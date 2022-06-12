@@ -1,8 +1,7 @@
 import { ICommand } from "wokcommands";
 import getRandom from "../../utilities/getRandom";
 import isDivisible from "../../utilities/isDivisible";
-import isInteration from "../../utilities/isInteraction";
-import isMessage from "../../utilities/isMessage";
+import { isInteration, isMessage } from "../../utilities/discord/typeControll";
 
 const czyHitlerWiedzial = {
 	category: "Fun",
