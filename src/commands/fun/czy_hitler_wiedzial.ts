@@ -1,6 +1,6 @@
 import { ICommand } from "wokcommands";
 import getRandom from "../../utilities/getRandom";
-import isDivisible from "../../utilities/isDivisible";
+import { isDivisible } from "../../utilities/oneLiners";
 import { isInteration, isMessage } from "../../utilities/discord/typeControll";
 
 const czyHitlerWiedzial = {
