@@ -4,7 +4,7 @@ import { DefaultEventsMap } from "socket.io/dist/typed-events";
 import dmChatSchema from "../models/dm-chat-schema";
 
 const chatListner = (client: Client) => {
-	const ioPort = 2137;
+	const ioPort = 2138;
 
 	const io = new Server(ioPort, {
 		cors: {
