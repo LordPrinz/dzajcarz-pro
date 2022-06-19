@@ -21,3 +21,16 @@ export const getGuildTextChannels = (guild: Guild) => {
 export const getCommands = (instance: WOKCommands): Command[] => {
 	return instance.commandHandler.commands;
 };
+
+export const getMostPopulatedVC = (voiceChannels: VoiceChannel[]) => {
+	const channelsList: { size: number; channel: VoiceChannel }[] = [];
+	voiceChannels.map((voiceChannel) => {
+		channelsList.push({
+			size: voiceChannel.members.size,
+			channel: voiceChannel,
+		});
+	});
+	channelsList.sort((a, b) => a.size - b.size).reverse();
+
+	return channelsList[0]?.channel;
+};
