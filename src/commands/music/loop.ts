@@ -6,7 +6,6 @@ const loop = {
 	category: "music",
 	description: "Loops music.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["lp", "repeat"],
 	options: [
 		{

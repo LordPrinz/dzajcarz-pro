@@ -6,7 +6,6 @@ const setSplitChannel = {
 	description: "Set the new split channel",
 	permissions: ["MANAGE_CHANNELS"],
 	slash: "both",
-	testOnly: true,
 	minArgs: 2,
 	options: [
 		{

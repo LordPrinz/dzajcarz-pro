@@ -6,7 +6,6 @@ const queue = {
 	category: "music",
 	description: "Displays music queue.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["q"],
 
 	callback: async ({ client, guild, channel, user, member }) => {

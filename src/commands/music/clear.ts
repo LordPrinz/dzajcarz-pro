@@ -5,7 +5,6 @@ const clear = {
 	category: "music",
 	description: "Clears queue.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["cq"],
 
 	callback: async ({ guild, channel, user, member, client }) => {

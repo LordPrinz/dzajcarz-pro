@@ -7,8 +7,6 @@ const collector = {
 	category: "Fun",
 	description: "Execution time",
 
-	testOnly: true,
-
 	callback: ({ message, channel, member }) => {
 		message?.reply("Podbij łapę jeśli chcesz bana");
 		message?.react("👍");

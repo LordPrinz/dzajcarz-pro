@@ -6,7 +6,6 @@ const play = {
 	category: "music",
 	description: "Plays music.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["p"],
 
 	expectedArgs: "<song_name>",

@@ -5,7 +5,6 @@ const save = {
 	category: "music",
 	description: "Sends you music name via DM.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["sv"],
 
 	callback: async ({ guild, user, member, client }) => {

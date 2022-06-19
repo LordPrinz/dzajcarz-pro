@@ -3,7 +3,7 @@ import express from "express";
 import dmChatSchema from "../models/dm-chat-schema";
 import cors from "cors";
 
-const port = 4762;
+const port = 4761;
 
 const app = express();
 

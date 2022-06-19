@@ -7,7 +7,6 @@ const clear = {
 	category: "music",
 	description: "Back to previous music.",
 	slash: "both",
-	testOnly: true,
 	aliases: [],
 	minArgs: 1,
 	expectedArgs: "<search>",

@@ -5,7 +5,6 @@ const stop = {
 	category: "music",
 	description: "Disconectss bot.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["dc"],
 
 	callback: async ({ guild, user, member, client }) => {

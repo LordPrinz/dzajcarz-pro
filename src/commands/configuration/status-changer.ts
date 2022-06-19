@@ -12,7 +12,6 @@ const setWelcome = {
 	expectedArgs: "<channel> <text>",
 
 	slash: "both",
-	testOnly: true,
 
 	options: [
 		{

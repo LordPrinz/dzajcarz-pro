@@ -7,7 +7,6 @@ const volume = {
 	category: "music",
 	description: "Regulates the volume.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["vol"],
 	minArgs: 1,
 	expectedArgs: "<volume>",

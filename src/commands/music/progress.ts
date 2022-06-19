@@ -5,7 +5,6 @@ const progress = {
 	category: "music",
 	description: "Shows playlist progress.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["pbar"],
 
 	callback: async ({ guild, user, member, client }) => {

@@ -11,7 +11,6 @@ const nowPlaying = {
 	category: "music",
 	description: "Shows what is playing right now.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["np"],
 	init: (client: Client) => {
 		client.on("interactionCreate", (interaction) => {

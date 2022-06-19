@@ -6,7 +6,6 @@ const seek = {
 	category: "music",
 	description: "Rewinds music.",
 	slash: "both",
-	testOnly: true,
 	aliases: [],
 	minArgs: 1,
 	expectedArgs: "<time>",

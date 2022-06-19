@@ -5,7 +5,6 @@ const pause = {
 	category: "music",
 	description: "Pauses the  music.",
 	slash: "both",
-	testOnly: true,
 	aliases: [],
 
 	callback: async ({ guild, user, member, client }) => {

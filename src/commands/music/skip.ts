@@ -5,7 +5,6 @@ const skip = {
 	category: "music",
 	description: "Skips music.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["sk"],
 
 	callback: async ({ guild, user, member, client }) => {

@@ -5,7 +5,6 @@ const back = {
 	category: "music",
 	description: "Back to previous music.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["previous"],
 
 	callback: async ({ guild, user, member, client }) => {

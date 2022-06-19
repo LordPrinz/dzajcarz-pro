@@ -4,7 +4,6 @@ const block = {
 	category: "Party",
 	description: "Blocks user from your party channel.",
 	slash: "both",
-	testOnly: true,
 	minArgs: 1,
 	expectedArgs: "<user>",
 	options: [

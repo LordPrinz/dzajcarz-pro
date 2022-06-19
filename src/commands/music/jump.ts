@@ -6,7 +6,6 @@ const jump = {
 	category: "Music",
 	minArgs: 1,
 	expectedArgs: "<track>",
-	testOnly: true,
 	slash: "both",
 	options: [
 		{

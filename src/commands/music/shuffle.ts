@@ -5,7 +5,6 @@ const shuffle = {
 	category: "music",
 	description: "Shuffles the queue.",
 	slash: "both",
-	testOnly: true,
 	aliases: ["sh"],
 
 	callback: async ({ guild, user, member, client }) => {

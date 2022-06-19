@@ -10,7 +10,6 @@ const updateHelp = {
 	hidden: true,
 	ownerOnly: true,
 	slash: "both",
-	testOnly: true,
 
 	callback: async ({ client, instance }) => {
 		const partyData: PartyArea[] = await partyAreaSchema.find({});

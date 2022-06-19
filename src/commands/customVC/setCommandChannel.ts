@@ -41,7 +41,6 @@ const setCommandChannel = {
 	description: "Set the new command channel",
 	permissions: ["MANAGE_CHANNELS"],
 	slash: "both",
-	testOnly: true,
 	minArgs: 2,
 	options: [
 		{

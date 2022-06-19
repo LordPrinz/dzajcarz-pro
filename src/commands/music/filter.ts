@@ -5,7 +5,6 @@ const clear = {
 	category: "music",
 	description: "Music special Effect.",
 	slash: "both",
-	testOnly: true,
 	aliases: [],
 	minArgs: 1,
 	expectedArgs: "<filter>",
