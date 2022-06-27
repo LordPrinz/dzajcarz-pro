@@ -1,2 +1,4 @@
 node_modules/
 .env
+src/commands/fun/czy_hitler_wiedzial.ts
+.gitignore
