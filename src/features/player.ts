@@ -20,7 +20,7 @@ export const player = (client: Client) => {
 			return;
 		});
 
-		player.on("trackStart", (queue: Queue, track) => {
+		player.on("trackStart", (queue:  Queue<any>, track) => {
 			if (queue?.repeatMode !== 0) return;
 			queue?.metadata?.send(
 				`Started playing ${track.title} in **${queue.connection.channel.name}** 🎧`
@@ -28,28 +28,28 @@ export const player = (client: Client) => {
 			return;
 		});
 
-		player.on("trackAdd", (queue, track) => {
+		player.on("trackAdd", (queue: Queue<any>, track) => {
 			queue?.metadata?.send(
 				`Track ${track.title} added in the queue ✅ \n${track.url}`
 			);
 			return;
 		});
 
-		player.on("botDisconnect", (queue) => {
+		player.on("botDisconnect", (queue:  Queue<any>) => {
 			queue?.metadata?.send(
 				"I was manually disconnected from the voice channel, clearing queue... ❌"
 			);
 			return;
 		});
 
-		player.on("channelEmpty", (queue) => {
+		player.on("channelEmpty", (queue:  Queue<any>) => {
 			queue?.metadata?.send(
 				"Nobody is in the voice channel, leaving the voice channel... ❌"
 			);
 			return;
 		});
 
-		player.on("queueEnd", (queue) => {
+		player.on("queueEnd", (queue:  Queue<any>) => {
 			queue?.metadata?.send("I finished reading the whole queue ✅");
 			return;
 		});
