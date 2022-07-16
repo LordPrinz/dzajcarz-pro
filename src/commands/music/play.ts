@@ -1,11 +1,11 @@
 import { QueryType } from "discord-player";
 import { ICommand } from "wokcommands";
-import { player } from "../../features/player";
 
 const play = {
 	category: "music",
 	description: "Plays music.",
 	slash: "both",
+	testOnly: true,
 	aliases: ["p"],
 
 	expectedArgs: "<song_name>",
@@ -31,9 +31,9 @@ const play = {
 			return "Please enter a song name or URL to this song.";
 		}
 
-		const discordPlayer = player(client);
+		const discordPlayer = (globalThis as any).player;
 
-		const response = await discordPlayer?.search(args.join(" "), {
+		const response = await discordPlayer.search(args.join(" "), {
 			requestedBy: member,
 			searchEngine: QueryType.AUTO,
 		});
@@ -46,14 +46,14 @@ const play = {
 			return "You can not use this command outside of the guild.";
 		}
 
-		const queue = await discordPlayer?.createQueue(guild, {
+		const queue = await discordPlayer.createQueue(guild, {
 			metadata: channel,
 		});
 
 		try {
-			if (!queue?.connection) await queue?.connect(voiceChannel);
+			if (!queue.connection) await queue.connect(voiceChannel);
 		} catch {
-			await discordPlayer?.deleteQueue(guild?.id);
+			await discordPlayer.deleteQueue(guild?.id);
 			if (user) {
 				return `I can't join the voice channel <@${user.id}>!`;
 			}
@@ -67,12 +67,12 @@ const play = {
 		}
 
 		response.playlist
-			? queue?.addTracks(response.tracks)
-			: queue?.addTrack(response.tracks[0]);
+			? queue.addTracks(response.tracks)
+			: queue.addTrack(response.tracks[0]);
 
-		if (!queue?.playing) await queue?.play();
+		if (!queue.playing) await queue.play();
 
-		channel.send("As you wish! <3");
+		channel?.send("As you wish! <3");
 	},
 } as ICommand;
 

@@ -1,5 +1,4 @@
 import { ICommand } from "wokcommands";
-import { player } from "../../features/player";
 
 const progress = {
 	category: "music",
@@ -15,7 +14,7 @@ const progress = {
 		if (!guild) {
 			return "You can not use this command outside of the guild.";
 		}
-		const discordPlayer = player(client);
+		const discordPlayer = (globalThis as any).player;
 
 		const queue = discordPlayer?.getQueue(guild?.id);
 

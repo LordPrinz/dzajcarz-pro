@@ -5,7 +5,6 @@ import {
 	MessageEmbed,
 } from "discord.js";
 import { ICommand } from "wokcommands";
-import { player } from "../../features/player";
 
 const nowPlaying = {
 	category: "music",
@@ -24,7 +23,7 @@ const nowPlaying = {
 				return;
 			}
 
-			const discordPlayer = player(client);
+			const discordPlayer = (globalThis as any).player;
 
 			const queue = discordPlayer?.getQueue(guild?.id);
 
@@ -65,60 +64,62 @@ const nowPlaying = {
 	},
 
 	callback: async ({ client, guild, channel, user, member }) => {
-		if (!guild) {
-			return "You can not use this command outside of the guild.";
-		}
+		try {
+			if (!guild) {
+				return "You can not use this command outside of the guild.";
+			}
 
-		if (!member.voice.channelId) {
-			return "You are not on the voice channel.";
-		}
+			if (!member.voice.channelId) {
+				return "You are not on the voice channel.";
+			}
 
-		const discordPlayer = player(client);
+			const discordPlayer = (globalThis as any).player;
 
-		const queue = discordPlayer?.getQueue(guild?.id);
+			const queue = discordPlayer?.getQueue(guild?.id);
 
-		if (!queue || !queue.playing) {
-			return `No music currently playing <@${user.id}>`;
-		}
+			if (!queue || !queue.playing) {
+				return `No music currently playing <@${user.id}>`;
+			}
 
-		const track = queue.current;
+			const track = queue.current;
 
-		const embed = new MessageEmbed();
+			const embed = new MessageEmbed();
 
-		embed.setColor("RED");
-		embed.setThumbnail(track.thumbnail);
-		embed.setAuthor(
-			track.title,
-			user.displayAvatarURL({ size: 1024, dynamic: true })
-		);
+			embed.setColor("RED");
+			embed.setThumbnail(track.thumbnail);
+			embed.setAuthor({
+				name: track.title,
+				iconURL: user.displayAvatarURL({ size: 1024, dynamic: true }),
+			});
 
-		const methods = ["disabled", "track", "queue"];
+			const methods = ["disabled", "track", "queue"];
 
-		const timestamp = queue.getPlayerTimestamp();
-		const trackDuration =
-			timestamp.progress === Infinity ? "infinity (live)" : track.duration;
+			const timestamp = queue.getPlayerTimestamp();
+			const trackDuration =
+				timestamp.progress === Infinity ? "infinity (live)" : track.duration;
 
-		embed.setDescription(
-			`Volume **${queue.volume}**%\nDuration **${trackDuration}**\nLoop mode **${
-				methods[queue.repeatMode]
-			}**\nRequested by <@${track.requestedBy.id}>`
-		);
+			embed.setDescription(
+				`Volume **${queue.volume}**%\nDuration **${trackDuration}**\nLoop mode **${
+					methods[queue.repeatMode]
+				}**\nRequested by <@${track.requestedBy.id}>`
+			);
 
-		embed.setTimestamp();
-		embed.setFooter({
-			text: `${process.env.AUTHOR! || ":)"}`,
-			iconURL: guild.iconURL({ size: 2048, dynamic: true })!,
-		});
+			embed.setTimestamp();
+			embed.setFooter({
+				text: `${process.env.AUTHOR! || ":)"}`,
+				iconURL: guild.iconURL({ size: 2048, dynamic: true })!,
+			});
 
-		const saveButton = new MessageButton();
+			const saveButton = new MessageButton();
 
-		saveButton.setLabel("Save this track");
-		saveButton.setCustomId("saveTrack");
-		saveButton.setStyle("SUCCESS");
+			saveButton.setLabel("Save this track");
+			saveButton.setCustomId("saveTrack");
+			saveButton.setStyle("SUCCESS");
 
-		const row = new MessageActionRow().addComponents(saveButton);
+			const row = new MessageActionRow().addComponents(saveButton);
 
-		channel.send({ embeds: [embed], components: [row] });
+			channel.send({ embeds: [embed], components: [row] });
+		} catch (error) {}
 	},
 } as ICommand;
 

@@ -1,5 +1,4 @@
 import { ICommand } from "wokcommands";
-import { player } from "../../features/player";
 
 const back = {
 	category: "music",
@@ -16,7 +15,7 @@ const back = {
 			return "You are not on the voice channel.";
 		}
 
-		const discordPlayer = player(client);
+		const discordPlayer = (globalThis as any).player;
 
 		const queue = discordPlayer?.getQueue(guild?.id);
 		if (!queue || !queue.playing)

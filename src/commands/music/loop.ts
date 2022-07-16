@@ -1,6 +1,5 @@
 import { QueueRepeatMode } from "discord-player";
 import { ICommand } from "wokcommands";
-import { player } from "../../features/player";
 
 const loop = {
 	category: "music",
@@ -25,7 +24,7 @@ const loop = {
 			return "You are not on the voice channel.";
 		}
 
-		const discordPlayer = player(client);
+		const discordPlayer = (globalThis as any).player;
 
 		const queue = discordPlayer?.getQueue(guild?.id);
 

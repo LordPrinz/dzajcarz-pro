@@ -1,7 +1,6 @@
 import { QueryType } from "discord-player";
 import { MessageEmbed } from "discord.js";
 import { ICommand } from "wokcommands";
-import { player } from "../../features/player";
 
 const clear = {
 	category: "music",
@@ -24,7 +23,7 @@ const clear = {
 			return `Please enter a valid search <@${user.id}>.`;
 		}
 
-		const discordPlayer = player(client);
+		const discordPlayer = (globalThis as any).player;
 
 		const res = await discordPlayer?.search(args.join(" "), {
 			requestedBy: member,
@@ -51,7 +50,10 @@ const clear = {
 
 		embed.setDescription(
 			`${maxTracks
-				.map((track, i) => `**${i + 1}**. ${track.title} | ${track.author}`)
+				.map(
+					(track: { title: any; author: any }, i: number) =>
+						`**${i + 1}**. ${track.title} | ${track.author}`
+				)
 				.join("\n")}\n\nSelect choice between **1** and **${
 				maxTracks.length
 			}** or **cancel** ⬇️`
