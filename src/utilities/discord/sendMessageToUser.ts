@@ -6,7 +6,7 @@ const sendMessageToUser = (data: SendMessageData) => {
 	const guild = data.guild;
 
 	guild.members.fetch(userId).then((member) => {
-		member.send(message);
+		member.send(message).catch((error) => {});
 	});
 };
 
