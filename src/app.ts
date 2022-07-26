@@ -84,4 +84,10 @@ player.on("queueEnd", (queue: Queue<any>) => {
 
 (globalThis as any).player = player;
 
-client.login(process.env.TOKEN);
+if (process.env.NODE_ENV === "development") {
+	client.login(process.env.DEV_TOKEN);
+}
+
+if (process.env.NODE_ENV === "production") {
+	client.login(process.env.PROD_TOKEN);
+}
