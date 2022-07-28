@@ -1,7 +1,8 @@
 [{
         "song": "xenogensis",
         "time": ["21:37"],
-        "isOnline": true
+        "isOnline": true,
+        "channelId": ["1002235139113365525", "1002195581906718760", "ad"]
     },
     {
         "message": "Szczęśliwego Nowego Dnia!",

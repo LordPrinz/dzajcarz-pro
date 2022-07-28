@@ -38,7 +38,15 @@ const actionTriggerer = (client: Client) => {
 						if (!time) {
 							return;
 						}
-						actions.playOnlineMostPopularCertain();
+
+						if (!action.guildId) {
+							return;
+						}
+
+						action.guildId.map((guildId) => {
+							actions.playOnlineMostPopularCertain({ song: action.song!, guildId });
+						});
+
 						return;
 					});
 					return;
@@ -63,8 +71,19 @@ const actionTriggerer = (client: Client) => {
 					if (!time) {
 						return;
 					}
-					actions.playOnlineOnCertainChannel();
-					return;
+
+					if (!action.channelId?.length) {
+						return;
+					}
+
+					action.channelId.map((channelId) => {
+						actions.playOnlineOnCertainChannel({
+							song: action.song!,
+							channelId: channelId,
+						});
+
+						return;
+					});
 				});
 				return;
 			}

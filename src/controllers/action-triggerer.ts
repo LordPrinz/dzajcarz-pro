@@ -4,6 +4,7 @@ import {
 	NewsChannel,
 	TextChannel,
 	ThreadChannel,
+	VoiceChannel,
 } from "discord.js";
 import {
 	getGuildTextChannels,
@@ -83,6 +84,43 @@ const playOffline = async (trackName: string, guild: Guild) => {
 	return `Playing ${found}! 🎶`;
 };
 
+const playOnline = async ({
+	song,
+	guild,
+	channel,
+}: {
+	song: string;
+	guild: Guild;
+	channel: VoiceChannel;
+}) => {
+	const discordPlayer = (globalThis as any).player;
+
+	const response = await discordPlayer.search(song, {
+		requestedBy: "Bot",
+		searchEngine: QueryType.AUTO,
+	});
+
+	if (!response || !response.tracks.length) {
+		return;
+	}
+
+	const queue = await discordPlayer.createQueue(guild, {
+		metadata: channel,
+	});
+
+	try {
+		if (!queue.connection) await queue.connect(channel);
+	} catch {
+		await discordPlayer.deleteQueue(guild?.id);
+	}
+
+	response.playlist
+		? queue.addTracks(response.tracks)
+		: queue.addTrack(response.tracks[0]);
+
+	if (!queue.playing) await queue.play();
+};
+
 export default class ActionTriggererFeatures {
 	client: Client;
 
@@ -159,8 +197,24 @@ export default class ActionTriggererFeatures {
 
 		playOffline(args.song, channel.guild);
 	}
-	playOnlineOnCertainChannel() {
-		console.log(`Play Online certain`);
+	async playOnlineOnCertainChannel(args: { song: string; channelId: string }) {
+		const guilds = this.client.guilds.cache.map((guild) => guild);
+
+		const voiceChannels = guilds.map((guild) => {
+			return getGuildVCs(guild);
+		});
+
+		const channel = voiceChannels
+			.map((channel) => {
+				return channel.find((ch) => ch.id === args.channelId);
+			})
+			.find((channel) => !!channel);
+
+		if (!channel) {
+			return;
+		}
+
+		playOnline({ song: args.song, channel, guild: channel.guild });
 	}
 	playOfflineMostPopularEvery(args: { song: string }) {
 		const guilds = this.client.guilds.cache.map((guild) => guild);
@@ -198,35 +252,8 @@ export default class ActionTriggererFeatures {
 				return;
 			}
 
-			const discordPlayer = (globalThis as any).player;
-
-			const response = await discordPlayer.search(args.song, {
-				requestedBy: "Bot",
-				searchEngine: QueryType.AUTO,
-			});
-
-			if (!response || !response.tracks.length) {
-				return;
-			}
-
-			const queue = await discordPlayer.createQueue(guild, {
-				metadata: channel,
-			});
-
-			try {
-				if (!queue.connection) await queue.connect(channel);
-			} catch {
-				await discordPlayer.deleteQueue(guild?.id);
-			}
-
-			response.playlist
-				? queue.addTracks(response.tracks)
-				: queue.addTrack(response.tracks[0]);
-
-			if (!queue.playing) await queue.play();
+			playOnline({ song: args.song, guild: channel.guild, channel });
 		});
-
-		console.log(`Play Online most popular on every`);
 	}
 	playOfflineMostPopularCertain(args: { song: string; guildId: string }) {
 		const guilds = this.client.guilds.cache.map((guild) => guild);
@@ -254,7 +281,27 @@ export default class ActionTriggererFeatures {
 
 		playOffline(args.song, channel.guild);
 	}
-	playOnlineMostPopularCertain() {
-		console.log(`Play Online most popular on certain`);
+	async playOnlineMostPopularCertain(args: { song: string; guildId: string }) {
+		const guilds = this.client.guilds.cache.map((guild) => guild);
+
+		const guild = guilds.find((guild) => guild.id === args.guildId);
+
+		if (!guild) {
+			return;
+		}
+
+		const VCs = getGuildVCs(guild);
+
+		if (!VCs.length) {
+			return;
+		}
+
+		const channel = getMostPopulatedVC(VCs);
+
+		if (!channel) {
+			return;
+		}
+
+		playOnline({ song: args.song, guild, channel });
 	}
 }
