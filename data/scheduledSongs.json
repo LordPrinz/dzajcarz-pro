@@ -1,15 +1,16 @@
 [{
-        "song": "supcar",
-        "time": "21:37"
+        "song": "xenogensis",
+        "time": ["21:37"],
+        "isOnline": true
     },
     {
-        "message": "Szczęśliwego nowego dnia!",
-        "userId": "257589107453198337",
-        "time": "22:22"
+        "message": "Szczęśliwego Nowego Dnia!",
+        "userId": ["", "", ""],
+        "time": ["21:46"]
     },
     {
-        "message": "hejka",
-        "channelId": "930170849623953458",
-        "time": "19:00"
+        "message": "Testowanie lol",
+        "channelId": ["", "", "", ""],
+        "time": ["19:00"]
     }
 ]

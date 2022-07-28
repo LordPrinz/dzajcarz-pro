@@ -15,7 +15,13 @@ export const getGuildVCs = (guild: Guild): VoiceChannel[] => {
 };
 
 export const getGuildTextChannels = (guild: Guild) => {
-	return guild.channels.cache.filter((channel) => channel.type === "GUILD_TEXT");
+	return guild.channels.cache.filter(
+		(channel) =>
+			channel.type !== "GUILD_CATEGORY" &&
+			channel.type !== "GUILD_STAGE_VOICE" &&
+			channel.type !== "GUILD_VOICE" &&
+			channel.type !== "GUILD_STORE"
+	);
 };
 
 export const getCommands = (instance: WOKCommands): Command[] => {

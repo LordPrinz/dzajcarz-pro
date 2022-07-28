@@ -49,37 +49,78 @@ player.on("connectionError", (queue, error) => {
 });
 
 player.on("trackStart", (queue: Queue<any>, track) => {
-	if (queue?.repeatMode !== 0) return;
-	queue?.metadata?.send(
-		`Started playing ${track.title} in **${queue.connection.channel.name}** 🎧`
-	);
-	return;
+	try {
+		if (queue?.repeatMode !== 0) return;
+
+		const channelType = queue?.metadata?.type;
+
+		if (channelType === "GUILD_VOICE" || channelType === "GUILD_STAGE_VOICE") {
+			return;
+		}
+
+		queue?.metadata?.send(
+			`Started playing ${track.title} in **${queue.connection.channel.name}** 🎧`
+		);
+		return;
+	} catch {}
 });
 
 player.on("trackAdd", (queue: Queue<any>, track) => {
-	queue?.metadata?.send(
-		`Track ${track.title} added in the queue ✅ \n${track.url}`
-	);
+	const channelType = queue?.metadata?.type;
+
+	if (channelType === "GUILD_VOICE" || channelType === "GUILD_STAGE_VOICE") {
+		return;
+	}
+
+	try {
+		queue?.metadata?.send(
+			`Track ${track.title} added in the queue ✅ \n${track.url}`
+		);
+	} catch {}
 	return;
 });
 
 player.on("botDisconnect", (queue: Queue<any>) => {
-	queue?.metadata?.send(
-		"I was manually disconnected from the voice channel, clearing queue... ❌"
-	);
-	return;
+	const channelType = queue?.metadata?.type;
+
+	if (channelType === "GUILD_VOICE" || channelType === "GUILD_STAGE_VOICE") {
+		return;
+	}
+
+	try {
+		queue?.metadata?.send(
+			"I was manually disconnected from the voice channel, clearing queue... ❌"
+		);
+		return;
+	} catch {}
 });
 
 player.on("channelEmpty", (queue: Queue<any>) => {
-	queue?.metadata?.send(
-		"Nobody is in the voice channel, leaving the voice channel... ❌"
-	);
-	return;
+	const channelType = queue?.metadata?.type;
+
+	if (channelType === "GUILD_VOICE" || channelType === "GUILD_STAGE_VOICE") {
+		return;
+	}
+
+	try {
+		queue?.metadata?.send(
+			"Nobody is in the voice channel, leaving the voice channel... ❌"
+		);
+		return;
+	} catch {}
 });
 
 player.on("queueEnd", (queue: Queue<any>) => {
-	queue?.metadata?.send("I finished reading the whole queue ✅");
-	return;
+	const channelType = queue?.metadata?.type;
+
+	if (channelType === "GUILD_VOICE" || channelType === "GUILD_STAGE_VOICE") {
+		return;
+	}
+
+	try {
+		queue?.metadata?.send("I finished reading the whole queue ✅");
+		return;
+	} catch {}
 });
 
 (globalThis as any).player = player;

@@ -1,54 +1,124 @@
-import { Client, VoiceChannel } from "discord.js";
-import decodeScheduledTime from "../utilities/decodeScheduledTime";
-import { getGuildVCs, getMostPopulatedVC } from "../utilities/discord/get";
-import sendMessageOnServer from "../utilities/discord/sendMessageOnServer";
-import sendMessageToUser from "../utilities/discord/sendMessageToUser";
-import planAction from "../utilities/planAction";
-import planDetails from "./../../data/scheduledSongs.json";
+import { Client } from "discord.js";
+import ActionTriggererFeatures from "../controllers/action-triggerer";
+import Scheduled from "../types/Scheduled";
+import scheduledAction from "./../../data/scheduledSongs.json";
 
 const actionTriggerer = (client: Client) => {
-	const guilds = client.guilds.cache.map((guild) => guild);
+	const actions = new ActionTriggererFeatures(client);
 
-	const channelsToConnect: VoiceChannel[] = [];
-
-	guilds.map((guild) => {
-		const guildChannels = getGuildVCs(guild);
-		const mostPopularVC = getMostPopulatedVC(guildChannels);
-
-		channelsToConnect.push(mostPopularVC);
-	});
-
-	planDetails.map((planDetail: any) => {
-		const time = decodeScheduledTime(planDetail.time);
-		if (!time) {
-			return "No time was provided!";
+	scheduledAction.map((action: Scheduled) => {
+		if (!action.time?.length) {
+			return;
 		}
-		planAction(time, () => {
-			if (planDetail?.message) {
-				guilds.map((guild) => {
-					const data = {
-						message: planDetail.message,
-						targetId: planDetail.channelId ?? planDetail.userId,
-						guild,
-					};
+		if (action.song) {
+			if (!action.channelId?.length) {
+				if (!action.guildId?.length) {
+					if (action.isOnline) {
+						action.time.map((time) => {
+							if (!time) {
+								return;
+							}
+							actions.playOnlineMostPopularEvery({ song: action.song! });
+							return;
+						});
+						return;
+					}
+					action.time.map((time) => {
+						if (!time) {
+							return;
+						}
+						actions.playOfflineMostPopularEvery({ song: action.song! });
+						return;
+					});
+					return;
+				}
 
-					if (planDetail?.channelId) {
-						sendMessageOnServer(data);
+				if (action.isOnline) {
+					action.time.map((time) => {
+						if (!time) {
+							return;
+						}
+						actions.playOnlineMostPopularCertain();
+						return;
+					});
+					return;
+				}
+
+				action.time.map((time) => {
+					if (!time) {
+						return;
 					}
-					if (planDetail?.userId) {
-						sendMessageToUser(data);
+
+					action.guildId!.map((guildId) => {
+						actions.playOfflineMostPopularCertain({ song: action.song!, guildId });
+					});
+
+					return;
+				});
+				return;
+			}
+
+			if (action.isOnline) {
+				action.time.map((time) => {
+					if (!time) {
+						return;
 					}
+					actions.playOnlineOnCertainChannel();
+					return;
+				});
+				return;
+			}
+			action.channelId.map((channelId) => {
+				action.time.map((time) => {
+					if (!time) {
+						return;
+					}
+					actions.playOfflineOnCertainChannel({
+						song: action.song!,
+						channelId: channelId,
+					});
+				});
+			});
+		}
+
+		if (action.message) {
+			if (action.userId?.length) {
+				action.userId.map((userId) => {
+					if (!userId) {
+						return;
+					}
+
+					action.time.map((time) => {
+						if (!time) {
+							return;
+						}
+
+						actions.sendMessageUser({
+							userId,
+							message: action.message!,
+						});
+					});
 				});
 			}
-			// if (planDetail?.song) {
-			// 	const trackPath = getSongPath(planDetail?.song);
 
-			// 	channelsToConnect.map((channel) => {
-			// 		const resource = createAudioResource(trackPath);
-			// 		playOffline(channel, resource);
-			// 	});
-			// }
-		});
+			if (action.channelId?.length) {
+				action.channelId.map((channelId) => {
+					if (!channelId) {
+						return;
+					}
+					action.time.map((time) => {
+						if (!time) {
+							return;
+						}
+
+						actions.sendMessageChannel({
+							channelId,
+							message: action.message!,
+						});
+					});
+				});
+			}
+		}
 	});
 };
 
