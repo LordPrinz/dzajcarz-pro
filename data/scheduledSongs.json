@@ -1,17 +1,20 @@
 [{
-        "song": "xenogensis",
-        "time": ["21:37"],
-        "isOnline": true,
-        "channelId": ["1002235139113365525", "1002195581906718760", "ad"]
+        "song": "lato_z_radiem",
+        "time": ["21:00"]
     },
     {
-        "message": "Szczęśliwego Nowego Dnia!",
-        "userId": ["", "", ""],
-        "time": ["21:46"]
+        "message": "Już działa ten action triggerer xd!",
+        "userId": [
+            "520676533279522817",
+            "257589107453198337",
+            "355024324840783883",
+            "575703536550281232"
+        ],
+        "time": ["18:00", "18:30", "20:00"]
     },
     {
-        "message": "Testowanie lol",
-        "channelId": ["", "", "", ""],
+        "message": "Bonżur",
+        "channelId": ["880203277562687539", "928638782952079394"],
         "time": ["19:00"]
     }
 ]

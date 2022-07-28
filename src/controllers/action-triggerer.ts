@@ -81,6 +81,12 @@ const playOffline = async (trackName: string, guild: Guild) => {
 	player.play(resource);
 	connection?.subscribe(player);
 
+	player.on("stateChange", () => {
+		if (player.state.status === "idle") {
+			connection?.destroy();
+		}
+	});
+
 	return `Playing ${found}! 🎶`;
 };
 

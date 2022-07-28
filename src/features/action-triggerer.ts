@@ -1,6 +1,8 @@
 import { Client } from "discord.js";
 import ActionTriggererFeatures from "../controllers/action-triggerer";
 import Scheduled from "../types/Scheduled";
+import decodeScheduledTime from "../utilities/decodeScheduledTime";
+import planAction from "../utilities/planAction";
 import scheduledAction from "./../../data/scheduledSongs.json";
 
 const actionTriggerer = (client: Client) => {
@@ -18,7 +20,9 @@ const actionTriggerer = (client: Client) => {
 							if (!time) {
 								return;
 							}
-							actions.playOnlineMostPopularEvery({ song: action.song! });
+							planAction(decodeScheduledTime(time), () => {
+								actions.playOnlineMostPopularEvery({ song: action.song! });
+							});
 							return;
 						});
 						return;
@@ -27,7 +31,11 @@ const actionTriggerer = (client: Client) => {
 						if (!time) {
 							return;
 						}
-						actions.playOfflineMostPopularEvery({ song: action.song! });
+
+						planAction(decodeScheduledTime(time), () => {
+							actions.playOfflineMostPopularEvery({ song: action.song! });
+						});
+
 						return;
 					});
 					return;
@@ -44,7 +52,9 @@ const actionTriggerer = (client: Client) => {
 						}
 
 						action.guildId.map((guildId) => {
-							actions.playOnlineMostPopularCertain({ song: action.song!, guildId });
+							planAction(decodeScheduledTime(time), () => {
+								actions.playOnlineMostPopularCertain({ song: action.song!, guildId });
+							});
 						});
 
 						return;
@@ -58,7 +68,9 @@ const actionTriggerer = (client: Client) => {
 					}
 
 					action.guildId!.map((guildId) => {
-						actions.playOfflineMostPopularCertain({ song: action.song!, guildId });
+						planAction(decodeScheduledTime(time), () => {
+							actions.playOfflineMostPopularCertain({ song: action.song!, guildId });
+						});
 					});
 
 					return;
@@ -77,9 +89,11 @@ const actionTriggerer = (client: Client) => {
 					}
 
 					action.channelId.map((channelId) => {
-						actions.playOnlineOnCertainChannel({
-							song: action.song!,
-							channelId: channelId,
+						planAction(decodeScheduledTime(time), () => {
+							actions.playOnlineOnCertainChannel({
+								song: action.song!,
+								channelId: channelId,
+							});
 						});
 
 						return;
@@ -92,9 +106,11 @@ const actionTriggerer = (client: Client) => {
 					if (!time) {
 						return;
 					}
-					actions.playOfflineOnCertainChannel({
-						song: action.song!,
-						channelId: channelId,
+					planAction(decodeScheduledTime(time), () => {
+						actions.playOfflineOnCertainChannel({
+							song: action.song!,
+							channelId: channelId,
+						});
 					});
 				});
 			});
@@ -112,9 +128,11 @@ const actionTriggerer = (client: Client) => {
 							return;
 						}
 
-						actions.sendMessageUser({
-							userId,
-							message: action.message!,
+						planAction(decodeScheduledTime(time), () => {
+							actions.sendMessageUser({
+								userId,
+								message: action.message!,
+							});
 						});
 					});
 				});
@@ -130,9 +148,11 @@ const actionTriggerer = (client: Client) => {
 							return;
 						}
 
-						actions.sendMessageChannel({
-							channelId,
-							message: action.message!,
+						planAction(decodeScheduledTime(time), () => {
+							actions.sendMessageChannel({
+								channelId,
+								message: action.message!,
+							});
 						});
 					});
 				});
