@@ -1,5 +1,6 @@
 import ms from "ms";
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const seek = {
 	category: "music",
@@ -21,9 +22,7 @@ const seek = {
 			return "You are not on the voice channel.";
 		}
 
-		const discordPlayer = (globalThis as any).player;
-
-		const queue = discordPlayer?.getQueue(guild?.id);
+		const queue = player?.getQueue(guild?.id);
 
 		if (!queue || !queue.playing)
 			return channel.send(`No music currently playing  <@${user.id}>`);
@@ -37,7 +36,9 @@ const seek = {
 
 		await queue.seek(timeToMS);
 
-		return `Time set on the current song **${ms(timeToMS, { long: true })}** ✅`;
+		return `Time set on the current song **${ms(timeToMS, {
+			long: true,
+		})}** ✅`;
 	},
 } as ICommand;
 

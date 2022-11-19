@@ -1,4 +1,5 @@
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const pause = {
 	category: "music",
@@ -15,9 +16,7 @@ const pause = {
 			return "You are not on the voice channel.";
 		}
 
-		const discordPlayer = (globalThis as any).player;
-
-		const queue = discordPlayer?.getQueue(guild?.id);
+		const queue = player?.getQueue(guild?.id);
 
 		if (!queue) return `No music currently playing <@${user.id}>`;
 

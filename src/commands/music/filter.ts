@@ -1,4 +1,5 @@
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const clear = {
 	category: "music",
@@ -24,9 +25,7 @@ const clear = {
 			return "You are not on the voice channel.";
 		}
 
-		const discordPlayer = (globalThis as any).player;
-
-		const queue = discordPlayer?.getQueue(guild?.id);
+		const queue = player?.getQueue(guild?.id);
 
 		if (!queue || !queue.playing) {
 			return `No music currently playing <@${user.id}>`;
@@ -35,7 +34,9 @@ const clear = {
 		const actualFilter = queue.getFiltersEnabled()[0];
 
 		if (!args[0]) {
-			return `Please specify a valid filter to enable or disable <@${user.id}>\n${
+			return `Please specify a valid filter to enable or disable <@${
+				user.id
+			}>\n${
 				actualFilter
 					? `Filter currently active ${actualFilter} (!filter ${actualFilter} to disable it).\n`
 					: ""

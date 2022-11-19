@@ -1,5 +1,6 @@
 import { MessageEmbed } from "discord.js";
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const queue = {
 	category: "music",
@@ -17,9 +18,7 @@ const queue = {
 				return "You are not on the voice channel.";
 			}
 
-			const discordPlayer = (globalThis as any).player;
-
-			const queue = discordPlayer?.getQueue(guild?.id);
+			const queue = player?.getQueue(guild?.id);
 
 			if (!queue) {
 				return `No music currently playing <@${user.id}>`;
@@ -39,10 +38,13 @@ const queue = {
 			});
 
 			const tracks = queue.tracks.map(
-				(track: { title: any; author: any; requestedBy: { id: any } }, index: number) =>
-					`**${index + 1}** - ${track.title} | ${track.author} (requested by : <@${
-						track.requestedBy.id
-					}>)`
+				(
+					track: { title: any; author: any; requestedBy: { id: any } },
+					index: number
+				) =>
+					`**${index + 1}** - ${track.title} | ${
+						track.author
+					} (requested by : <@${track.requestedBy.id}>)`
 			);
 
 			const songs = queue.tracks.length;

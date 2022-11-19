@@ -22,6 +22,7 @@ import {
 } from "@discordjs/voice";
 import shuffle from "../utilities/shuffle";
 import { QueryType } from "discord-player";
+import player from "../player";
 
 const playOffline = async (trackName: string, guild: Guild) => {
 	const suffix = "mp3";
@@ -59,7 +60,8 @@ const playOffline = async (trackName: string, guild: Guild) => {
 	});
 
 	const found = trackNames.find(
-		(track) => track.replace(/-/g, " ").toLowerCase() === trackName.toLowerCase()
+		(track) =>
+			track.replace(/-/g, " ").toLowerCase() === trackName.toLowerCase()
 	);
 
 	if (!found) {
@@ -99,7 +101,7 @@ const playOnline = async ({
 	guild: Guild;
 	channel: VoiceChannel;
 }) => {
-	const discordPlayer = (globalThis as any).player;
+	const discordPlayer = player;
 
 	const response = await discordPlayer.search(song, {
 		requestedBy: "Bot",
@@ -154,7 +156,9 @@ export default class ActionTriggererFeatures {
 		}
 
 		user?.send(args.message).catch((error) => {
-			console.log(`${user.user.username} blocked me or something went wrong! :(`);
+			console.log(
+				`${user.user.username} blocked me or something went wrong! :(`
+			);
 		});
 	}
 

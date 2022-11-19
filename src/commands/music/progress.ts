@@ -1,4 +1,5 @@
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const progress = {
 	category: "music",
@@ -14,9 +15,8 @@ const progress = {
 		if (!guild) {
 			return "You can not use this command outside of the guild.";
 		}
-		const discordPlayer = (globalThis as any).player;
 
-		const queue = discordPlayer?.getQueue(guild?.id);
+		const queue = player?.getQueue(guild?.id);
 
 		if (!queue || !queue.playing) {
 			return `No music currently playing <@${user.id}>`;

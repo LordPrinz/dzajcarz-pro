@@ -1,5 +1,6 @@
 import { QueryType } from "discord-player";
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const play = {
 	category: "music",
@@ -31,9 +32,7 @@ const play = {
 			return "Please enter a song name or URL to this song.";
 		}
 
-		const discordPlayer = (globalThis as any)?.player;
-
-		const response = await discordPlayer.search(args.join(" "), {
+		const response = await player?.search(args.join(" "), {
 			requestedBy: member,
 			searchEngine: QueryType.AUTO,
 		});
@@ -46,14 +45,14 @@ const play = {
 			return "You can not use this command outside of the guild.";
 		}
 
-		const queue = await discordPlayer.createQueue(guild, {
+		const queue = await player?.createQueue(guild, {
 			metadata: channel,
 		});
 
 		try {
 			if (!queue.connection) await queue.connect(voiceChannel);
 		} catch {
-			await discordPlayer.deleteQueue(guild?.id);
+			await player?.deleteQueue(guild?.id);
 			if (user) {
 				return `I can't join the voice channel <@${user.id}>!`;
 			}

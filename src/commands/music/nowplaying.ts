@@ -5,6 +5,7 @@ import {
 	MessageEmbed,
 } from "discord.js";
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const nowPlaying = {
 	category: "music",
@@ -73,9 +74,7 @@ const nowPlaying = {
 				return "You are not on the voice channel.";
 			}
 
-			const discordPlayer = (globalThis as any).player;
-
-			const queue = discordPlayer?.getQueue(guild?.id);
+			const queue = player?.getQueue(guild?.id);
 
 			if (!queue || !queue.playing) {
 				return `No music currently playing <@${user.id}>`;
@@ -99,7 +98,9 @@ const nowPlaying = {
 				timestamp.progress === Infinity ? "infinity (live)" : track.duration;
 
 			embed.setDescription(
-				`Volume **${queue.volume}**%\nDuration **${trackDuration}**\nLoop mode **${
+				`Volume **${
+					queue.volume
+				}**%\nDuration **${trackDuration}**\nLoop mode **${
 					methods[queue.repeatMode]
 				}**\nRequested by <@${track.requestedBy.id}>`
 			);

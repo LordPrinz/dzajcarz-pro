@@ -1,6 +1,7 @@
 import { QueryType } from "discord-player";
 import { MessageEmbed } from "discord.js";
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const clear = {
 	category: "music",
@@ -23,9 +24,7 @@ const clear = {
 			return `Please enter a valid search <@${user.id}>.`;
 		}
 
-		const discordPlayer = (globalThis as any).player;
-
-		const res = await discordPlayer?.search(args.join(" "), {
+		const res = await player?.search(args.join(" "), {
 			requestedBy: member,
 			searchEngine: QueryType.AUTO,
 		});
@@ -34,7 +33,7 @@ const clear = {
 			return `No results found <@${user.id}>.`;
 		}
 
-		const queue = discordPlayer?.createQueue(guild, {
+		const queue = player?.createQueue(guild, {
 			metadata: channel,
 		});
 
@@ -86,7 +85,7 @@ const clear = {
 			try {
 				if (!queue?.connection) await queue?.connect(member.voice.channel!);
 			} catch {
-				discordPlayer?.deleteQueue(guild?.id);
+				player?.deleteQueue(guild?.id);
 				return `I can't join the voice channel  <@${user.id}> `;
 			}
 

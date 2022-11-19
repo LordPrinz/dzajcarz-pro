@@ -1,4 +1,5 @@
 import { ICommand } from "wokcommands";
+import player from "../../player";
 
 const jump = {
 	description: "Jump to the specific track.",
@@ -23,9 +24,7 @@ const jump = {
 			return "You are not on the voice channel.";
 		}
 
-		const discordPlayer = (globalThis as any).player;
-
-		const queue = discordPlayer?.getQueue(guild?.id);
+		const queue = player?.getQueue(guild?.id);
 
 		if (!queue || !queue.playing) {
 			return "No music is being played.";
