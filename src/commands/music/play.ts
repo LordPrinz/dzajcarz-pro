@@ -31,7 +31,7 @@ const play = {
 			return "Please enter a song name or URL to this song.";
 		}
 
-		const discordPlayer = (globalThis as any).player;
+		const discordPlayer = (globalThis as any)?.player;
 
 		const response = await discordPlayer.search(args.join(" "), {
 			requestedBy: member,
