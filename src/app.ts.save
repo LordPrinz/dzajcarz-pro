@@ -3,7 +3,7 @@ import WOKCommands from "wokcommands";
 import dotenv from "dotenv";
 import path from "path";
 import { Player, Queue } from "discord-player";
-// xx
+//d 
 dotenv.config();
 
 const client = new DiscordJS.Client({
