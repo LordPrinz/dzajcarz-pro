@@ -38,6 +38,7 @@
         "typescript": "^4.6.4",
         "undici": "^5.5.1",
         "wokcommands": "^1.5.3",
+        "wrapper-valorant-api": "^1.0.1",
         "ytdl-core": "^4.11.2"
     },
     "devDependencies": {
