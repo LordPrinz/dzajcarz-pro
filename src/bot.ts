@@ -2,6 +2,7 @@ import DiscordJS, { Intents } from "discord.js";
 import WOKCommands from "wokcommands";
 import dotenv from "dotenv";
 import path from "path";
+import { createWarningLog } from "./utilities/loger";
 
 dotenv.config();
 
@@ -28,6 +29,14 @@ client.on("ready", () => {
 		mongoUri: process.env.MONGO_URI,
 		typeScript: true,
 	}).setDefaultPrefix("*");
+});
+
+client.on("shardError", (error) => {
+	createWarningLog(error);
+});
+
+client.on("error", (error) => {
+	createWarningLog(error);
 });
 
 if (process.env.NODE_ENV === "development") {
