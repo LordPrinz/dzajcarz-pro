@@ -23,6 +23,10 @@ const chatListner = (client: Client) => {
 		socket = sck;
 	});
 
+	io.on("connect_failed", () => {
+		throw new Error("CONNECTION FAILED DISCORD CHAT LISTENER!");
+	});
+
 	client.on("messageCreate", async (message) => {
 		if (message.channel.type !== "DM") {
 			return;

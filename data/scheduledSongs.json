@@ -1,21 +1,19 @@
 [{
         "song": "lato_z_radiem",
-        "time": ["09:00","21:00"]
+        "time": ["09:00", "21:00"]
     },
     {
         "message": "Bonżur",
-        "channelId": ["880203277562687539", "928638782952079394", "951550553341689927"],
+        "channelId": [
+            "880203277562687539",
+            "928638782952079394",
+            "951550553341689927"
+        ],
         "time": ["19:00"]
     },
     {
         "message": "Szczęśliwego nowego dnia!!!",
-        "userId": ["257589107453198337"],
-        "time": ["21:10"]
-    },
-    {
-        "song": "https://www.youtube.com/watch?v=3GwjfUFyY6M&ab_channel=KoolAndTheGangVEVO",
-        "time": ["21:13"],
-        "channelId":["1028636473664229426", "803721994800857139"],
-        "isOnline": true
+        "userId": ["257589107453198337", "236373708350947328"],
+        "time": ["21:12"]
     }
 ]
