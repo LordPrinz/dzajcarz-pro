@@ -30,6 +30,14 @@ client.on("ready", () => {
 	}).setDefaultPrefix("*");
 });
 
+client.on("shardError", (error) => {
+	console.log(error);
+});
+
+client.on("error", (error) => {
+	console.log(error);
+});
+
 if (process.env.NODE_ENV === "development") {
 	client.login(process.env.DEV_TOKEN);
 }
