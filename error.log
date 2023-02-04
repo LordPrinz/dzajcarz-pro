@@ -25,4 +25,9 @@ src/features/action-triggerer.ts(11,22): error TS2345: Argument of type '(action
 
 [7m11[0m  scheduledAction.map((action: Scheduled) => {
 [7m  [0m [91m                     ~~~~~~~~~~~~~~~~~~~~~~~~[0m
-Wed, 01 Feb 2023 06:09:30 GMT | Error -> WebSocket was closed before the connection was establishedThu, 02 Feb 2023 00:41:39 GMT | Error -> WebSocket was closed before the connection was established
+Wed, 01 Feb 2023 06:09:30 GMT | Error -> WebSocket was closed before the connection was establishedThu, 02 Feb 2023 00:41:39 GMT | Error -> WebSocket was closed before the connection was establishedSat, 04 Feb 2023 18:34:25 GMT | TSError -> ⨯ Unable to compile TypeScript:
+[96msrc/commands/api/dzajde/dzajcuj.ts[0m:[93m2[0m:[93m19[0m - [91merror[0m[90m TS2307: [0mCannot find module 'axios' or its corresponding type declarations.
+
+[7m2[0m import axios from "axios";
+[7m [0m [91m                  ~~~~~~~[0m
+
