@@ -3,22 +3,17 @@ import axios from "axios";
 
 export default {
 	category: "api",
-	description: "Returns short version of your link.",
+	description: "Returns how many times link has been visited.",
 	slash: "both",
 	minArgs: 1,
-	expectedArgs: "<link> <custom_name>",
+	expectedArgs: "<link>",
+	testOnly: true,
 	options: [
 		{
 			name: "link",
 			description: "Your link.",
 			required: true,
 			type: "STRING",
-		},
-		{
-			name: "custom_name",
-			description: "Cutstom name",
-			type: "STRING",
-			required: false,
 		},
 	],
 
@@ -27,21 +22,17 @@ export default {
 			return "You have to pass a link!";
 		}
 
-		const [link, customName] = args;
-
-		let body: any = { url: link };
-
-		if (customName) {
-			body = { ...body, customName };
-		}
+		const linkCode = args[0]
+			.replace("https://www.dzaj.de/", "")
+			.replace("https://dzaj.de/", "")
+			.replace("/", "");
 
 		try {
-			const result: any = await axios.post(
-				"https://www.dzaj.de/api/urls",
-				body
+			const result: any = await axios.get(
+				`https://www.dzaj.de/api/urls/${linkCode}/stats`
 			);
 
-			return `https://dzaj.de/${result.data.shortUrl}`;
+			return `Clicks: ${result.data.clicks}`;
 		} catch (error: any) {
 			const { response } = error;
 

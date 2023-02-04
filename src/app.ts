@@ -8,8 +8,6 @@ process.on("uncaughtException", (err) => {
 	console.log("UNCAUGHT EXCEPTION! Shutting down...");
 	console.log(err.name, err.message);
 	createErrorLog(err);
-
-	process.exit(1);
 });
 
 const port = process.env.PCHPORT || 4761;
@@ -19,12 +17,9 @@ const PCHServer = privateChatServer.listen(port, () => {
 });
 
 process.on("unhandledRejection", (err: Error) => {
-	console.log("UNHANDLED REJECTION! Shutting down...");
+	console.log("UNHANDLED REJECTION!");
 	console.log(err.name, err.message);
 	createErrorLog(err);
-	PCHServer.close(() => {
-		process.exit(1);
-	});
 });
 
 process.on("SIGTERM", () => {
