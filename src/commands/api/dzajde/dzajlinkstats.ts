@@ -7,7 +7,6 @@ export default {
 	slash: "both",
 	minArgs: 1,
 	expectedArgs: "<link>",
-	testOnly: true,
 	options: [
 		{
 			name: "link",
