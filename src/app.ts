@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import privateChatServer from "./privateChatServer";
-import { createErrorLog } from "./utilities/loger";
+import { createErrorLog } from "./utils/logger";
 
 dotenv.config();
 

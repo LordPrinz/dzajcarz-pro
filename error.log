@@ -1,33 +1,0 @@
-Sat, 19 Nov 2022 22:23:25 GMT | Error -> listen EADDRINUSE: address already in use :::4761Sat, 19 Nov 2022 23:31:48 GMT | TypeError -> Cannot read properties of undefined (reading 'search')Thu, 24 Nov 2022 13:17:50 GMT | Error -> WebSocket was closed before the connection was establishedThu, 24 Nov 2022 19:13:29 GMT | Error -> WebSocket was closed before the connection was establishedWed, 30 Nov 2022 15:34:51 GMT | Error -> WebSocket was closed before the connection was establishedSat, 03 Dec 2022 08:02:55 GMT | Error -> WebSocket was closed before the connection was establishedSun, 04 Dec 2022 19:45:41 GMT | Error -> WebSocket was closed before the connection was establishedFri, 16 Dec 2022 00:21:48 GMT | Error -> WebSocket was closed before the connection was establishedSat, 17 Dec 2022 16:11:42 GMT | Error -> WebSocket was closed before the connection was establishedThu, 22 Dec 2022 10:38:13 GMT | Error -> WebSocket was closed before the connection was establishedFri, 23 Dec 2022 17:01:55 GMT | Error -> WebSocket was closed before the connection was establishedFri, 23 Dec 2022 17:32:49 GMT | AbortError -> The user aborted a request.Fri, 23 Dec 2022 17:34:17 GMT | AbortError -> The user aborted a request.Fri, 23 Dec 2022 18:10:32 GMT | Error -> WebSocket was closed before the connection was establishedWed, 04 Jan 2023 10:31:01 GMT | Error -> WebSocket was closed before the connection was establishedSun, 08 Jan 2023 13:30:45 GMT | Error -> WebSocket was closed before the connection was establishedMon, 16 Jan 2023 02:55:06 GMT | Error -> WebSocket was closed before the connection was establishedMon, 16 Jan 2023 12:52:00 GMT | Error -> WebSocket was closed before the connection was establishedWed, 25 Jan 2023 16:30:09 GMT | TSError -> ⨯ Unable to compile TypeScript:
-src/features/action-triggerer.ts(11,22): error TS2345: Argument of type '(action: Scheduled) => void' is not assignable to parameter of type '(value: { song: string; time: string[]; message?: undefined; channelId?: undefined; userId?: undefined; isOnline?: undefined; } | { message: string; channelId: string[]; time: string[]; song?: undefined; userId?: undefined; isOnline?: undefined; } | { ...; } | { ...; }, index: number, array: ({ ...; } | ... 2 more ....'.
-  Types of parameters 'action' and 'value' are incompatible.
-    Type '{ song: string; time: string[]; message?: undefined; channelId?: undefined; userId?: undefined; isOnline?: undefined; } | { message: string; channelId: string[]; time: string[]; song?: undefined; userId?: undefined; isOnline?: undefined; } | { ...; } | { ...; }' is not assignable to type 'Scheduled'.
-      Type '{ song: string; time: string[]; channelId: string[]; isOnline: string; message?: undefined; userId?: undefined; }' is not assignable to type 'Scheduled'.
-        Types of property 'isOnline' are incompatible.
-          Type 'string' is not assignable to type 'boolean | undefined'.
-Thu, 26 Jan 2023 00:51:11 GMT | TSError -> ⨯ Unable to compile TypeScript:
-[96msrc/features/action-triggerer.ts[0m:[93m11[0m:[93m22[0m - [91merror[0m[90m TS2345: [0mArgument of type '(action: Scheduled) => void' is not assignable to parameter of type '(value: { song: string; time: string[]; message?: undefined; channelId?: undefined; userId?: undefined; isOnline?: undefined; } | { message: string; channelId: string[]; time: string[]; song?: undefined; userId?: undefined; isOnline?: undefined; } | { ...; } | { ...; }, index: number, array: ({ ...; } | ... 2 more ....'.
-  Types of parameters 'action' and 'value' are incompatible.
-    Type '{ song: string; time: string[]; message?: undefined; channelId?: undefined; userId?: undefined; isOnline?: undefined; } | { message: string; channelId: string[]; time: string[]; song?: undefined; userId?: undefined; isOnline?: undefined; } | { ...; } | { ...; }' is not assignable to type 'Scheduled'.
-      Type '{ song: string; time: string[]; channelId: string[]; isOnline: string; message?: undefined; userId?: undefined; }' is not assignable to type 'Scheduled'.
-        Types of property 'isOnline' are incompatible.
-          Type 'string' is not assignable to type 'boolean | undefined'.
-
-[7m11[0m  scheduledAction.map((action: Scheduled) => {
-[7m  [0m [91m                     ~~~~~~~~~~~~~~~~~~~~~~~~[0m
-Thu, 26 Jan 2023 00:52:37 GMT | TSError -> ⨯ Unable to compile TypeScript:
-[96msrc/features/action-triggerer.ts[0m:[93m11[0m:[93m22[0m - [91merror[0m[90m TS2345: [0mArgument of type '(action: Scheduled) => void' is not assignable to parameter of type '(value: { song: string; time: string[]; message?: undefined; channelId?: undefined; userId?: undefined; isOnline?: undefined; } | { message: string; channelId: string[]; time: string[]; song?: undefined; userId?: undefined; isOnline?: undefined; } | { ...; } | { ...; }, index: number, array: ({ ...; } | ... 2 more ....'.
-  Types of parameters 'action' and 'value' are incompatible.
-    Type '{ song: string; time: string[]; message?: undefined; channelId?: undefined; userId?: undefined; isOnline?: undefined; } | { message: string; channelId: string[]; time: string[]; song?: undefined; userId?: undefined; isOnline?: undefined; } | { ...; } | { ...; }' is not assignable to type 'Scheduled'.
-      Type '{ song: string; time: string[]; channelId: string[]; isOnline: string; message?: undefined; userId?: undefined; }' is not assignable to type 'Scheduled'.
-        Types of property 'isOnline' are incompatible.
-          Type 'string' is not assignable to type 'boolean | undefined'.
-
-[7m11[0m  scheduledAction.map((action: Scheduled) => {
-[7m  [0m [91m                     ~~~~~~~~~~~~~~~~~~~~~~~~[0m
-Wed, 01 Feb 2023 06:09:30 GMT | Error -> WebSocket was closed before the connection was establishedThu, 02 Feb 2023 00:41:39 GMT | Error -> WebSocket was closed before the connection was establishedSat, 04 Feb 2023 18:34:25 GMT | TSError -> ⨯ Unable to compile TypeScript:
-[96msrc/commands/api/dzajde/dzajcuj.ts[0m:[93m2[0m:[93m19[0m - [91merror[0m[90m TS2307: [0mCannot find module 'axios' or its corresponding type declarations.
-
-[7m2[0m import axios from "axios";
-[7m [0m [91m                  ~~~~~~~[0m
-Sat, 04 Feb 2023 18:40:36 GMT | DiscordAPIError -> Unknown interactionFri, 02 Jun 2023 21:08:47 GMT | TypeError -> channel.isText is not a functionFri, 02 Jun 2023 21:10:17 GMT | TypeError -> channel.isText is not a functionFri, 02 Jun 2023 21:34:51 GMT | TypeError -> channel.isText is not a function
