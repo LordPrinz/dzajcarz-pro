@@ -1,30 +1,33 @@
 import dotenv from "dotenv";
 import privateChatServer from "./privateChatServer";
-import { createErrorLog } from "./utils/logger";
+import Logger from "./utils/debug/Logger";
 
 dotenv.config();
 
+const logger = new Logger();
+
 process.on("uncaughtException", (err) => {
-	console.log("UNCAUGHT EXCEPTION! Shutting down...");
-	console.log(err.name, err.message);
-	createErrorLog(err);
+	logger.saveLog(`${err.name }${err.message}`, "error");
 });
+
+process.on("warning", (warn) => {
+  logger.saveLog(`${warn.name }${warn.message}`, "warn");
+})
 
 const port = process.env.PCHPORT || 4761;
 
 const PCHServer = privateChatServer.listen(port, () => {
-	console.log(`App running on port ${port}`);
+  logger.saveLog(`App running on port ${port}`,  "info");
 });
 
 process.on("unhandledRejection", (err: Error) => {
-	console.log("UNHANDLED REJECTION!");
-	console.log(err.name, err.message);
-	createErrorLog(err);
+	logger.saveLog(`${err.name }${err.message}`, "error");
 });
 
 process.on("SIGTERM", () => {
-	console.log("SIGTERM RECEIVED. Shutting down gracefully");
+  logger.saveLog("SIGTERM RECEIVED. Shutting down gracefully", "info");
 	PCHServer.close(() => {
-		console.log("Process terminated!");
+    logger.saveLog("PRIVATE CHANNEL LISTENER TERMINATED!", "info");
 	});
 });
+
