@@ -30,4 +30,4 @@ src/features/action-triggerer.ts(11,22): error TS2345: Argument of type '(action
 
 [7m2[0m import axios from "axios";
 [7m [0m [91m                  ~~~~~~~[0m
-Sat, 04 Feb 2023 18:40:36 GMT | DiscordAPIError -> Unknown interaction
+Sat, 04 Feb 2023 18:40:36 GMT | DiscordAPIError -> Unknown interactionFri, 02 Jun 2023 21:08:47 GMT | TypeError -> channel.isText is not a functionFri, 02 Jun 2023 21:10:17 GMT | TypeError -> channel.isText is not a functionFri, 02 Jun 2023 21:34:51 GMT | TypeError -> channel.isText is not a function
