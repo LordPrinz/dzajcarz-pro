@@ -1,7 +1,7 @@
 import { Client, Message } from "discord.js";
 import { allowedWords } from "./../../../data/allowedWords.json";
 import generateRegex from "../../utils/commands/generateCoRegex";
-import getRandom from "../../utils/getRandom";
+import { getRandom } from "../../utils/oneLiners";
 
 const dzajco = (client: Client) => {
 	client.on("messageCreate", (message: Message) => {
