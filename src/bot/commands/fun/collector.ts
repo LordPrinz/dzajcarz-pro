@@ -1,7 +1,7 @@
 import { ICommand } from "wokcommands";
-import generateInvitation from "../../utilities/discord/generateInvitation";
-import { getRandom } from "../../../utils/oneLiners";
-import { sleep } from "../../../utils/oneLiners";
+import generateInvitation from "../../../utils/commands/generateInvitation";
+import { getRandom, sleep } from "../../../utils/oneLiners";
+import Logger from "../../../utils/debug/Logger";
 
 const collector = {
 	category: "Fun",
@@ -18,6 +18,8 @@ const collector = {
 		const collector = message?.createReactionCollector({
 			time,
 		});
+
+		const logger = new Logger();
 
 		collector.on("collect", async (reaction, usr) => {
 			const userId = usr.id;
@@ -40,15 +42,13 @@ const collector = {
 			if (userId === member?.user?.id) {
 				hasBeenBanned = true;
 			}
-			console.log(`BAN ${usr?.username}`);
+			logger.saveLog(`BAN ${usr?.username}`, "info");
 
 			message?.reply("No to elo xd");
 
-			userToBan
-				?.ban({
-					reason: "Sam chciał Bana :)",
-				})
-				.catch((err) => console.error(err));
+			userToBan?.ban({
+				reason: "Sam chciał Bana :)",
+			});
 		});
 
 		collector.on("end", async () => {
@@ -85,7 +85,7 @@ const collector = {
 			await member
 				?.send(`https://discord.gg/${invitation.code}`)
 				.catch(() => {});
-			console.log(`KICK ${member?.user?.username}`);
+			logger.saveLog(`KICK ${member?.user?.username}`, "info");
 			message?.member?.kick().catch(() => {});
 		});
 	},
