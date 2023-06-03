@@ -3,5 +3,4 @@ node_modules/
 dzajcarz.sh
 error.log
 riot.txt
-error.log
-warning.log
+logs.log

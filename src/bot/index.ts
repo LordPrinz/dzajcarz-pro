@@ -29,23 +29,15 @@ client.on("ready", () => {
 		typeScript: true,
 	}).setDefaultPrefix("*");
 
-  logger.saveLog("Commands loaded", "info");
+	logger.saveLog("Commands loaded", "info");
 });
 
 client.on("shardError", (error) => {
-  logger.saveLog(`${error.name} ${error.message}`, "error");
+	logger.saveLog(`${error.name} ${error.message}`, "error");
 });
 
 client.on("error", (error) => {
 	logger.saveLog(`${error.name} ${error.message}`, "error");
 });
-
-if (process.env.NODE_ENV === "development") {
-	client.login(process.env.DEV_TOKEN);
-}
-
-if (process.env.NODE_ENV === "production") {
-	client.login(process.env.PROD_TOKEN);
-}
 
 export default client;
