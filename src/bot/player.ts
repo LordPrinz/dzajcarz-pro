@@ -45,18 +45,6 @@ player.on("trackAdd", (queue: Queue<unknown>, track: Track) => {
 	channel.send(`Track ${track.title} added in the queue ✅ \n${track.url}`);
 });
 
-player.on("botDisconnect", (queue: Queue<unknown>) => {
-	const channel = queue?.metadata as TextChannel;
-
-	if (!channel) {
-		return;
-	}
-
-	channel.send(
-		"I was manually disconnected from the voice channel, clearing queue..."
-	);
-});
-
 player.on("channelEmpty", (queue: Queue<unknown>) => {
 	const channel = queue?.metadata as TextChannel;
 
