@@ -70,7 +70,7 @@ const play = {
 
 		if (!queue.playing) await queue.play();
 
-		channel?.send("As you wish! <3");
+		return "As you wish! <3";
 	},
 } as ICommand;
 

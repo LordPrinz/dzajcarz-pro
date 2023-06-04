@@ -9,3 +9,20 @@ export const sleep = (ms: number) =>
 
 export const capitalizeFirstLetter = (string: string): string =>
 	string.charAt(0).toUpperCase() + string.slice(1);
+
+export const shuffle = (array: unknown[]) => {
+	let currentIndex = array.length,
+		randomIndex;
+
+	while (currentIndex != 0) {
+		randomIndex = Math.floor(Math.random() * currentIndex);
+		currentIndex--;
+
+		[array[currentIndex], array[randomIndex]] = [
+			array[randomIndex],
+			array[currentIndex],
+		];
+	}
+
+	return array;
+};
