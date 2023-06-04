@@ -1,7 +1,8 @@
 import dotenv from "dotenv";
-// import server from "./server";
+import server from "./server";
 import Logger from "./utils/debug/Logger";
 import client from "./bot";
+import setupServer from "./server";
 
 dotenv.config();
 
@@ -25,9 +26,9 @@ process.on("warning", (warn) => {
 
 const port = process.env.PCHPORT || 4761;
 
-// const dzajServer = server.listen(port, () => {
-//   logger.saveLog(`App running on port ${port}`,  "info");
-// });
+const dzajServer = setupServer(client).listen(port, () => {
+	logger.saveLog(`App running on port ${port}`, "info");
+});
 
 process.on("unhandledRejection", (err: Error) => {
 	logger.saveLog(`${err.name}${err.message}`, "error");
@@ -35,7 +36,7 @@ process.on("unhandledRejection", (err: Error) => {
 
 process.on("SIGTERM", () => {
 	logger.saveLog("SIGTERM RECEIVED. Shutting down gracefully", "info");
-	// dzajServer.close(() => {
-	//   logger.saveLog("PRIVATE CHANNEL LISTENER TERMINATED!", "info");
-	// });
+	dzajServer.close(() => {
+		logger.saveLog("PRIVATE CHANNEL LISTENER TERMINATED!", "info");
+	});
 });
