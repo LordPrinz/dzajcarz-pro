@@ -13,7 +13,17 @@
     },
     {
         "message": "Szczęśliwego nowego dnia!!!",
-        "userId": ["257589107453198337", "236373708350947328"],
-        "time": ["21:12"]
+        "userId": ["257589107453198337", "355024324840783883"],
+        "time": ["21:10"]
+    },
+    {
+        "message": "Szczesliwego nowego dnia, nie zabijaj sie :))",
+        "userId": ["633281386643587092"],
+        "time": ["01:00"]
+    },
+    {
+        "message": "Gratulacje użytkowniku @undefined! Twoje urodziny będą za undefined dni!",
+        "userId": ["473430118535004160", "257589107453198337"],
+        "time": ["22:57"]
     }
 ]
