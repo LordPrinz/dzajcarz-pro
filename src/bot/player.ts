@@ -10,12 +10,10 @@ const player = new Player(client, {
 });
 
 player.on("error", (queue: Queue<unknown>, error) => {
-	queue.destroy();
 	throw new Error(`Error emitted from the queue ${error.message}`);
 });
 
 player.on("connectionError", (queue: Queue<unknown>, error) => {
-	queue.destroy();
 	throw new Error(`Error emitted from the connection ${error.message}`);
 });
 
@@ -54,8 +52,6 @@ player.on("botDisconnect", (queue: Queue<unknown>) => {
 		return;
 	}
 
-	queue.destroy();
-
 	channel.send(
 		"I was manually disconnected from the voice channel, clearing queue..."
 	);
@@ -68,8 +64,6 @@ player.on("channelEmpty", (queue: Queue<unknown>) => {
 		return;
 	}
 
-	queue.destroy();
-
 	channel.send("Nobody is in the voice channel, leaving the voice channel...");
 });
 
@@ -79,8 +73,6 @@ player.on("queueEnd", (queue: Queue<unknown>) => {
 	if (!channel) {
 		return;
 	}
-
-	queue.destroy();
 
 	channel.send("I finished reading the whole queue.");
 });

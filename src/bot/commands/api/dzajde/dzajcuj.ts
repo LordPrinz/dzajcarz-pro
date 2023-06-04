@@ -47,17 +47,7 @@ export default {
 
 			channel.send(`https://dzaj.de/${result.data.shortUrl}`);
 		} catch (error: any) {
-			const { response } = error;
-
-			if (response.status === 422) {
-				return response.data.message;
-			}
-
-			if (response.status === 429) {
-				return response.data.error;
-			}
+			channel.send("Something went wrong!");
 		}
-
-		return "Something went Wrong!";
 	},
 } as ICommand;
