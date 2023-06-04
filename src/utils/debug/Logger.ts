@@ -27,7 +27,9 @@ class Logger {
 			date.getMonth() + 1
 		)}-${this.padNumber(date.getDate())} ${this.padNumber(
 			date.getHours()
-		)}:${this.padNumber(date.getMinutes())}`;
+		)}:${this.padNumber(date.getMinutes())}:${this.padNumber(
+			date.getSeconds()
+		)}`;
 		this.timestamp = formattedDate;
 	}
 
