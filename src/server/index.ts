@@ -35,6 +35,10 @@ app.use("/api/v1/users", userRouter);
 app.use("/api/v1/chats", chatRouter);
 app.use("/api/v1/messages", messageRouter);
 
+app.get("/favicon.ico", (req, res) => {
+	res.status(204).end();
+});
+
 app.all("*", async (req, res, next) => {
 	new AppError(`Can't find ${req.originalUrl} on this server!`, 404);
 });
