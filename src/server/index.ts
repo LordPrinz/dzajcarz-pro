@@ -17,18 +17,6 @@ const setupServer = (client: Client) => {
 		app.use(morgan("dev"));
 	}
 
-	app.get("/", async (req, res) => {
-		const messages = await dmChatSchema.find();
-
-		res.status(200).json({
-			status: "success",
-			results: messages.length,
-			data: {
-				messages,
-			},
-		});
-	});
-
 	app.get("/contacts", async (req, res) => {
 		const response = await dmChatSchema.find();
 		let contactsIds: string[] = [];
@@ -106,19 +94,6 @@ const setupServer = (client: Client) => {
 			results: 1,
 			data: {
 				user,
-			},
-		});
-	});
-
-	app.get("/messages/:id", async (req, res) => {
-		const id = req.params.id;
-		const message = await dmChatSchema.findById(id);
-
-		res.status(200).json({
-			status: !!+!!message ? "success" : "fail",
-			results: +!!message,
-			data: {
-				message,
 			},
 		});
 	});
