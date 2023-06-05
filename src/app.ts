@@ -1,8 +1,7 @@
 import dotenv from "dotenv";
-import server from "./server";
 import Logger from "./utils/debug/Logger";
 import client from "./bot";
-import setupServer from "./server";
+import dzajcordServer from "./server";
 
 dotenv.config();
 
@@ -26,7 +25,7 @@ process.on("warning", (warn) => {
 
 const port = process.env.PCHPORT || 4761;
 
-const dzajServer = setupServer(client).listen(port, () => {
+const dzajServer = dzajcordServer.listen(port, () => {
 	logger.saveLog(`App running on port ${port}`, "info");
 });
 

@@ -1,174 +1,44 @@
 import express from "express";
-import dmChatSchema from "../bot/models/dm-chat-schema";
 import cors from "cors";
 import morgan from "morgan";
-import { Client } from "discord.js";
+import mongoSanitize from "express-mongo-sanitize";
+import compression from "compression";
+import AppError from "../utils/server/AppError";
+import globalErrorHandler from "./controllers/errorController";
 
-// TODO: REWRITE AND CONNECT WITH BOT
+import userRouter from "./routes/userRouter";
+import messageRouter from "./routes/messageRouter";
+import chatRouter from "./routes/chatRouter";
 
-const setupServer = (client: Client) => {
-	const app = express();
+const app = express();
 
-	app.use(express.json());
+app.enable("trust proxy");
 
-	app.use(cors());
+app.use(express.json());
 
-	if (process.env.NODE_ENV === "development") {
-		app.use(morgan("dev"));
-	}
+app.use(cors());
 
-	app.get("/contacts", async (req, res) => {
-		const response = await dmChatSchema.find();
-		let contactsIds: string[] = [];
+if (process.env.NODE_ENV === "development") {
+	app.use(morgan("dev"));
+}
 
-		response.map((res) => {
-			contactsIds.push(res.chat);
-		});
+app.use(mongoSanitize());
 
-		contactsIds = [...new Set(contactsIds)];
+app.use(compression());
 
-		const contacts = contactsIds.map(async (id) => {
-			const contact = await client.users.fetch(id).then((data) => {
-				const contact = {
-					id: data.id,
-					username: data.username,
-					discriminator: data.discriminator,
-					avatar: data.displayAvatarURL(),
-				};
+app.use((req, res, next) => {
+	(req as any).requestTime = new Date().toISOString();
+	next();
+});
 
-				return contact;
-			});
+app.use("/api/v1/users", userRouter);
+app.use("/api/v1/chats", chatRouter);
+app.use("/api/v1/messages", messageRouter);
 
-			return contact;
-		});
+app.all("*", async (req, res, next) => {
+	new AppError(`Can't find ${req.originalUrl} on this server!`, 404);
+});
 
-		Promise.all(contacts).then((values) => {
-			res.status(200).json({
-				status: "success",
-				results: 1,
-				data: {
-					contacts: values,
-				},
-			});
-		});
-	});
+app.use(globalErrorHandler);
 
-	app.get("/contacts/:id", async (req, res) => {
-		const id = req.params.id;
-
-		if (isNaN(+id)) {
-			res.status(400).json({
-				status: "fail",
-				results: 0,
-				data: {
-					info: "Wrong ID",
-				},
-			});
-			return;
-		}
-
-		const user = await client.users.fetch(id).catch(() => {
-			res.status(404).json({
-				status: "fail",
-				results: 0,
-				data: {
-					info: "No users found",
-				},
-			});
-			return;
-		});
-
-		if (!user) {
-			res.status(404).json({
-				status: "fail",
-				results: 0,
-				data: {
-					info: "No users found",
-				},
-			});
-			return;
-		}
-
-		res.status(200).json({
-			status: "success",
-			results: 1,
-			data: {
-				user,
-			},
-		});
-	});
-
-	app.get("/chat/:id", async (req, res) => {
-		const id = req.params.id;
-
-		const chat = await dmChatSchema.find({
-			chat: id,
-		});
-
-		if (chat.length === 0) {
-			res.status(404).json({
-				status: "fail",
-				results: chat.length,
-				data: {
-					info: "No chat found",
-				},
-			});
-			return;
-		}
-
-		res.status(200).json({
-			status: "success",
-			results: chat.length,
-			data: {
-				chat,
-			},
-		});
-	});
-
-	app.post("/chat/:id", async (req, res) => {
-		const data = req.body;
-
-		const user = await client.users.fetch(data.id).catch((err) => {});
-
-		if (!user) {
-			res.status(404).json({
-				status: "fail",
-				data: {
-					info: "Conversation not found!",
-				},
-			});
-
-			return;
-		}
-
-		user
-			.send({
-				content: data.content,
-				files: data.attachments,
-			})
-			.catch((error) => {
-				res.status(403).json({
-					status: "fail",
-					data: {
-						info: error.name,
-					},
-				});
-			})
-			.then((response) => {
-				if (!response) {
-					return;
-				}
-
-				res.status(201).json({
-					status: "success",
-					data: {
-						info: "Message Sent!",
-					},
-				});
-			});
-	});
-
-	return app;
-};
-
-export default setupServer;
+export default app;
