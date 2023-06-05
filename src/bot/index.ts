@@ -17,7 +17,7 @@ const client = new DiscordJS.Client({
 	partials: ["CHANNEL", "MESSAGE", "REACTION"],
 });
 
-const logger = new Logger();
+const logger = new Logger("dzajcarz");
 
 client.on("ready", () => {
 	new WOKCommands(client, {

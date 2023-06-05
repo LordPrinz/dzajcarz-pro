@@ -1,5 +1,5 @@
 import fs from "fs";
-import { LogType } from "../../types/TLogger";
+import { AppNames, LogType } from "../../types/TLogger";
 
 /**
  * Log file managment class
@@ -8,6 +8,11 @@ import { LogType } from "../../types/TLogger";
 class Logger {
 	private readonly filePath: string = "./logs.log";
 	private timestamp: string = "";
+	private appName: AppNames;
+
+	constructor(appName: AppNames) {
+		this.appName = appName;
+	}
 
 	/**
 	 * Saves log to deticated log file.
@@ -17,7 +22,9 @@ class Logger {
 
 	saveLog(log: string, type: LogType) {
 		this.generateTimestamp();
-		const logData = `${this.timestamp} ${type.toUpperCase()} ${log} \n`;
+		const logData = `${
+			this.timestamp
+		} ${type.toUpperCase()} ${this.appName.toUpperCase()} ${log} \n`;
 		this.saveToFile(logData);
 	}
 

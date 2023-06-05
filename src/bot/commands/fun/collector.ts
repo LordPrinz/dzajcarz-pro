@@ -19,7 +19,7 @@ const collector = {
 			time,
 		});
 
-		const logger = new Logger();
+		const logger = new Logger("dzajcarz");
 
 		collector.on("collect", async (reaction, usr) => {
 			const userId = usr.id;

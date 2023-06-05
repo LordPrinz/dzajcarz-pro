@@ -5,7 +5,7 @@ class AppError extends Error {
 	status: "fail" | "error";
 	isOperational: boolean;
 	constructor(message: string, statusCode: number) {
-		const logger = new Logger();
+		const logger = new Logger("dzajserver");
 
 		super(message);
 

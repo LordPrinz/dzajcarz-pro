@@ -5,7 +5,8 @@ import dzajcordServer from "./server";
 
 dotenv.config();
 
-const logger = new Logger();
+const botLogger = new Logger("dzajcarz");
+const serverLogger = new Logger("dzajserver");
 
 if (process.env.NODE_ENV === "development") {
 	client.login(process.env.DEV_TOKEN);
@@ -16,26 +17,26 @@ if (process.env.NODE_ENV === "production") {
 }
 
 process.on("uncaughtException", (err) => {
-	logger.saveLog(`${err.name}${err.message}`, "error");
+	botLogger.saveLog(`${err.name}${err.message}`, "error");
 });
 
 process.on("warning", (warn) => {
-	logger.saveLog(`${warn.name}${warn.message}`, "warn");
+	botLogger.saveLog(`${warn.name}${warn.message}`, "warn");
 });
 
 const port = process.env.PCHPORT || 4761;
 
 const dzajServer = dzajcordServer.listen(port, () => {
-	logger.saveLog(`App running on port ${port}`, "info");
+	serverLogger.saveLog(`App running on port ${port}`, "info");
 });
 
 process.on("unhandledRejection", (err: Error) => {
-	logger.saveLog(`${err.name}${err.message}`, "error");
+	botLogger.saveLog(`${err.name}${err.message}`, "error");
 });
 
 process.on("SIGTERM", () => {
-	logger.saveLog("SIGTERM RECEIVED. Shutting down gracefully", "info");
+	botLogger.saveLog("SIGTERM RECEIVED. Shutting down gracefully", "info");
 	dzajServer.close(() => {
-		logger.saveLog("PRIVATE CHANNEL LISTENER TERMINATED!", "info");
+		serverLogger.saveLog("PRIVATE CHANNEL LISTENER TERMINATED!", "info");
 	});
 });
