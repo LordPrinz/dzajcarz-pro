@@ -29,6 +29,7 @@
         "express-mongo-sanitize": "^2.2.0",
         "ffmpeg": "^0.0.4",
         "forever": "^4.0.3",
+        "http": "^0.0.1-security",
         "install": "^0.13.0",
         "libsodium-wrappers": "^0.7.11",
         "mongoose": "^6.3.3",

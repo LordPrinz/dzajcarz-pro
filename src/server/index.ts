@@ -1,16 +1,23 @@
-import express from "express";
+import express, { Request } from "express";
 import cors from "cors";
 import morgan from "morgan";
 import mongoSanitize from "express-mongo-sanitize";
 import compression from "compression";
+import { Server } from "socket.io";
+import http from "http";
+
 import AppError from "../utils/server/AppError";
 import globalErrorHandler from "./controllers/errorController";
-
 import userRouter from "./routes/userRouter";
 import messageRouter from "./routes/messageRouter";
 import chatRouter from "./routes/chatRouter";
+import router from "./routes/userRouter";
+
+// Express Server
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
 app.enable("trust proxy");
 
@@ -31,6 +38,12 @@ app.use((req, res, next) => {
 	next();
 });
 
+app.use((req, res, next) => {
+	req.io = io;
+	next();
+});
+
+app.use("/api/v1/ws", router);
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/chats", chatRouter);
 app.use("/api/v1/messages", messageRouter);
@@ -45,4 +58,4 @@ app.all("*", async (req, res, next) => {
 
 app.use(globalErrorHandler);
 
-export default app;
+export default server;
