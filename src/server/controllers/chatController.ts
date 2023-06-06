@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import catchAsync from "../../utils/server/catchAsync";
 import dmChatSchema from "../../bot/models/dm-chat-schema";
 import client from "../../bot";
+import handleFactory from "./handleFactory";
 
 const sendMessage = catchAsync(async (req: Request, res: Response) => {
 	const data = req.body;
@@ -46,34 +47,7 @@ const sendMessage = catchAsync(async (req: Request, res: Response) => {
 		});
 });
 
-const getChat = catchAsync(async (req: Request, res: Response) => {
-	const id = req.params.id;
-
-	const chat = await dmChatSchema.find({
-		chat: id,
-	});
-
-	if (chat.length === 0) {
-		res.status(404).json({
-			status: "fail",
-			results: chat.length,
-			data: {
-				info: "No chat found",
-			},
-		});
-		return;
-	}
-
-	res.status(200).json({
-		status: "success",
-		results: chat.length,
-		data: {
-			chat,
-		},
-	});
-});
-
 export default {
-	getChat,
+	getChat: handleFactory.getAll(dmChatSchema),
 	sendMessage,
 };

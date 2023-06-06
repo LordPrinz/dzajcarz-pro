@@ -8,8 +8,8 @@ import AppError from "../../utils/server/AppError";
 const getAll = (Model: Model<any>) =>
 	catchAsync(async (req: Request, res: Response, next: NextFunction) => {
 		let filter = {};
-		if (req.params.reportId) {
-			filter = { report: req.params.reportId };
+		if (req.params.id) {
+			filter = { chat: req.params.id };
 		}
 
 		const features = new APIFeatures(Model.find(filter), req.query as any)
