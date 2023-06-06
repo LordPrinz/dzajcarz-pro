@@ -12,6 +12,7 @@ import userRouter from "./routes/userRouter";
 import messageRouter from "./routes/messageRouter";
 import chatRouter from "./routes/chatRouter";
 import router from "./routes/userRouter";
+import CustomRequest from "../types/customRequest";
 
 // Express Server
 
@@ -38,7 +39,7 @@ app.use((req, res, next) => {
 	next();
 });
 
-app.use((req, res, next) => {
+app.use((req: CustomRequest, res, next) => {
 	req.io = io;
 	next();
 });

@@ -1,8 +1,9 @@
 import { Router } from "express";
+import CustomRequest from "../../types/customRequest";
 
 const router = Router();
 
-router.get("/", (req, res) => {
+router.get("/", (req: CustomRequest, res) => {
 	const io = req.io;
 
 	if (!io) {
