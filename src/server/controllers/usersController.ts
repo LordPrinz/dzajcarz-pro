@@ -2,12 +2,22 @@ import { Request, Response } from "express";
 import client from "../../bot";
 import dmChatSchema from "../../bot/models/dm-chat-schema";
 import catchAsync from "../../utils/server/catchAsync";
+import APIFeatures from "../../utils/server/APIFeatures";
 
-const getAllUsers = catchAsync(async (_: Request, res: Response) => {
-	const response = await dmChatSchema.find();
+const getAllUsers = catchAsync(async (req: Request, res: Response) => {
+	const features = new APIFeatures(dmChatSchema.find(), req.query as any)
+		.filter()
+		.sort()
+		.limitFields()
+		.paginate();
+
+	const doc = await features.query;
+
+	console.log(doc);
+
 	let contactsIds: string[] = [];
 
-	response.map((res) => {
+	doc.map((res: { chat: string }) => {
 		contactsIds.push(res.chat);
 	});
 
@@ -31,10 +41,8 @@ const getAllUsers = catchAsync(async (_: Request, res: Response) => {
 	Promise.all(contacts).then((values) => {
 		res.status(200).json({
 			status: "success",
-			results: 1,
-			data: {
-				contacts: values,
-			},
+			results: contacts.length,
+			data: values,
 		});
 	});
 });
