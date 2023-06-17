@@ -20,6 +20,7 @@ const ChatSchema = new Schema(
 		timestamp: { type: Number, required: true },
 		author: { type: String, required: true, ref: "User" },
 		chat: { type: String, required: true },
+		server: { type: String, required: true },
 	},
 	{
 		versionKey: false,
