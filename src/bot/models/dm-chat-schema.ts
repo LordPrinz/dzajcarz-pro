@@ -12,14 +12,19 @@ const AttachmentSchema = new Schema({
 	contentType: { type: String, required: true },
 });
 
-const DNSchema = new Schema({
-	id: { type: String, required: true },
-	content: { type: String, required: false },
-	attachments: [{ type: AttachmentSchema, required: false }],
-	timestamp: { type: Number, required: true },
-	author: { type: String, required: true, ref: "User" },
-	chat: { type: String, required: true },
-});
+const DNSchema = new Schema(
+	{
+		_id: { type: String, required: true },
+		content: { type: String, required: false },
+		attachments: [{ type: AttachmentSchema, required: false }],
+		timestamp: { type: Number, required: true },
+		author: { type: String, required: true, ref: "User" },
+		chat: { type: String, required: true },
+	},
+	{
+		versionKey: false,
+	}
+);
 
 DNSchema.set("toJSON", {
 	transform: function (doc, ret) {
