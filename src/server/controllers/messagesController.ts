@@ -1,4 +1,4 @@
-import DMChatModel from "../../bot/models/chatModel";
+import DMChatModel from "../../bot/models/messageModel";
 import factory from "./handleFactory";
 
 export default {

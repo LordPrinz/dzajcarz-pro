@@ -45,7 +45,6 @@ export const formMessage = (message: Message | PartialMessage) => {
 		timestamp,
 		author: authorId,
 		chat,
-		server: "me",
 	};
 
 	return msg;
