@@ -1,7 +1,13 @@
 import { Message, PartialMessage } from "discord.js";
 import { Server } from "socket.io";
 import dmChatSchema from "../models/dm-chat-schema";
-import { formMessage, isDmChannel } from "../../utils/commands/dmChatListener";
+import {
+	checkUserExistence,
+	formAuthor,
+	formMessage,
+	isDmChannel,
+} from "../../utils/commands/dmChatListener";
+import userSchema from "../models/userModel";
 
 export const messageCreateHandler = async (
 	socket: Server | null,
@@ -11,8 +17,14 @@ export const messageCreateHandler = async (
 		return;
 	}
 
-	const msg = formMessage(message);
+	const doesUserExist = await checkUserExistence(message.author.id);
 
+	if (!doesUserExist) {
+		const author = formAuthor(message);
+		await userSchema.insertMany([author]);
+	}
+
+	const msg = formMessage(message);
 	await dmChatSchema.insertMany([msg]);
 
 	socket?.emit("messageCreate", msg);

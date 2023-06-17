@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const userSchema = new mongoose.Schema(
 	{
-		id: {
+		_id: {
 			type: String,
 			required: true,
 		},
@@ -21,16 +21,22 @@ const userSchema = new mongoose.Schema(
 	},
 	{
 		versionKey: false,
+		toObject: {
+			transform: function (doc, ret) {
+				ret.id = ret._id;
+				delete ret._id;
+				delete ret.__v;
+			},
+		},
+		toJSON: {
+			transform: function (doc, ret) {
+				ret.id = ret._id;
+				delete ret._id;
+				delete ret.__v;
+			},
+		},
 	}
 );
-
-userSchema.set("toJSON", {
-	transform: function (doc, ret) {
-		ret.id = ret._id;
-		delete ret._id;
-		delete ret.__v;
-	},
-});
 
 const User = mongoose.model("User", userSchema);
 
