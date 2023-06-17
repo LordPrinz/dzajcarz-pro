@@ -9,7 +9,7 @@ import AppError from "../utils/server/AppError";
 import globalErrorHandler from "./controllers/errorController";
 import userRouter from "./routes/userRouter";
 import messageRouter from "./routes/messageRouter";
-import chatRouter from "./routes/chatRouter";
+import chatRouter from "./routes/dmChatRouter";
 
 // Express Server
 

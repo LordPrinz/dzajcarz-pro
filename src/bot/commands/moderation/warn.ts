@@ -1,6 +1,6 @@
 import { MessageEmbed } from "discord.js";
 import { ICommand } from "wokcommands";
-import warnSchema from "../../models/warn-schema";
+import warnSchema from "../../models/warnModel";
 
 const warn = {
 	category: "Moderation",
@@ -113,7 +113,9 @@ const warn = {
 				description += `**Reason** ${warn.reason}\n\n`;
 			}
 
-			const embed = new MessageEmbed().setDescription(description).setColor("RED");
+			const embed = new MessageEmbed()
+				.setDescription(description)
+				.setColor("RED");
 			return embed;
 		}
 	},

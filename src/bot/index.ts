@@ -2,7 +2,7 @@ import DiscordJS, { Intents } from "discord.js";
 import WOKCommands from "wokcommands";
 import path from "path";
 import Logger from "../utils/debug/Logger";
-import setupChatListener from "./dmChatListener";
+import setupIOListener from "./ioListner";
 
 const client = new DiscordJS.Client({
 	intents: [
@@ -41,6 +41,6 @@ client.on("error", (error) => {
 	logger.saveLog(`${error.name} ${error.message}`, "error");
 });
 
-setupChatListener(client); // WebSocket for private chat
+setupIOListener(client); // WebSocket for server
 
 export default client;

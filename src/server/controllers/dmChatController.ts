@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import catchAsync from "../../utils/server/catchAsync";
-import dmChatSchema from "../../bot/models/dmChatModel";
+import DMChatModel from "../../bot/models/chatModel";
 import client from "../../bot";
 import handleFactory from "./handleFactory";
 
@@ -48,6 +48,6 @@ const sendMessage = catchAsync(async (req: Request, res: Response) => {
 });
 
 export default {
-	getChat: handleFactory.getAll(dmChatSchema),
+	getChat: handleFactory.getAll(DMChatModel),
 	sendMessage,
 };

@@ -12,7 +12,7 @@ const AttachmentSchema = new Schema({
 	contentType: { type: String, required: true },
 });
 
-const DMSchema = new Schema(
+const ChatSchema = new Schema(
 	{
 		_id: { type: String, required: true },
 		content: { type: String, required: false },
@@ -26,7 +26,7 @@ const DMSchema = new Schema(
 	}
 );
 
-DMSchema.set("toJSON", {
+ChatSchema.set("toJSON", {
 	transform: function (doc, ret) {
 		ret.id = ret._id;
 		delete ret._id;
@@ -42,7 +42,7 @@ AttachmentSchema.set("toJSON", {
 	},
 });
 
-DMSchema.pre(/^find/, function (next) {
+ChatSchema.pre(/^find/, function (next) {
 	this.populate({
 		path: "user",
 		select: "-__v",
@@ -51,8 +51,8 @@ DMSchema.pre(/^find/, function (next) {
 	next();
 });
 
-DMSchema.set("toObject", { virtuals: true });
+ChatSchema.set("toObject", { virtuals: true });
 
-const DmChat = mongoose.model("DmChat", DMSchema);
+const Chat = mongoose.model("chat", ChatSchema);
 
-export default DmChat;
+export default Chat;
