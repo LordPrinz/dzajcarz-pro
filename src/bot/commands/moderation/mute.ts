@@ -1,6 +1,6 @@
 import { User } from "discord.js";
 import { ICommand } from "wokcommands";
-import punishmentSchema from "../../models/punishment-schema";
+import punishmentSchema from "../../models/punishmentModel";
 
 const mute: ICommand = {
 	category: "Moderation",
@@ -84,7 +84,9 @@ const mute: ICommand = {
 		try {
 			const member = await guild.members.fetch(userId);
 			if (member) {
-				const muteRole = guild.roles.cache.find((role) => role.name === "Muted");
+				const muteRole = guild.roles.cache.find(
+					(role) => role.name === "Muted"
+				);
 				if (!muteRole) {
 					return 'This server does not have a "Muted" role.';
 				}

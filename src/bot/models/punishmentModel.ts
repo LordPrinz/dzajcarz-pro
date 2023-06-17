@@ -5,7 +5,7 @@ const reqString = {
 	required: true,
 };
 
-const schema = new Schema(
+const punishmentSchema = new Schema(
 	{
 		userId: reqString,
 		guildId: reqString,
@@ -23,6 +23,6 @@ const schema = new Schema(
 	}
 );
 
-const name = "punishments";
+const Punishments = mongoose.model("Punishment", punishmentSchema);
 
-export default mongoose.models[name] || mongoose.model(name, schema);
+export default Punishments;

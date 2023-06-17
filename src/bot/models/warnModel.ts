@@ -5,7 +5,7 @@ const reqString = {
 	required: true,
 };
 
-const schema = new Schema(
+const warnSchema = new Schema(
 	{
 		userId: reqString,
 		guildId: reqString,
@@ -15,6 +15,6 @@ const schema = new Schema(
 	{ timestamps: true }
 );
 
-const name = "warns";
+const Warn = mongoose.model("Warn", warnSchema);
 
-export default mongoose.models[name] || mongoose.model(name, schema);
+export default Warn;

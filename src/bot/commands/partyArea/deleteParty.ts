@@ -1,5 +1,5 @@
 import { ICommand } from "wokcommands";
-import partyAreaSchema from "../../models/party-area-schema";
+import partyAreaSchema from "../../models/partyAreaModel";
 import PartyArea from "../../../types/TPartyArea";
 
 const deleteParty = {

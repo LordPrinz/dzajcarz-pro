@@ -11,7 +11,6 @@ const welcomeSchema = new Schema({
 	text: reqString,
 });
 
-const name = "welcome";
+const Welcome = mongoose.model("Welcome", welcomeSchema);
 
-export default mongoose.models[name] ||
-	mongoose.model(name, welcomeSchema, name);
+export default Welcome;

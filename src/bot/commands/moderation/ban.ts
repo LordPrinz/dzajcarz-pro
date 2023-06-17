@@ -1,6 +1,6 @@
 import { User } from "discord.js";
 import { ICommand } from "wokcommands";
-import punishmentSchema from "../../models/punishment-schema";
+import punishmentSchema from "../../models/punishmentModel";
 
 const ban: ICommand = {
 	category: "Moderation",

@@ -1,5 +1,5 @@
 import { Client, TextChannel } from "discord.js";
-import welcomeSchema from "../models/welcome-schema";
+import welcomeSchema from "../models/welcomeModel";
 
 const welcomeData = {} as {
 	[key: string]: [TextChannel, string];

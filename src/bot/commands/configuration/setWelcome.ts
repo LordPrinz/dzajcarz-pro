@@ -1,5 +1,5 @@
 import { ICommand } from "wokcommands";
-import welcomeSchema from "../../models/welcome-schema";
+import welcomeSchema from "../../models/welcomeModel";
 
 const setWelcome = {
 	category: "Configuration",

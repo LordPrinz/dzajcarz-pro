@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import client from "../../bot";
-import dmChatSchema from "../../bot/models/dm-chat-schema";
+import dmChatSchema from "../../bot/models/dmChatModel";
 import catchAsync from "../../utils/server/catchAsync";
 import APIFeatures from "../../utils/server/APIFeatures";
 

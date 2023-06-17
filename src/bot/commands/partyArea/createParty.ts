@@ -1,6 +1,6 @@
 import { CategoryChannel, Guild, MessageEmbed, TextChannel } from "discord.js";
 import { ICommand } from "wokcommands";
-import partyAreaSchema from "../../models/party-area-schema";
+import partyAreaSchema from "../../models/partyAreaModel";
 import { getCommands } from "../../../utils/getData";
 
 const createChannelCategory = async (

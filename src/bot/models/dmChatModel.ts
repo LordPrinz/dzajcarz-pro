@@ -12,7 +12,7 @@ const AttachmentSchema = new Schema({
 	contentType: { type: String, required: true },
 });
 
-const DNSchema = new Schema(
+const DMSchema = new Schema(
 	{
 		_id: { type: String, required: true },
 		content: { type: String, required: false },
@@ -26,7 +26,7 @@ const DNSchema = new Schema(
 	}
 );
 
-DNSchema.set("toJSON", {
+DMSchema.set("toJSON", {
 	transform: function (doc, ret) {
 		ret.id = ret._id;
 		delete ret._id;
@@ -42,7 +42,7 @@ AttachmentSchema.set("toJSON", {
 	},
 });
 
-DNSchema.pre(/^find/, function (next) {
+DMSchema.pre(/^find/, function (next) {
 	this.populate({
 		path: "user",
 		select: "-__v",
@@ -51,8 +51,8 @@ DNSchema.pre(/^find/, function (next) {
 	next();
 });
 
-DNSchema.set("toObject", { virtuals: true });
+DMSchema.set("toObject", { virtuals: true });
 
-const name = "DMSchema";
+const DmChat = mongoose.model("DmChat", DMSchema);
 
-export default mongoose.models[name] || mongoose.model(name, DNSchema, name);
+export default DmChat;

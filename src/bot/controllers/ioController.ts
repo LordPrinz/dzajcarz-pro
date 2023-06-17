@@ -1,6 +1,6 @@
 import { Message, PartialMessage } from "discord.js";
 import { Server } from "socket.io";
-import dmChatSchema from "../models/dm-chat-schema";
+import dmChatSchema from "../models/dmChatModel";
 import {
 	checkUserExistence,
 	formAuthor,

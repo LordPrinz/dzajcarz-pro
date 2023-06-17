@@ -6,7 +6,7 @@ import {
 	GuildBasedChannel,
 	ReactionUserManager,
 } from "discord.js";
-import partyAreaSchema from "../models/party-area-schema";
+import partyAreaSchema from "../models/partyAreaModel";
 import PartyArea from "../../types/TPartyArea";
 import { getGuildVCs } from "../../utils/getData";
 

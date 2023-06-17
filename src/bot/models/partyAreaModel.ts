@@ -18,6 +18,6 @@ const partySchema = new Schema({
 	commandsChannel: nonReqString,
 });
 
-const name = "partyArea";
+const Party = mongoose.model("Party", partySchema);
 
-export default mongoose.models[name] || mongoose.model(name, partySchema, name);
+export default Party;
