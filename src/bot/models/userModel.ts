@@ -18,6 +18,11 @@ const userSchema = new mongoose.Schema(
 			type: String,
 			required: true,
 		},
+		isBot: {
+			type: Boolean,
+			required: false,
+			default: false,
+		},
 	},
 	{
 		versionKey: false,

@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 
 import userModel from "../../bot/models/userModel";
+import DMChat from "../../bot/models/DMChatModel";
 
 export const formMessage = (message: Message | PartialMessage) => {
 	const content = message?.content;
@@ -58,6 +59,7 @@ export const formAuthor = (message: Message | PartialMessage) => {
 		avatar: author?.displayAvatarURL(),
 		tag: author?.tag,
 		userName: author?.username,
+		isBot: author?.id === process.env.CLIENT_ID,
 	};
 
 	return user;
@@ -67,6 +69,13 @@ export const checkUserExistence = async (userId: string) => {
 	const result = await userModel.findById(userId);
 	return !!result;
 };
+
+export const checkDMChannelExistence = async (channelId: string) => {
+	const result = await DMChat.findById(channelId);
+	return !!result;
+};
+
+export const isBot = (id: string) => id === process.env.CLIENT_ID;
 
 export const isDmChannel = (message: Message | PartialMessage) =>
 	message.channel.type === "DM";

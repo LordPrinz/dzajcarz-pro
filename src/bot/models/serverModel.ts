@@ -10,6 +10,7 @@ const ServerSchema = new Schema(
 			},
 		],
 		users: [{ type: String, required: true, ref: "User" }],
+		name: { type: String, required: true },
 	},
 	{
 		versionKey: false,

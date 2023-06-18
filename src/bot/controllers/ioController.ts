@@ -1,19 +1,24 @@
 import { Message, PartialMessage } from "discord.js";
 import { Server } from "socket.io";
-import dmChatSchema from "../models/messageModel";
+import messageModel from "../models/messageModel";
 import {
+	checkDMChannelExistence,
 	checkUserExistence,
 	formAuthor,
 	formMessage,
+	isBot,
 	isDmChannel,
 } from "../../utils/commands/dmChatListener";
 import userSchema from "../models/userModel";
+import DMChat from "../models/DMChatModel";
 
 export const messageCreateHandler = async (
 	socket: Server | null,
 	message: Message
 ) => {
-	const doesUserExist = await checkUserExistence(message.author.id);
+	const authorId = message.author.id;
+
+	const doesUserExist = await checkUserExistence(authorId);
 
 	if (!doesUserExist) {
 		const author = formAuthor(message);
@@ -24,8 +29,14 @@ export const messageCreateHandler = async (
 		return;
 	}
 
+	const doesDMChannelExistYet = await checkDMChannelExistence(authorId);
+
+	if (!doesDMChannelExistYet && !isBot(authorId)) {
+		await DMChat.insertMany([{ _id: authorId }]);
+	}
+
 	const msg = formMessage(message);
-	await dmChatSchema.insertMany([msg]);
+	await messageModel.insertMany([msg]);
 
 	socket?.emit("messageCreate", msg);
 };
@@ -43,7 +54,7 @@ export const messageUpdateHandler = async (
 
 	const msg = formMessage(newMessage);
 
-	await dmChatSchema.findOneAndUpdate(
+	await messageModel.findOneAndUpdate(
 		{
 			_id: messageId,
 		},
@@ -71,7 +82,7 @@ export const messageDeleteHandler = async (
 
 	const messageId = message.id;
 
-	await dmChatSchema.deleteOne({
+	await messageModel.deleteOne({
 		_id: messageId,
 	});
 

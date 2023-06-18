@@ -20,7 +20,7 @@ const client = new DiscordJS.Client({
 
 const logger = new Logger("dzajcarz");
 
-client.on("ready", () => {
+client.on("ready", async () => {
 	new WOKCommands(client, {
 		commandsDir: path.join(__dirname, "commands"),
 		featuresDir: path.join(__dirname, "features"),
@@ -32,7 +32,6 @@ client.on("ready", () => {
 
 	logger.saveLog("Commands loaded", "info");
 });
-
 client.on("shardError", (error) => {
 	logger.saveLog(`${error.name} ${error.message}`, "error");
 });
