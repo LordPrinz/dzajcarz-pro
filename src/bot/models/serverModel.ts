@@ -3,12 +3,6 @@ import mongoose, { Schema } from "mongoose";
 const ServerSchema = new Schema(
 	{
 		_id: { type: String, required: true },
-		channels: [
-			{
-				type: String,
-				required: true,
-			},
-		],
 		users: [{ type: String, required: true, ref: "User" }],
 		name: { type: String, required: true },
 	},

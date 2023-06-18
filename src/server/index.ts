@@ -9,7 +9,7 @@ import AppError from "../utils/server/AppError";
 import globalErrorHandler from "./controllers/errorController";
 import userRouter from "./routes/userRouter";
 import messageRouter from "./routes/messageRouter";
-import chatRouter from "./routes/chatRouter";
+import channelRouter from "./routes/channelRouter";
 import serverRouter from "./routes/serverRouter";
 
 // Express Server
@@ -37,7 +37,7 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/v1/users", userRouter);
-app.use("/api/v1/chats", chatRouter);
+app.use("/api/v1/channels", channelRouter);
 app.use("/api/v1/messages", messageRouter);
 app.use("/api/v1/servers", serverRouter);
 
