@@ -30,16 +30,15 @@ const getAll = (Model: Model<any>) =>
 const getOne = (Model: Model<any>) =>
 	catchAsync(async (req: Request, res: Response, next: NextFunction) => {
 		const id = req.params.id;
+		const doc = await Model.findById(id);
 
-		if (!validateId(id)) {
+		if (!doc) {
 			return res.status(422).json({
 				status: "fail",
 				results: 0,
 				data: "Wrong ID",
 			});
 		}
-
-		const doc = await Model.findById(id);
 
 		res.status(200).json({
 			status: "success",
