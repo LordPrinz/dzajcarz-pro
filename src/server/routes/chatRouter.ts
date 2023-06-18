@@ -1,7 +1,5 @@
 import express from "express";
 
-import chatController from "../controllers/dmChatController";
-
 const router = express.Router();
 
 router.route("/me/:id");

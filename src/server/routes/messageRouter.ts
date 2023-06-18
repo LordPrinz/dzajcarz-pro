@@ -3,6 +3,7 @@ import msgController from "../controllers/messagesController";
 
 const router = express.Router();
 
-router.route("/").get(msgController.getAllMessages);
+router.route("/me").get(msgController.getAllDMMessages);
+router.route("/me/:chat").get(msgController.getDMMessages);
 
 export default router;

@@ -44,7 +44,7 @@ AttachmentSchema.set("toJSON", {
 
 MessageSchema.pre(/^find/, function (next) {
 	this.populate({
-		path: "user",
+		path: "author",
 		select: "-__v",
 	});
 
