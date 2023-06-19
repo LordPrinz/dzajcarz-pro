@@ -4,6 +4,7 @@ const ServerSchema = new Schema(
 	{
 		_id: { type: String, required: true },
 		users: [{ type: String, required: true, ref: "User" }],
+		image: { type: String, required: true },
 		name: { type: String, required: true },
 	},
 	{

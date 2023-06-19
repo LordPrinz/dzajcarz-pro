@@ -32,3 +32,8 @@ const dzajco = (client: Client) => {
 };
 
 export default dzajco;
+
+export const config = {
+	dbName: "DZAJCO",
+	displayName: "Dzajco",
+};
