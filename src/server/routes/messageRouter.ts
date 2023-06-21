@@ -11,6 +11,9 @@ router
 
 // TODO server message router
 
-router.route("/:serverId/:channelId").get(msgController.getAllMessages);
+router
+	.route("/:serverId/:channelId")
+	.get(msgController.getAllMessages)
+	.post(msgController.sendMessage);
 
 export default router;

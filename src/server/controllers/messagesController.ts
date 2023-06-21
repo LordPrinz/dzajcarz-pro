@@ -69,9 +69,33 @@ const sendDMMessage = () =>
 		});
 	});
 
+const sendMessage = () =>
+	catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+		const channel = client.channels.cache.find(
+			(ch) => ch.id === req.params.channelId
+		);
+
+		if (!channel) {
+			return res.status(422).json({
+				status: "fail",
+				results: 0,
+				data: "Wrong ID",
+			});
+		}
+
+		if (channel.isText()) {
+			await channel.send(req.body.message);
+		}
+
+		res.status(201).json({
+			data: "Created",
+		});
+	});
+
 export default {
 	getAllDMMessages: factory.getAll(MessageModel),
 	getDMMessages: factory.getAll(MessageModel),
 	getAllMessages: getServerMessages(),
 	sendDMMessage: sendDMMessage(),
+	sendMessage: sendMessage(),
 };
