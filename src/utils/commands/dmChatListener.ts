@@ -16,7 +16,7 @@ export const formMessage = (message: Message | PartialMessage) => {
 	const messageId = message.id;
 	const authorId = author?.id;
 	const opponent = (message.channel as DMChannel | PartialDMChannel).recipient;
-	const chat = authorId === process.env.CLIENT_ID ? opponent.id : authorId;
+	const chat = authorId === process.env.CLIENT_ID ? opponent?.id : authorId;
 
 	const transformedAttachments: {
 		name: string | null;

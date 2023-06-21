@@ -4,7 +4,10 @@ import msgController from "../controllers/messagesController";
 const router = express.Router();
 
 router.route("/me").get(msgController.getAllDMMessages);
-router.route("/me/:chat").get(msgController.getDMMessages);
+router
+	.route("/me/:chat")
+	.get(msgController.getDMMessages)
+	.post(msgController.sendDMMessage);
 
 // TODO server message router
 

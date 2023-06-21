@@ -1,6 +1,5 @@
 import { NextFunction, Request, Response } from "express";
 import catchAsync from "../../utils/server/catchAsync";
-import ServerModel from "../../bot/models/serverModel";
 import client from "../../bot";
 import { TextChannel } from "discord.js";
 

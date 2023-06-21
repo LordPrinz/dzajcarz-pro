@@ -4,8 +4,10 @@ import catchAsync from "../../utils/server/catchAsync";
 import factory from "./handleFactory";
 import client from "../../bot";
 import { TextChannel } from "discord.js";
+import { formAuthor, formMessage } from "../../utils/commands/dmChatListener";
+import { TMessage } from "../../types/TMessage";
 
-const getAllMessages = async () =>
+const getServerMessages = () =>
 	catchAsync(async (req: Request, res: Response, next: NextFunction) => {
 		const serverId = req.params.serverId;
 		const channelId = req.params.channelId;
@@ -32,13 +34,44 @@ const getAllMessages = async () =>
 			});
 		}
 
-		const fetchedMessages = await channel.messages.fetch({ limit: 5 });
-		console.log(fetchedMessages);
+		const fetchedMessages = await channel.messages.fetch({ limit: 10 });
 
-		res.end();
+		const response: TMessage[] = [];
+
+		fetchedMessages.forEach((msg) => {
+			// const author = formAuthor(msg);
+
+			const message = formMessage(msg);
+
+			console.log(message);
+
+			// (message as any).author = author;
+
+			response.push(message as any as TMessage);
+		});
+
+		res.status(200).json({
+			status: "success",
+			results: response.length,
+			data: response,
+		});
 	});
+
+const sendDMMessage = () =>
+	catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+		const message = req.body.message;
+		const userId = req.params.chat;
+
+		await client.users.send(userId, message);
+
+		res.status(201).json({
+			data: "Created",
+		});
+	});
+
 export default {
 	getAllDMMessages: factory.getAll(MessageModel),
 	getDMMessages: factory.getAll(MessageModel),
-	getAllMessages,
+	getAllMessages: getServerMessages(),
+	sendDMMessage: sendDMMessage(),
 };
