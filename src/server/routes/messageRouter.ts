@@ -9,8 +9,6 @@ router
 	.get(msgController.getDMMessages)
 	.post(msgController.sendDMMessage);
 
-// TODO server message router
-
 router
 	.route("/:serverId/:channelId")
 	.get(msgController.getAllMessages)

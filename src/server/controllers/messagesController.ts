@@ -6,6 +6,7 @@ import client from "../../bot";
 import { TextChannel } from "discord.js";
 import { formAuthor, formMessage } from "../../utils/commands/dmChatListener";
 import { TMessage } from "../../types/TMessage";
+import AppError from "../../utils/server/AppError";
 
 const getServerMessages = () =>
 	catchAsync(async (req: Request, res: Response, next: NextFunction) => {
@@ -34,18 +35,18 @@ const getServerMessages = () =>
 			});
 		}
 
-		const fetchedMessages = await channel.messages.fetch({ limit: 10 });
+		const { limit } = req.query;
+
+		const fetchedMessages = await channel.messages.fetch({
+			limit: limit ? +limit : 10,
+		});
+
+		// TODO: Add Pagination
 
 		const response: TMessage[] = [];
 
 		fetchedMessages.forEach((msg) => {
-			// const author = formAuthor(msg);
-
 			const message = formMessage(msg);
-
-			console.log(message);
-
-			// (message as any).author = author;
 
 			response.push(message as any as TMessage);
 		});
@@ -62,7 +63,12 @@ const sendDMMessage = () =>
 		const message = req.body.message;
 		const userId = req.params.chat;
 
-		await client.users.send(userId, message);
+		await client.users.send(userId, message).catch((err) => {
+			res.status(400).json({
+				data: "Couldn't send a message!",
+			});
+			throw new AppError("Couldn't send a message!", 400);
+		});
 
 		res.status(201).json({
 			data: "Created",
