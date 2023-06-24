@@ -3,7 +3,7 @@ import WOKCommands from "wokcommands";
 import path from "path";
 import Logger from "../utils/debug/Logger";
 import setupIOListener from "./ioListner";
-import { saveServer } from "../utils/botBoot";
+import { saveMember, saveServerData, saveServers } from "../utils/botBoot";
 
 const client = new DiscordJS.Client({
 	intents: [
@@ -41,8 +41,16 @@ client.on("error", (error) => {
 	logger.saveLog(`${error.name} ${error.message}`, "error");
 });
 
+client.on("guildCreate", (guild) => {
+	saveServerData(guild);
+});
+
+client.on("guildMemberAdd", (member) => {
+	saveMember(member);
+});
+
 setupIOListener(client); // WebSocket for server
 
-saveServer(client);
+saveServers(client);
 
 export default client;
