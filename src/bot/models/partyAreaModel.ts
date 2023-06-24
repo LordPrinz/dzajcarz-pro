@@ -10,13 +10,18 @@ const nonReqString = {
 	required: false,
 };
 
-const partySchema = new Schema({
-	guildId: reqString,
-	groupId: reqString,
-	splitChannelId: reqString,
-	newChannelName: reqString,
-	commandsChannel: nonReqString,
-});
+const partySchema = new Schema(
+	{
+		guildId: reqString,
+		groupId: reqString,
+		splitChannelId: reqString,
+		newChannelName: reqString,
+		commandsChannel: nonReqString,
+	},
+	{
+		versionKey: false,
+	}
+);
 
 const Party = mongoose.model("Party", partySchema);
 
