@@ -32,6 +32,8 @@ client.on("ready", async () => {
 	}).setDefaultPrefix("*");
 
 	logger.saveLog("Commands loaded", "info");
+
+	saveServers(client);
 });
 client.on("shardError", (error) => {
 	logger.saveLog(`${error.name} ${error.message}`, "error");
@@ -50,7 +52,5 @@ client.on("guildMemberAdd", (member) => {
 });
 
 setupIOListener(client); // WebSocket for server
-
-saveServers(client);
 
 export default client;

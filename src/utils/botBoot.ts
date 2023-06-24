@@ -5,11 +5,15 @@ import {
 	checkUserExistence,
 } from "./commands/dmChatListener";
 import User from "../bot/models/userModel";
+import Logger from "./debug/Logger";
+
+const logger = new Logger("dzajcarz");
 
 export const saveServers = async (client: Client) => {
 	for (const [guildId, guild] of client.guilds.cache) {
 		saveServerData(guild);
 	}
+	logger.saveLog("Servers have been saved to database", "info");
 };
 
 export const saveServerData = async (guild: Guild) => {
@@ -28,13 +32,16 @@ export const saveServerData = async (guild: Guild) => {
 		return;
 	}
 
-	const s = {
+	const server = {
 		_id: guild.id,
 		users,
+		image: guild.iconURL({ format: "png" }),
 		name: guild.name,
 	};
 
-	await serverModel.insertMany([s]);
+	await serverModel.insertMany([server]);
+
+	logger.saveLog(`Server ${guild.name} has been saved to database`, "info");
 };
 
 export const saveMember = async (member: GuildMember) => {
@@ -53,4 +60,6 @@ export const saveMember = async (member: GuildMember) => {
 	};
 
 	await User.insertMany([us]);
+
+	logger.saveLog(`User ${member.user.tag} has been saved to database`, "info");
 };
