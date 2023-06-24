@@ -4,7 +4,7 @@ import catchAsync from "../../utils/server/catchAsync";
 import factory from "./handleFactory";
 import client from "../../bot";
 import { TextChannel } from "discord.js";
-import { formAuthor, formMessage } from "../../utils/commands/dmChatListener";
+import { formMessage } from "../../utils/commands/dmChatListener";
 import { TMessage } from "../../types/TMessage";
 import AppError from "../../utils/server/AppError";
 
