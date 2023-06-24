@@ -7,6 +7,7 @@ import {
 
 import userModel from "../../bot/models/userModel";
 import DMChat from "../../bot/models/DMChatModel";
+import serverModel from "../../bot/models/serverModel";
 
 export const formMessage = (message: Message | PartialMessage) => {
 	const content = message?.content;
@@ -67,6 +68,11 @@ export const formAuthor = (message: Message | PartialMessage) => {
 
 export const checkUserExistence = async (userId: string) => {
 	const result = await userModel.findById(userId);
+	return !!result;
+};
+
+export const checkServerExistance = async (guildId: string) => {
+	const result = await serverModel.findById(guildId);
 	return !!result;
 };
 

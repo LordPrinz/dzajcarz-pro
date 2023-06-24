@@ -3,6 +3,7 @@ import WOKCommands from "wokcommands";
 import path from "path";
 import Logger from "../utils/debug/Logger";
 import setupIOListener from "./ioListner";
+import { saveServer } from "../utils/botBoot";
 
 const client = new DiscordJS.Client({
 	intents: [
@@ -41,5 +42,7 @@ client.on("error", (error) => {
 });
 
 setupIOListener(client); // WebSocket for server
+
+saveServer(client);
 
 export default client;
