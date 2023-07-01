@@ -3,13 +3,10 @@ import { Server } from "socket.io";
 import messageModel from "../models/messageModel";
 import {
 	checkDMChannelExistence,
-	checkUserExistence,
-	formAuthor,
 	formMessage,
 	isBot,
 	isDmChannel,
 } from "../../utils/commands/dmChatListener";
-import userSchema from "../models/userModel";
 import DMChat from "../models/DMChatModel";
 
 export const messageCreateHandler = async (
@@ -17,13 +14,6 @@ export const messageCreateHandler = async (
 	message: Message
 ) => {
 	const authorId = message.author.id;
-
-	const doesUserExist = await checkUserExistence(authorId);
-
-	if (!doesUserExist) {
-		const author = formAuthor(message);
-		await userSchema.insertMany([author]);
-	}
 
 	if (!isDmChannel(message)) {
 		return;
