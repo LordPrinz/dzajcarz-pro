@@ -11,6 +11,7 @@ import userRouter from "./routes/userRouter";
 import messageRouter from "./routes/messageRouter";
 import channelRouter from "./routes/channelRouter";
 import serverRouter from "./routes/serverRouter";
+import emojiRouter from "./routes/emojiRouter";
 
 // Express Server
 
@@ -40,6 +41,7 @@ app.use("/api/v1/users", userRouter);
 app.use("/api/v1/channels", channelRouter);
 app.use("/api/v1/messages", messageRouter);
 app.use("/api/v1/servers", serverRouter);
+app.use("/api/v1/emojis", emojiRouter);
 
 app.get("/favicon.ico", (req, res) => {
 	res.status(204).end();
