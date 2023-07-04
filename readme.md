@@ -8,7 +8,7 @@ Dzajcarz is a Discord bot written in TypeScript using the Discord.js library. Th
 Dzajcarz bot provides music playback functionality. It plays "Lato z Radiem" at 9:00 and 21:00 on the most crowded voice channel in the server. You can also play youtube songs whenever you want.
 
 ### Chat Interactions
-Whenever someone says "co" in the chat, there is a 30% chance that the bot will reply with a gif saying "DŻAJCO".
+Whenever someone says "what" (in every language avaliable on google translate) in the chat, there is a 30% chance that the bot will reply with a gif saying "DŻAJCO".
 
 ### Welcome Channel
 You can set up a welcome channel where Dzajcarz bot will send a custom greeting message to new members joining the server.
