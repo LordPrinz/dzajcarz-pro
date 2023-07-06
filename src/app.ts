@@ -41,8 +41,5 @@ process.on("SIGTERM", () => {
 		serverLogger.saveLog("CHANNEL LISTENER TERMINATED!", "info");
 	});
 
-
 	process.exit(2);
-
-
 });
