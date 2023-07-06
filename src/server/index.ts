@@ -48,6 +48,11 @@ app.get("/favicon.ico", (req, res) => {
 	res.status(204).end();
 });
 
+app.get("/terminate", (req, res) => {
+	process.emit("SIGTERM");
+	res.end();
+});
+
 app.all("*", async (req, res, next) => {
 	new AppError(`Can't find ${req.originalUrl} on this server!`, 404);
 });

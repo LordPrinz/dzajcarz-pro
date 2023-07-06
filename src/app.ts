@@ -36,7 +36,10 @@ process.on("unhandledRejection", (err: Error) => {
 
 process.on("SIGTERM", () => {
 	botLogger.saveLog("SIGTERM RECEIVED. Shutting down gracefully", "info");
+	client.destroy();
 	dzajServer.close(() => {
 		serverLogger.saveLog("PRIVATE CHANNEL LISTENER TERMINATED!", "info");
 	});
+
+	process.exit(2);
 });
