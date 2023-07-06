@@ -38,12 +38,11 @@ process.on("SIGTERM", () => {
 	botLogger.saveLog("SIGTERM RECEIVED. Shutting down gracefully", "info");
 	client.destroy();
 	dzajServer.close(() => {
-		serverLogger.saveLog("PRIVATE CHANNEL LISTENER TERMINATED!", "info");
+		serverLogger.saveLog("CHANNEL LISTENER TERMINATED!", "info");
 	});
 
 
-	setTimeout(() => {
-		process.exit(2);
-	}, 10000)
+	process.exit(2);
+
 
 });
