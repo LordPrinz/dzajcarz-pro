@@ -41,5 +41,9 @@ process.on("SIGTERM", () => {
 		serverLogger.saveLog("PRIVATE CHANNEL LISTENER TERMINATED!", "info");
 	});
 
-	process.exit(2);
+
+	setTimeout(() => {
+		process.exit(2);
+	}, 10000)
+
 });

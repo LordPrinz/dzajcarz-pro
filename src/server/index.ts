@@ -48,9 +48,11 @@ app.get("/favicon.ico", (req, res) => {
 	res.status(204).end();
 });
 
-app.get("/terminate", (req, res) => {
+app.delete("/terminate", (req, res) => {
+	res.status(202).json({
+		message: "App will be terminated in 10 seconds."
+	})
 	process.emit("SIGTERM");
-	res.end();
 });
 
 app.all("*", async (req, res, next) => {
