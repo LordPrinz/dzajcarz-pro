@@ -1,6 +1,4 @@
 node_modules/
 .env
-dzajcarz.sh
-error.log
-riot.txt
 logs.log
+boot.sh
