@@ -85,6 +85,29 @@ const actionTriggerer = (client: Client) => {
 			}
 
 			if (action.isOnline) {
+				const channelsLength = action.channelId.length;
+				const filteredChannels = action.channelId.filter((channelId) =>
+					channelId.startsWith("-")
+				);
+
+				if (channelsLength === filteredChannels.length) {
+					action.time.map((time) => {
+						if (!time) {
+							return;
+						}
+
+						planAction(decodeScheduledTime(time), () => {
+							actions.playOnlineMostPopularEveryExceptChannel({
+								song: action.song!,
+								exceptChannels: filteredChannels.map((channelId) =>
+									channelId.replace("-", "")
+								),
+							});
+						});
+					});
+					return;
+				}
+
 				action.time.map((time) => {
 					if (!time) {
 						return;
@@ -95,6 +118,10 @@ const actionTriggerer = (client: Client) => {
 					}
 
 					action.channelId.map((channelId) => {
+						if (channelId.startsWith("-")) {
+							return;
+						}
+
 						planAction(decodeScheduledTime(time), () => {
 							actions.playOnlineOnCertainChannel({
 								song: action.song!,
@@ -107,11 +134,40 @@ const actionTriggerer = (client: Client) => {
 				});
 				return;
 			}
-			action.channelId.map((channelId) => {
+
+			const channelsLength = action.channelId.length;
+			const filteredChannels = action.channelId.filter((channelId) =>
+				channelId.startsWith("-")
+			);
+
+			if (channelsLength === filteredChannels.length) {
 				action.time.map((time) => {
 					if (!time) {
 						return;
 					}
+
+					planAction(decodeScheduledTime(time), () => {
+						actions.playOfflineMostPopularEveryExceptChannel({
+							song: action.song!,
+							exceptChannels: filteredChannels.map((channelId) =>
+								channelId.replace("-", "")
+							),
+						});
+					});
+				});
+				return;
+			}
+
+			action.channelId.map((channelId) => {
+				if (channelId.startsWith("-")) {
+					return;
+				}
+
+				action.time.map((time) => {
+					if (!time) {
+						return;
+					}
+
 					planAction(decodeScheduledTime(time), () => {
 						actions.playOfflineOnCertainChannel({
 							song: action.song!,

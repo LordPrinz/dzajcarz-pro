@@ -1,29 +1,38 @@
-[{
-        "song": "lato_z_radiem",
-        "time": ["09:00", "21:00"]
-    },
-    {
-        "message": "Bonżur",
-        "channelId": [
-            "880203277562687539",
-            "928638782952079394",
-            "951550553341689927"
-        ],
-        "time": ["19:00"]
-    },
-    {
-        "message": "Szczęśliwego nowego dnia!!!",
-        "userId": ["257589107453198337", "355024324840783883"],
-        "time": ["21:10"]
-    },
-    {
-        "message": "Szczesliwego nowego dnia, nie zabijaj sie :))",
-        "userId": ["633281386643587092"],
-        "time": ["01:00"]
-    },
-    {
-        "message": "Gratulacje użytkowniku @undefined! Twoje urodziny będą za undefined dni!",
-        "userId": ["473430118535004160", "257589107453198337"],
-        "time": ["22:57"]
-    }
+[
+	{
+		"song": "lato_z_radiem",
+		"time": ["09:00", "21:00"],
+		"channelId": [
+			"-693159343985524846",
+			"-701480231781007430",
+			"-703245798212763709",
+			"-701480903104528419",
+			"-754311850744610846",
+			"-772049318931595264"
+		]
+	},
+	{
+		"message": "Bonżur",
+		"channelId": [
+			"880203277562687539",
+			"928638782952079394",
+			"951550553341689927"
+		],
+		"time": ["19:00"]
+	},
+	{
+		"message": "Szczęśliwego nowego dnia!!!",
+		"userId": ["257589107453198337", "355024324840783883"],
+		"time": ["21:10"]
+	},
+	{
+		"message": "Szczesliwego nowego dnia, nie zabijaj sie :))",
+		"userId": ["633281386643587092"],
+		"time": ["01:00"]
+	},
+	{
+		"message": "Gratulacje użytkowniku @undefined! Twoje urodziny będą za undefined dni!",
+		"userId": ["473430118535004160", "257589107453198337"],
+		"time": ["22:57"]
+	}
 ]

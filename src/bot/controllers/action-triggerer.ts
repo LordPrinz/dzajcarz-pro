@@ -59,8 +59,7 @@ const playOffline = async (trackName: string, guild: Guild) => {
 	});
 
 	const found = trackNames.find(
-		(track) =>
-			track.replace(/-/g, " ").toLowerCase() === trackName.toLowerCase()
+		(track) => track.replace(/-/g, " ").toLowerCase() === trackName.toLowerCase()
 	);
 
 	if (!found) {
@@ -155,9 +154,7 @@ export default class ActionTriggererFeatures {
 		}
 
 		user?.send(args.message).catch((error) => {
-			console.log(
-				`${user.user.username} blocked me or something went wrong! :(`
-			);
+			console.log(`${user.user.username} blocked me or something went wrong! :(`);
 		});
 	}
 
@@ -312,5 +309,71 @@ export default class ActionTriggererFeatures {
 		}
 
 		playOnline({ song: args.song, guild, channel });
+	}
+
+	async playOfflineMostPopularEveryExceptChannel(args: {
+		song: string;
+		exceptChannels: string[];
+	}) {
+		const guilds = this.client.guilds.cache.map((guild) => guild);
+
+		guilds.map((guild) => {
+			const VCs = getGuildVCs(guild);
+			if (!VCs.length) {
+				return;
+			}
+			let channel = getMostPopulatedVC(VCs);
+
+			if (args.exceptChannels.includes(channel.id)) {
+				for (let i = 0; i < VCs.length; i++) {
+					if (!args.exceptChannels.includes(VCs[i].id)) {
+						channel = VCs[i];
+						break;
+					}
+				}
+			}
+
+			joinVoiceChannel({
+				channelId: channel.id,
+				guildId: channel.guild.id,
+				adapterCreator: channel?.guild
+					.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+			});
+
+			playOffline(args.song, channel.guild);
+		});
+	}
+
+	async playOnlineMostPopularEveryExceptChannel(args: {
+		song: string;
+		exceptChannels: string[];
+	}) {
+		const guilds = this.client.guilds.cache.map((guild) => guild);
+
+		guilds.map((guild) => {
+			const VCs = getGuildVCs(guild);
+			if (!VCs.length) {
+				return;
+			}
+			let channel = getMostPopulatedVC(VCs);
+
+			if (args.exceptChannels.includes(channel.id)) {
+				for (let i = 0; i < VCs.length; i++) {
+					if (!args.exceptChannels.includes(VCs[i].id)) {
+						channel = VCs[i];
+						break;
+					}
+				}
+			}
+
+			joinVoiceChannel({
+				channelId: channel.id,
+				guildId: channel.guild.id,
+				adapterCreator: channel?.guild
+					.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+			});
+
+			playOnline({ song: args.song, guild: channel.guild, channel });
+		});
 	}
 }

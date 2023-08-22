@@ -50,9 +50,11 @@ app.get("/favicon.ico", (req, res) => {
 
 app.delete("/terminate", (req, res) => {
 	res.status(202).json({
-		message: "App will be terminated in 10 seconds."
-	})
-	process.emit("SIGTERM");
+		message: "App will be terminated in 10 seconds.",
+	});
+	setTimeout(() => {
+		process.emit("SIGTERM");
+	}, 1000 * 10);
 });
 
 app.all("*", async (req, res, next) => {
