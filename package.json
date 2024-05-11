@@ -1,0 +1,26 @@
+{
+	"dependencies": {
+		"discord.js": "^14.15.2",
+		"dotenv": "^16.4.5",
+		"wokcommands": "^2.1.9"
+	},
+	"devDependencies": {
+		"typescript": "^5.4.5"
+	},
+	"name": "dzajcarz-2",
+	"version": "3.0.0",
+	"main": "src/main.ts",
+	"scripts": {
+		"start": "ts-node src/app.ts",
+		"start:prod": "NODE_ENV=production ts-node src/app.ts",
+		"dev": "nodemon src/app.ts",
+		"test": "jest"
+	},
+	"keywords": [
+		"bot",
+		"discord"
+	],
+	"author": "LordPrinz",
+	"license": "ISC",
+	"description": "Not popular but powerful discord bot."
+}
