@@ -1,11 +1,25 @@
 import { Client } from "discord.js";
 import { intents, partials } from "./conf/bot";
+import path from "path";
 
-export const clinet = new Client({
+import WOK from "wokcommands";
+
+export const client = new Client({
 	intents,
 	partials,
 });
 
-clinet.on("ready", () => {
-	console.log("Bot is ready");
+client.on("ready", () => {
+	new WOK({
+		client,
+		commandsDir: path.join(__dirname, "commands"),
+		events: {
+			dir: path.join(__dirname, "events"),
+		},
+		validations: {
+			runtime: path.join(__dirname, "validations", "runtime"),
+			syntax: path.join(__dirname, "validations", "syntax"),
+		},
+		botOwners: ["520676533279522817"],
+	});
 });

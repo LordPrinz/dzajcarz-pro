@@ -1,8 +1,9 @@
 import { config } from "dotenv";
-import { clinet as botClient } from "./bot";
-const { NODE_ENV } = process.env;
+import { client as botClient } from "./bot";
 
 config();
+
+const { NODE_ENV } = process.env;
 
 if (NODE_ENV === "development") {
 	botClient.login(process.env.DEV_TOKEN);
