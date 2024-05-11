@@ -4,6 +4,7 @@ export const intents = [
 	GatewayIntentBits.Guilds,
 	GatewayIntentBits.GuildMessages,
 	GatewayIntentBits.GuildMessageReactions,
+	GatewayIntentBits.MessageContent,
 	GatewayIntentBits.GuildVoiceStates,
 	GatewayIntentBits.GuildMembers,
 	GatewayIntentBits.DirectMessages,

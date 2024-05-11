@@ -1,8 +1,9 @@
 import { Client } from "discord.js";
-import { intents, partials } from "./conf/bot";
-import path from "path";
 
 import WOK from "wokcommands";
+import path from "path";
+
+import { intents, partials } from "@/conf/bot";
 
 export const client = new Client({
 	intents,
@@ -20,6 +21,8 @@ client.on("ready", () => {
 			runtime: path.join(__dirname, "validations", "runtime"),
 			syntax: path.join(__dirname, "validations", "syntax"),
 		},
+		featuresDir: path.join(__dirname, "features"),
 		botOwners: ["520676533279522817"],
+		testServers: ["928638782952079391"],
 	});
 });

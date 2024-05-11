@@ -1,5 +1,8 @@
+import { configCustomAlias } from "./conf/customAlias";
+configCustomAlias();
+
 import { config } from "dotenv";
-import { client as botClient } from "./bot";
+import { client as botClient } from "@/app";
 
 config();
 
