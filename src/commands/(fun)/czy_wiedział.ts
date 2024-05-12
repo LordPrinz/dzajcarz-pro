@@ -1,5 +1,5 @@
 import { getRandom } from "@/utils";
-import { CommandObject, CommandType } from "wokcommands";
+import { CommandType, type CommandObject } from "wokcommands";
 
 export default {
 	description: "Answers the damn old question",

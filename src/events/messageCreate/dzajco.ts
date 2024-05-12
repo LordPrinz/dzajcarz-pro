@@ -1,6 +1,6 @@
 import { dzajcoGifUrl as gifURL, dzajcoRegex as regex } from "@/conf/bot";
 import { getRandom } from "@/utils";
-import { Message } from "discord.js";
+import { type Message } from "discord.js";
 
 export default (message: Message) => {
 	const { content } = message;

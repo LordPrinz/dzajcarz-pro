@@ -1,4 +1,4 @@
-import { CommandObject, CommandType } from "wokcommands";
+import { CommandType, type CommandObject } from "wokcommands";
 
 export default {
 	description: "Replies with pong",
