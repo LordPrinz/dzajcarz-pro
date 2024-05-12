@@ -5,3 +5,6 @@ export const isCategoryChannel = (channel: Channel) =>
 
 export const isVoiceChannel = (channel: Channel) =>
 	channel.type === ChannelType.GuildVoice;
+
+export const isTextChannel = (channel: Channel) =>
+	channel.type === ChannelType.GuildText;
