@@ -1,16 +1,19 @@
-import { isTextChannel } from "@/validators/channel";
+import { CommandType, type CommandObject } from "wokcommands";
 import {
 	ApplicationCommandOptionType,
-	Channel,
 	PermissionFlagsBits,
+	type Channel,
 } from "discord.js";
-import { CommandType, type CommandObject } from "wokcommands";
+
+import { updateWelcomeChannel } from "@/db/welcomeChannel";
+import { isTextChannel } from "@/validators/channel";
 
 export default {
 	description: "Sets the welcome channel for the server.",
 	type: CommandType.BOTH,
 
 	permissions: [PermissionFlagsBits.Administrator],
+	testOnly: true,
 	minArgs: 2,
 	expectedArgs: "<channel> <message>",
 	guildOnly: true,
@@ -30,7 +33,7 @@ export default {
 		},
 	],
 
-	callback: async ({ interaction, message }) => {
+	callback: async ({ interaction, message, guild }) => {
 		const targetChannel = message
 			? message.mentions.channels.first()
 			: interaction.options.getChannel("channel");
@@ -44,6 +47,20 @@ export default {
 		const messageContent = message
 			? message.content.split(" ").slice(2).join(" ")
 			: interaction.options.getString("message");
+
+		const dataToSave = {
+			id: guild.id,
+			channelId: targetChannel.id,
+			content: messageContent,
+		};
+
+		const res = await updateWelcomeChannel(dataToSave);
+
+		if (!res) {
+			return {
+				content: "Failed to set welcome channel",
+			};
+		}
 
 		return {
 			content: "Welcome channel set!",

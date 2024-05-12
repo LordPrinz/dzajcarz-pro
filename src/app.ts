@@ -13,7 +13,7 @@ export const client = new Client({
 client.on("ready", () => {
 	new WOK({
 		client,
-		defaultPrefix: "!",
+		defaultPrefix: "$",
 		mongoUri: process.env.MONGO_URI,
 		commandsDir: path.join(__dirname, "commands"),
 		events: {
