@@ -12,3 +12,8 @@ export const intents = [
 ];
 
 export const partials = [Partials.Message, Partials.Channel, Partials.Reaction];
+
+export const dzajcoRegex =
+	/\b[cC][oO]\b|\b[cC][oO]\??\b|\b[cC][oO]\s?\b|\b[cC][oO]{2,}\b|\b[cC][oO]o\s+aaa\b/m;
+
+export const dzajcoGifUrl = "https://tenor.com/view/jajco-gif-23924347";

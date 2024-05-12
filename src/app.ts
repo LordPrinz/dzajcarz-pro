@@ -13,6 +13,8 @@ export const client = new Client({
 client.on("ready", () => {
 	new WOK({
 		client,
+		defaultPrefix: "!",
+		mongoUri: process.env.MONGO_URI,
 		commandsDir: path.join(__dirname, "commands"),
 		events: {
 			dir: path.join(__dirname, "events"),
@@ -25,4 +27,6 @@ client.on("ready", () => {
 		botOwners: ["520676533279522817"],
 		testServers: ["928638782952079391"],
 	});
+
+	console.log(`Logged in as ${client.user?.tag}!`);
 });
