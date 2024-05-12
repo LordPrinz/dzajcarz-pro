@@ -2,7 +2,7 @@
 	"compilerOptions": {
 		"baseUrl": "./",
 		"paths": {
-			"@/validators/*": ["src/utils/validators/*"],
+			"@/validators/*": ["src/validators/*"],
 			"@/*": ["src/*"]
 		},
 		"module": "commonjs",

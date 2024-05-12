@@ -19,10 +19,6 @@ client.on("ready", () => {
 		events: {
 			dir: path.join(__dirname, "events"),
 		},
-		validations: {
-			runtime: path.join(__dirname, "validations", "runtime"),
-			syntax: path.join(__dirname, "validations", "syntax"),
-		},
 		featuresDir: path.join(__dirname, "features"),
 		botOwners: ["520676533279522817"],
 		testServers: ["928638782952079391"],
