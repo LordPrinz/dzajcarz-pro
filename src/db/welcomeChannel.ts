@@ -1,17 +1,25 @@
 import WelcomeChannelModel, {
-	type WelcomeChannel,
+	type WelcomeChannelData,
 } from "@/models/welcomeChannelModel";
 
-export const updateWelcomeChannel = async (data: WelcomeChannel) => {
-	const response = await WelcomeChannelModel.findOneAndUpdate(
+export const getOneByIDWelcomeChannel = async (id: string) =>
+	await WelcomeChannelModel.findById(id);
+
+export const updateWelcomeChannel = async ({
+	id,
+	...data
+}: WelcomeChannelData) => {
+	return await WelcomeChannelModel.findOneAndUpdate(
 		{
-			id: data.id,
+			_id: id,
 		},
 		data,
 		{
 			upsert: true,
+			new: true,
 		}
 	);
-
-	return response;
 };
+
+export const deleteWelcomeChannel = async (id: string) =>
+	await WelcomeChannelModel.findByIdAndDelete(id);

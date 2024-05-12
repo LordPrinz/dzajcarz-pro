@@ -1,14 +1,16 @@
 import mongoose, { Schema } from "mongoose";
 
-export type WelcomeChannel = {
-	id: string;
+type WelcomeChannel = {
+	_id: string;
 	channelId: string;
 	content: string;
 };
 
+export type WelcomeChannelData = Omit<WelcomeChannel, "_id"> & { id: string };
+
 const welcomeChannelSchema = new Schema<WelcomeChannel>(
 	{
-		id: {
+		_id: {
 			type: String,
 			required: true,
 		},

@@ -11,9 +11,7 @@ import { isTextChannel } from "@/validators/channel";
 export default {
 	description: "Sets the welcome channel for the server.",
 	type: CommandType.BOTH,
-
 	permissions: [PermissionFlagsBits.Administrator],
-	testOnly: true,
 	minArgs: 2,
 	expectedArgs: "<channel> <message>",
 	guildOnly: true,
