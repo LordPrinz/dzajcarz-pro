@@ -6,7 +6,7 @@ export default {
 	type: CommandType.BOTH,
 
 	callback: async ({ interaction, message }) => {
-		const randomNumber = getRandom(0, 2);
+		const randomNumber = getRandom(0, 1);
 
 		let replyMessage = "";
 

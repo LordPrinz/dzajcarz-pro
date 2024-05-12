@@ -5,9 +5,7 @@ import { deleteWelcomeChannel } from "@/db/welcomeChannel";
 export default {
 	description: "Unsets the welcome channel for the server.",
 	type: CommandType.BOTH,
-
 	permissions: [PermissionFlagsBits.Administrator],
-	testOnly: true,
 	guildOnly: true,
 
 	callback: async ({ guild }) => {
