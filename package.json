@@ -10,7 +10,7 @@
 		"@types/node": "^20.12.11",
 		"typescript": "^5.4.5"
 	},
-	"name": "dzajcarz-2",
+	"name": "dzajcarz",
 	"version": "3.0.0",
 	"main": "src/main.ts",
 	"scripts": {
