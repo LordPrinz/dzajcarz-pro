@@ -1,53 +1,85 @@
-import { ActionRow, TextInput } from "@/components";
-import {
-	ActionRowBuilder,
-	Message,
-	ModalBuilder,
-	PermissionFlagsBits,
-	TextInputBuilder,
-	TextInputStyle,
-} from "discord.js";
+import { ActionRow, Modal, TextInput } from "@/components";
+import { getTextInputValue } from "@/components/TextInput";
+import { PermissionFlagsBits, TextInputStyle } from "discord.js";
 import { CommandType, type CommandObject } from "wokcommands";
 
 export default {
-	description: "Replies with pong",
+	description: "Creates a party area category and channels.",
 	type: CommandType.BOTH,
 	permissions: [PermissionFlagsBits.Administrator],
 	guildOnly: true,
 	testOnly: true,
 
-	callback: async ({ message, channel, interaction }) => {
-		const customModalId = "interaction--create_party_area";
-
-		const filter = (interaction: any) => interaction.customId === customModalId;
-
-		const nameInput = TextInput({
-			customId: "name",
-			label: "Channel name",
-			style: TextInputStyle.Short,
+	callback: async ({ interaction }) => {
+		const categoryNameInput = TextInput({
+			customId: "categoryName",
+			label: "Party area name",
+			style: "short",
 			required: true,
-			minLength: 2,
+			minLength: 1,
 			maxLength: 50,
 		});
 
-		const modal = new ModalBuilder({
-			customId: customModalId,
-			title: "Create a party area",
+		const splitChannelNameInput = TextInput({
+			customId: "splitChannelName",
+			label: "Split channel name",
+			style: "short",
+			required: true,
+			minLength: 1,
+			maxLength: 50,
 		});
 
-		// Ensure the ActionRowBuilder is correctly typed
-		const actionRow = ActionRow(nameInput);
+		const newChannelNameInput = TextInput({
+			customId: "newChannelName",
+			label:
+				"New channel name (use @ to mention the user who created the channel)",
+			style: "short",
+			required: true,
+			minLength: 1,
+			maxLength: 50,
+		});
 
-		modal.addComponents(actionRow);
+		const commandChannelNameInput = TextInput({
+			customId: "commandChannelName",
+			label:
+				"Command channel name (channel where users can use commands and is cleared every 20 seconds)",
+			style: "short",
+			required: false,
+			minLength: 1,
+			maxLength: 50,
+		});
+
+		const actionRow = ActionRow(
+			categoryNameInput,
+			splitChannelNameInput,
+			newChannelNameInput,
+			commandChannelNameInput
+		);
+
+		const { modal, filter } = Modal({
+			title: "Create a party area",
+			components: [actionRow],
+		});
 
 		await interaction.showModal(modal);
 
-		interaction
-			.awaitModalSubmit({ filter, time: 30000 })
-			.then((modalInteraction) => {
-				const name = modalInteraction.fields.getTextInputValue("name");
+		const modalInteraction = await interaction.awaitModalSubmit({
+			filter,
+			time: 30_000,
+		});
 
-				modalInteraction.reply("Party area created!");
-			});
+		const name = getTextInputValue(modalInteraction, "name");
+		const splitChannelName = getTextInputValue(
+			modalInteraction,
+			"splitChannelName"
+		);
+		const newChannelName = getTextInputValue(modalInteraction, "newChannelName");
+		const commandChannelName = getTextInputValue(
+			modalInteraction,
+			"commandChannelName"
+		);
+
+		console.log(name, splitChannelName, newChannelName, commandChannelName);
+		modalInteraction.reply("Party area created!");
 	},
 } as CommandObject;

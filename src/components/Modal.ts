@@ -23,5 +23,5 @@ export const Modal = ({ title, components, id }: Props) => {
 	const filter = (interaction: ModalSubmitInteraction) =>
 		interaction.customId === customId;
 
-	return { Modal: modal, filter };
+	return { modal, filter };
 };
