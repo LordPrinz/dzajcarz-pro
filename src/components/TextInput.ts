@@ -22,4 +22,12 @@ export const TextInput = ({ style, ...props }: Props) => {
 export const getTextInputValue = (
 	interaction: ModalSubmitInteraction,
 	customId: string
-) => interaction.fields.getTextInputValue(customId);
+) => {
+	let value = null;
+
+	try {
+		value = interaction.fields.getTextInputValue(customId);
+	} catch {}
+
+	return value;
+};
