@@ -8,7 +8,6 @@ export default {
 	type: CommandType.BOTH,
 	permissions: [PermissionFlagsBits.Administrator],
 	guildOnly: true,
-	testOnly: true,
 
 	callback: async ({ interaction }) => {
 		const categoryNameInput = TextInput({
