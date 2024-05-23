@@ -70,7 +70,7 @@ export default {
 		const modalInteraction = await interaction
 			.awaitModalSubmit({
 				filter,
-				time: 3000,
+				time: 1000 * 60 * 3,
 			})
 			.catch(() => null);
 
