@@ -18,3 +18,10 @@ import {
 } from "./ChannelSelectMenu";
 
 export { ChannelSelectMenu, createChannelSelectMenuCollector };
+
+import {
+	UserSelectMenu,
+	createUserSelectMenuCollector,
+} from "./UserSelectMenu";
+
+export { UserSelectMenu, createUserSelectMenuCollector };

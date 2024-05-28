@@ -14,6 +14,7 @@ export default {
 	type: CommandType.BOTH,
 	testOnly: true,
 	ownerOnly: true,
+	guildOnly: true,
 
 	callback: async ({ interaction }) => {
 		// # String Select Menu
