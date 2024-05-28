@@ -1,7 +1,9 @@
 import { ActionRow } from "@/components";
 import {
+	ChannelSelectMenu,
 	RoleSelectMenu,
 	StringSelectMenu,
+	createChannelSelectMenuCollector,
 	createRoleSelectMenuCollector,
 	createStringSelectMenuCollector,
 } from "@/components/select";
@@ -14,6 +16,8 @@ export default {
 	ownerOnly: true,
 
 	callback: async ({ interaction }) => {
+		// # String Select Menu
+
 		// const selectMenu = StringSelectMenu({
 		// 	placeholder: "Select an option",
 		// 	interaction,
@@ -48,18 +52,44 @@ export default {
 		// 	i.reply(`You selected ${i.values.join(", ")}`);
 		// });
 
-		const roleSelect = RoleSelectMenu({
-			placeholder: "Select a role",
+		// # Role Select Menu
+
+		// 	const roleSelect = RoleSelectMenu({
+		// 		placeholder: "Select a role",
+		// 		interaction,
+		// 	});
+
+		// 	const actionRow = ActionRow(roleSelect);
+
+		// 	const reply = await interaction.reply({
+		// 		components: [actionRow],
+		// 	});
+
+		// 	const collector = createRoleSelectMenuCollector({
+		// 		reply,
+		// 		interaction,
+		// 	});
+
+		// 	collector.on("collect", (i) => {
+		// 		if (!i.values.length) return;
+
+		// 		i.reply(`You selected ${i.values.join(", ")}`);
+		// 	});
+
+		// # Channel Select Menu
+
+		const channelSelect = ChannelSelectMenu({
+			placeholder: "Select a channel",
 			interaction,
 		});
 
-		const actionRow = ActionRow(roleSelect);
+		const actionRow = ActionRow(channelSelect);
 
 		const reply = await interaction.reply({
 			components: [actionRow],
 		});
 
-		const collector = createRoleSelectMenuCollector({
+		const collector = createChannelSelectMenuCollector({
 			reply,
 			interaction,
 		});
