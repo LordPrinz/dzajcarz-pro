@@ -1,6 +1,8 @@
 import { ActionRow } from "@/components";
 import {
+	RoleSelectMenu,
 	StringSelectMenu,
+	createRoleSelectMenuCollector,
 	createStringSelectMenuCollector,
 } from "@/components/select";
 import { CommandType, type CommandObject } from "wokcommands";
@@ -12,32 +14,54 @@ export default {
 	ownerOnly: true,
 
 	callback: async ({ interaction }) => {
-		const selectMenu = StringSelectMenu({
-			placeholder: "Select an option",
-			interaction,
+		// const selectMenu = StringSelectMenu({
+		// 	placeholder: "Select an option",
+		// 	interaction,
 
-			options: [
-				{
-					label: "Option 1",
-					value: "option_1",
-				},
-				{
-					label: "Option 2",
-					value: "option_2",
-				},
-			],
+		// 	options: [
+		// 		{
+		// 			label: "Option 1",
+		// 			value: "option_1",
+		// 		},
+		// 		{
+		// 			label: "Option 2",
+		// 			value: "option_2",
+		// 		},
+		// 	],
+		// });
+
+		// const actionRow = ActionRow(selectMenu);
+
+		// const reply = await interaction.reply({
+		// 	components: [actionRow],
+		// });
+
+		// const collector = createStringSelectMenuCollector({
+		// 	reply,
+		// 	interaction,
+		// 	time: 60000,
+		// });
+
+		// collector.on("collect", (i) => {
+		// 	if (!i.values.length) return;
+
+		// 	i.reply(`You selected ${i.values.join(", ")}`);
+		// });
+
+		const roleSelect = RoleSelectMenu({
+			placeholder: "Select a role",
+			interaction,
 		});
 
-		const actionRow = ActionRow(selectMenu);
+		const actionRow = ActionRow(roleSelect);
 
 		const reply = await interaction.reply({
 			components: [actionRow],
 		});
 
-		const collector = createStringSelectMenuCollector({
+		const collector = createRoleSelectMenuCollector({
 			reply,
 			interaction,
-			time: 60000,
 		});
 
 		collector.on("collect", (i) => {

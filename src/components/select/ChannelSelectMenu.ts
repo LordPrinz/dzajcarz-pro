@@ -1,11 +1,11 @@
 import {
-	RoleSelectMenuBuilder,
+	ChannelSelectMenuBuilder,
 	ComponentType,
 	type Interaction,
 	type BaseSelectMenuComponentData,
 	type InteractionResponse,
 	type MessageComponentCollectorOptions,
-	type RoleSelectMenuInteraction,
+	type ChannelSelectMenuInteraction,
 } from "discord.js";
 
 type Props = Omit<
@@ -18,10 +18,10 @@ type Props = Omit<
 	"type"
 >;
 
-export const RoleSelectMenu = ({ interaction, ...props }: Props) =>
-	new RoleSelectMenuBuilder({
+export const ChannelSelectMenu = ({ interaction, ...props }: Props) =>
+	new ChannelSelectMenuBuilder({
 		customId: interaction.id,
-		type: ComponentType.RoleSelect,
+		type: ComponentType.ChannelSelect,
 		...props,
 	});
 
@@ -29,18 +29,18 @@ type Params = {
 	reply: InteractionResponse<boolean>;
 	interaction: Interaction;
 } & Omit<
-	MessageComponentCollectorOptions<RoleSelectMenuInteraction>,
+	MessageComponentCollectorOptions<ChannelSelectMenuInteraction>,
 	"componentType"
 >;
 
-export const createRoleSelectMenuCollector = ({
+export const createChannelSelectMenuCollector = ({
 	reply,
 	interaction,
 	time,
 	...props
 }: Params) =>
 	reply.createMessageComponentCollector({
-		componentType: ComponentType.RoleSelect,
+		componentType: ComponentType.ChannelSelect,
 		filter: (i) =>
 			i.customId === interaction.id && i.user.id === interaction.user.id,
 
