@@ -1,5 +1,8 @@
 import { ActionRow } from "@/components";
-import { StringSelectMenu } from "@/components/select";
+import {
+	StringSelectMenu,
+	createStringSelectMenuCollector,
+} from "@/components/select";
 import { CommandType, type CommandObject } from "wokcommands";
 
 export default {
@@ -11,7 +14,8 @@ export default {
 	callback: async ({ interaction }) => {
 		const selectMenu = StringSelectMenu({
 			placeholder: "Select an option",
-			id: "test_select",
+			interaction,
+
 			options: [
 				{
 					label: "Option 1",
@@ -26,12 +30,20 @@ export default {
 
 		const actionRow = ActionRow(selectMenu);
 
-		const res = await interaction.reply({
+		const reply = await interaction.reply({
 			components: [actionRow],
 		});
 
-		const collector = res.createMessageComponentCollector({
-			componentType: CommandType.StringSelect,
+		const collector = createStringSelectMenuCollector({
+			reply,
+			interaction,
+			time: 60000,
+		});
+
+		collector.on("collect", (i) => {
+			if (!i.values.length) return;
+
+			i.reply(`You selected ${i.values.join(", ")}`);
 		});
 	},
 } as CommandObject;

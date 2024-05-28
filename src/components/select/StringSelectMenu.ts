@@ -8,14 +8,15 @@ import {
 	type APIStringSelectComponent,
 	type InteractionResponse,
 	type Interaction,
-	MessageCollectorOptionsParams,
-	MessageComponentCollectorOptions,
-	StringSelectMenuInteraction,
+	type MessageComponentCollectorOptions,
+	type StringSelectMenuInteraction,
 } from "discord.js";
 
 type Props = {
-	id?: string;
+	interaction: Interaction;
 	options: (SelectMenuComponentOptionData | APISelectMenuOption)[];
+	maxValues?: number;
+	minValues?: number;
 } & Omit<
 	Partial<StringSelectMenuComponentData | APIStringSelectComponent>,
 	"customId"
@@ -23,13 +24,13 @@ type Props = {
 
 export const StringSelectMenu = ({
 	options,
-	id,
+	interaction,
+
 	...props
 }: Omit<Props, "type">) => {
-	const customId = id || `interaction--${crypto.randomUUID()}`;
-
 	const selectMenu = new StringSelectMenuBuilder({
-		customId,
+		customId: interaction.id,
+
 		type: ComponentType.StringSelect,
 		...props,
 	});
@@ -44,16 +45,22 @@ export const StringSelectMenu = ({
 type Params = {
 	reply: InteractionResponse<boolean>;
 	interaction: Interaction;
-} & MessageComponentCollectorOptions<StringSelectMenuInteraction>;
+} & Omit<
+	MessageComponentCollectorOptions<StringSelectMenuInteraction>,
+	"componentType"
+>;
 
 export const createStringSelectMenuCollector = ({
 	reply,
 	interaction,
 	time,
+	...props
 }: Params) =>
 	reply.createMessageComponentCollector({
 		componentType: ComponentType.StringSelect,
 		filter: (i) =>
 			i.customId === interaction.id && i.user.id === interaction.user.id,
+
 		time: time || 60000,
+		...props,
 	});
