@@ -3,6 +3,8 @@
 		"baseUrl": "./",
 		"paths": {
 			"@/validators/*": ["src/validators/*"],
+			"@/models/*": ["src/models/*"],
+			"@/lib/*": ["src/lib/*"],
 			"@/*": ["src/*"]
 		},
 		"module": "commonjs",
