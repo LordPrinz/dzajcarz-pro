@@ -1,6 +1,7 @@
 import { ActionRow, Modal, TextInput } from "@/components";
 import { getTextInputValue } from "@/components/TextInput";
-import { PermissionFlagsBits } from "discord.js";
+import { createPartyArea } from "@/db/partyArea";
+import { ChannelType, PermissionFlagsBits } from "discord.js";
 import { CommandType, type CommandObject } from "wokcommands";
 
 export default {
@@ -9,7 +10,7 @@ export default {
 	permissions: [PermissionFlagsBits.Administrator],
 	guildOnly: true,
 
-	callback: async ({ interaction }) => {
+	callback: async ({ interaction, guild }) => {
 		const categoryNameInput = TextInput({
 			customId: "categoryName",
 			label: "Party area name",
@@ -94,6 +95,45 @@ export default {
 			newChannelName,
 			commandChannelName
 		);
+
+		// Create category
+
+		const newCategoryChannel = await guild.channels.create({
+			name: categoryName,
+			type: ChannelType.GuildCategory,
+		});
+
+		const splitChannel = await newCategoryChannel.guild.channels.create({
+			name: splitChannelName,
+			type: ChannelType.GuildVoice,
+			parent: newCategoryChannel,
+		});
+
+		if (commandChannelName !== "") {
+			const commandChannel = await newCategoryChannel.guild.channels.create({
+				name: commandChannelName,
+				type: ChannelType.GuildText,
+				parent: newCategoryChannel,
+			});
+
+			await createPartyArea({
+				id: guild.id,
+				groupId: newCategoryChannel.id,
+				newChannelName,
+				splitChannelId: splitChannel.id,
+				commandsChannel: commandChannel.id,
+			});
+
+			// send embed message to commandChannel
+		} else {
+			await createPartyArea({
+				id: guild.id,
+				groupId: newCategoryChannel.id,
+				newChannelName,
+				splitChannelId: splitChannel.id,
+			});
+		}
+
 		modalInteraction.reply("Party area created!");
 	},
 } as CommandObject;
