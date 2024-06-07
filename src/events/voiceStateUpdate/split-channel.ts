@@ -4,7 +4,7 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 	const oldChannel = oldState.channel;
 	const newChannel = newState.channel;
 
-	// Detects if the user joined the channel
+	//* Detects if the user joined the channel
 
 	if (
 		(oldChannel !== null || newChannel === null) &&

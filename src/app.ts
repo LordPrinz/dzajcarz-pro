@@ -4,13 +4,14 @@ import WOK from "wokcommands";
 import path from "path";
 
 import { intents, partials } from "@/conf/bot";
+import { syncVCRedis } from "./helpers/redis";
 
 export const client = new Client({
 	intents,
 	partials,
 });
 
-client.on("ready", () => {
+client.on("ready", async () => {
 	new WOK({
 		client,
 		defaultPrefix: "$",
@@ -25,4 +26,10 @@ client.on("ready", () => {
 	});
 
 	console.log(`Logged in as ${client.user?.tag}!`);
+
+	// Sync VC with redis
+
+	// await syncPartyRedisMongo();
+
+	await syncVCRedis(client);
 });

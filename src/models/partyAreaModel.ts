@@ -1,8 +1,8 @@
 import mongoose, { Schema } from "mongoose";
 
 type PartyArea = {
-	_id: string; // Guild ID
-	groupId: string;
+	_id: string; // Category channel ID
+	guildId: string;
 	splitChannelId: string;
 	newChannelName: string;
 	commandsChannel?: string;
@@ -16,7 +16,7 @@ const partyAreaSchema = new Schema<PartyArea>(
 			type: String,
 			required: true,
 		},
-		groupId: {
+		guildId: {
 			type: String,
 			required: true,
 		},

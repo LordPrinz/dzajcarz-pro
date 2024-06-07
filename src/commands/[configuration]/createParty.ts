@@ -89,13 +89,6 @@ export default {
 			"commandChannelName"
 		);
 
-		console.log(
-			categoryName,
-			splitChannelName,
-			newChannelName,
-			commandChannelName
-		);
-
 		// Create category
 
 		const newCategoryChannel = await guild.channels.create({
@@ -106,29 +99,31 @@ export default {
 		const splitChannel = await newCategoryChannel.guild.channels.create({
 			name: splitChannelName,
 			type: ChannelType.GuildVoice,
-			parent: newCategoryChannel,
 		});
+
+		splitChannel.setParent(newCategoryChannel.id);
 
 		if (commandChannelName !== "") {
 			const commandChannel = await newCategoryChannel.guild.channels.create({
 				name: commandChannelName,
 				type: ChannelType.GuildText,
-				parent: newCategoryChannel,
 			});
 
+			commandChannel.setParent(newCategoryChannel.id);
+
 			await createPartyArea({
-				id: guild.id,
-				groupId: newCategoryChannel.id,
+				id: newCategoryChannel.id,
+				guildId: guild.id,
 				newChannelName,
 				splitChannelId: splitChannel.id,
 				commandsChannel: commandChannel.id,
 			});
 
-			// send embed message to commandChannel
+			//TODO: send embed message to commandChannel
 		} else {
 			await createPartyArea({
-				id: guild.id,
-				groupId: newCategoryChannel.id,
+				id: newCategoryChannel.id,
+				guildId: guild.id,
 				newChannelName,
 				splitChannelId: splitChannel.id,
 			});
