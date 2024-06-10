@@ -1,6 +1,14 @@
-import { type VoiceState } from "discord.js";
+import { VoiceBasedChannel, type VoiceState } from "discord.js";
 import { sleep } from "@/utils";
-import { redisClient } from "@/lib/redisClient";
+import { checkElementExists, deleteElement } from "@/helpers/redis/list";
+
+const handleChannelDelete = async (
+	oldChannel: VoiceBasedChannel,
+	channelId: string
+) => {
+	await deleteElement("customChannels", channelId);
+	return await oldChannel.delete();
+};
 
 export default async (oldState: VoiceState, newState: VoiceState) => {
 	const oldChannel = oldState.channel;
@@ -26,29 +34,17 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 		return;
 	}
 
-	const script = `
-	local channelId = ARGV[1]
-	local list = redis.call('LRANGE', KEYS[1], 0, -1)
-	for _, v in ipairs(list) do
-			if v == channelId then
-					return 1
-			end
-	end
-	return 0
-`;
-
-	const shouldBeDeleted = await redisClient.eval(script, {
-		keys: ["customChannels"],
-		arguments: [targetChannelId],
-	});
+	const shouldBeDeleted = await checkElementExists(
+		"customChannels",
+		targetChannelId
+	);
 
 	if (!shouldBeDeleted) {
 		return;
 	}
 
 	if (oldChannel.members.size === 0) {
-		await redisClient.lRem("customChannels", 0, targetChannelId);
-		return await oldChannel.delete();
+		return await handleChannelDelete(oldChannel, targetChannelId);
 	}
 
 	//* Delete after 1 minute if the channel has only bots
@@ -58,7 +54,6 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 	const bots = oldChannel.members.filter((member) => member.user.bot);
 
 	if (oldChannel.members.size === bots.size) {
-		await redisClient.lRem("customChannels", 0, targetChannelId);
-		return await oldChannel.delete();
+		await handleChannelDelete(oldChannel, targetChannelId);
 	}
 };

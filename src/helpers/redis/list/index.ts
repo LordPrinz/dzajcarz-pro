@@ -22,3 +22,13 @@ export const checkElementExists = async (
 		})
 	);
 };
+
+export const deleteElement = async (key: string, value: string) =>
+	await redisClient.lRem(key, 0, value);
+
+export const appendElement = async (key: string, value: string) =>
+	await redisClient.rPush(key, value);
+
+export const getElements = async (key: string) => {
+	return await redisClient.lRange(key, 0, -1);
+};

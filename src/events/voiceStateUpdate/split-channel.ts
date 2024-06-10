@@ -1,4 +1,5 @@
-import { redisClient } from "@/lib/redisClient";
+import { appendElement } from "@/helpers/redis/list";
+import { getElements } from "@/helpers/redis/set";
 import { PartyAreaData } from "@/models/partyAreaModel";
 import { type VoiceState } from "discord.js";
 
@@ -21,9 +22,7 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 
 	const guildId = newChannel.guild.id;
 
-	const partyAreas = JSON.parse(
-		await redisClient.get("partyArea")
-	) as PartyAreaData[];
+	const partyAreas = await getElements<PartyAreaData[]>("partyAreas");
 
 	const desiredParty = partyAreas.find(
 		(area) => area.guildId === guildId && area.splitChannelId === targetChannelId
@@ -45,5 +44,5 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 	});
 
 	await user.voice.setChannel(customChannel);
-	await redisClient.rPush("customChannels", customChannel.id);
+	await appendElement("customChannels", customChannel.id);
 };

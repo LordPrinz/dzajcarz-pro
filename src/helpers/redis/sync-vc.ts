@@ -1,13 +1,12 @@
 import { getPartyAreas } from "@/db/partyArea";
-import { redisClient } from "@/lib/redisClient";
 import { type PartyAreaData } from "@/models/partyAreaModel";
 import { getAllVoiceChannels } from "@/utils";
 import { VoiceChannel, type Client } from "discord.js";
+import { deleteElements, getElements, setElements } from "./set";
+import { appendElement } from "./list";
 
 export const syncVCRedis = async (client: Client) => {
-	const partyAreas = JSON.parse(
-		await redisClient.get("partyArea")
-	) as PartyAreaData[];
+	const partyAreas = await getElements<PartyAreaData[]>("partyAreas");
 
 	const splitChannelIds = [];
 	const partyAreasIds = [];
@@ -50,15 +49,15 @@ export const syncVCRedis = async (client: Client) => {
 
 	const voiceChannelsToSave = await getAllVoiceChannels(client, saveFilter);
 
-	await redisClient.del("customChannels");
+	await deleteElements("customChannels");
 
 	for (const channel of voiceChannelsToSave) {
-		await redisClient.rPush("customChannels", channel.id);
+		await appendElement("customChannels", channel.id);
 	}
 };
 
 export const syncPartyRedisMongo = async () => {
 	const partyArea = await getPartyAreas();
 
-	await redisClient.set("partyArea", JSON.stringify(partyArea));
+	await setElements("partyAreas", partyArea);
 };
