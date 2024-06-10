@@ -1,3 +1,3 @@
-import { syncVCRedis } from "./sync-vc";
+import { syncVCRedis, syncPartyRedisMongo } from "./sync-vc";
 
-export { syncVCRedis };
+export { syncVCRedis, syncPartyRedisMongo };

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-export const configMongoDB = async () => {
+export const configMongoDB = () => {
 	const DB = process.env.MONGO_URI;
 
 	if (!DB) {

@@ -3,7 +3,6 @@ configCustomAlias();
 
 import { config } from "dotenv";
 import { client as botClient } from "@/app";
-import mongoose from "mongoose";
 import { configMongoDB } from "./lib/mongoDB";
 
 config();

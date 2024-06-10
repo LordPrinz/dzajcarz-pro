@@ -1,5 +1,6 @@
 import { type VoiceState } from "discord.js";
 import { sleep } from "@/utils";
+import { redisClient } from "@/lib/redisClient";
 
 export default async (oldState: VoiceState, newState: VoiceState) => {
 	const oldChannel = oldState.channel;
@@ -25,11 +26,28 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 		return;
 	}
 
-	//TODO: Check if the channel is not a proper channel to delete and return
+	const script = `
+	local channelId = ARGV[1]
+	local list = redis.call('LRANGE', KEYS[1], 0, -1)
+	for _, v in ipairs(list) do
+			if v == channelId then
+					return 1
+			end
+	end
+	return 0
+`;
 
-	//* Delete if the channel is empty
+	const shouldBeDeleted = await redisClient.eval(script, {
+		keys: ["customChannels"],
+		arguments: [targetChannelId],
+	});
+
+	if (!shouldBeDeleted) {
+		return;
+	}
 
 	if (oldChannel.members.size === 0) {
+		await redisClient.lRem("customChannels", 0, targetChannelId);
 		return await oldChannel.delete();
 	}
 
@@ -40,6 +58,7 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 	const bots = oldChannel.members.filter((member) => member.user.bot);
 
 	if (oldChannel.members.size === bots.size) {
+		await redisClient.lRem("customChannels", 0, targetChannelId);
 		return await oldChannel.delete();
 	}
 };
