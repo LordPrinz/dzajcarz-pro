@@ -1,6 +1,7 @@
 import { type TextChannel, type GuildMember } from "discord.js";
 
 import { getOneByIDWelcomeChannel } from "@/db/welcomeChannel";
+import { pingUser, replaceTagToUser } from "@/utils";
 
 export default async (member: GuildMember) => {
 	const { guild, id } = member;
@@ -15,5 +16,7 @@ export default async (member: GuildMember) => {
 
 	if (!channel) return;
 
-	channel.send(content.replace(/@/g, `<@${id}>`));
+	const welcomeMessage = replaceTagToUser(content, pingUser(id));
+
+	channel.send(welcomeMessage);
 };

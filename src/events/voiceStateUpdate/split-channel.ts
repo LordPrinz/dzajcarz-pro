@@ -1,6 +1,7 @@
 import { appendElement } from "@/helpers/redis/list";
 import { getElements } from "@/helpers/redis/set";
 import { PartyAreaData } from "@/models/partyAreaModel";
+import { replaceTagToUser } from "@/utils";
 import { type VoiceState } from "discord.js";
 
 export default async (oldState: VoiceState, newState: VoiceState) => {
@@ -34,10 +35,9 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 
 	const user = newState.member;
 
-	const newChannelName = desiredParty.newChannelName.replace(
-		"@",
-		user.nickname || user.user.username
-	);
+	const userName = user.nickname || user.user.username;
+
+	const newChannelName = replaceTagToUser(desiredParty.newChannelName, userName);
 
 	const customChannel = await newChannel.clone({
 		name: newChannelName,

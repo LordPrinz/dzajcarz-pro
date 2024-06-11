@@ -1,6 +1,6 @@
 import { getRandom, shuffle } from "./math";
 import { sleep, capitalizeFirstLetter } from "./utils";
-import { getAllVoiceChannels } from "./discord";
+import { getAllVoiceChannels, pingUser, replaceTagToUser } from "./discord";
 
 export {
 	getRandom,
@@ -8,4 +8,6 @@ export {
 	sleep,
 	capitalizeFirstLetter,
 	getAllVoiceChannels,
+	pingUser,
+	replaceTagToUser,
 };

@@ -21,3 +21,9 @@ export const getAllVoiceChannels = async (
 
 	return Promise.all(voiceChannels);
 };
+
+export const pingUser = (id: string) => `<@${id}>`;
+
+export const replaceTagToUser = (message: string, user: string) => {
+	return message.replace(/@/g, user);
+};
