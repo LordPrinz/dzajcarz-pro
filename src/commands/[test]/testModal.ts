@@ -7,6 +7,7 @@ import {
 	createRoleSelectMenuCollector,
 	createStringSelectMenuCollector,
 } from "@/components/select";
+import { getCommands } from "@/utils/discord";
 import { ButtonStyle, ComponentType } from "discord.js";
 import { CommandType, type CommandObject } from "wokcommands";
 
@@ -83,23 +84,28 @@ export default {
 
 		// # Button
 
-		const [button] = Button({
-			style: ButtonStyle.Link,
-			label: "Google",
-			url: "https://google.com",
-		});
+		// const [button] = Button({
+		// 	style: ButtonStyle.Link,
+		// 	label: "Google",
+		// 	url: "https://google.com",
+		// });
 
-		const [button2, id] = Button({
-			style: ButtonStyle.Primary,
-			label: "Primary Button",
-			interaction,
-		});
+		// const [button2, id] = Button({
+		// 	style: ButtonStyle.Primary,
+		// 	label: "Primary Button",
+		// 	interaction,
+		// });
 
-		const actionRow = ActionRow(button, button2);
-		const reply = await interaction.reply({
-			components: [actionRow],
-		});
+		// const actionRow = ActionRow(button, button2);
+		// const reply = await interaction.reply({
+		// 	components: [actionRow],
+		// });
 
-		console.log(id);
+		// console.log(id);
+
+		// # help
+
+		const commands = getCommands();
+		console.log(commands);
 	},
 } as CommandObject;
