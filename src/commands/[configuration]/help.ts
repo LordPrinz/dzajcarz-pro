@@ -4,6 +4,7 @@ import {
 	createStringSelectMenuCollector,
 	type StringSelectOptions,
 } from "@/components/select";
+import { authorFooter } from "@/conf/bot";
 import { filterCommandsByPermission, getCommands } from "@/utils/discord";
 import { CommandType, type CommandObject } from "wokcommands";
 
@@ -61,7 +62,7 @@ export default {
 				},
 				timestamp: new Date(),
 				footer: {
-					text: process.env.AUTHOR,
+					text: authorFooter,
 				},
 
 				fields: categoryCommands.map((command) => {

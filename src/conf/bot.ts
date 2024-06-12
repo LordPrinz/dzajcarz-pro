@@ -20,3 +20,4 @@ export const dzajcoGifUrl = "https://tenor.com/view/jajco-gif-23924347";
 
 export const botOwners = ["520676533279522817"];
 export const testServers = ["928638782952079391", "694497213145022496"];
+export const authorFooter = "Made by Lord Prinz";
