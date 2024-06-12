@@ -55,6 +55,7 @@ export default {
 			const embed = Embed({
 				title: `${selectedCategory} commands`,
 				description: "List of all comands in this category",
+
 				thumbnail: {
 					url: guild.iconURL({ size: 512 }),
 				},
@@ -65,7 +66,7 @@ export default {
 
 				fields: categoryCommands.map((command) => {
 					return {
-						name: "XD",
+						name: command.name,
 						value: command.description,
 					};
 				}),

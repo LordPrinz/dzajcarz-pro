@@ -1,12 +1,11 @@
 import { botOwners, testServers } from "@/conf/bot";
+import { type DzajCommand } from "@/types";
 import {
 	ChannelType,
 	type GuildMember,
 	type Channel,
 	type Client,
 	type VoiceChannel,
-	PermissionsBitField,
-	PermissionFlagsBits,
 } from "discord.js";
 
 import fs from "fs";
@@ -39,7 +38,7 @@ export const replaceTagToUser = (message: string, user: string) => {
 const commandsDir = path.join(__dirname, "..", "commands");
 
 export const getCommands = () => {
-	const commandMap = new Map<string, CommandObject[]>();
+	const commandMap = new Map<string, DzajCommand[]>();
 
 	const processDirectory = (dirPath: string, parentKey: string) => {
 		const items = fs.readdirSync(dirPath);
@@ -59,8 +58,8 @@ export const getCommands = () => {
 				if (!commandMap.has(parentKey)) {
 					commandMap.set(parentKey, []);
 				}
-
-				commandMap.get(parentKey)?.push(commandData);
+				const commandName = item.replace(".ts", "");
+				commandMap.get(parentKey)?.push({ name: commandName, ...commandData });
 			}
 		}
 	};
@@ -93,10 +92,10 @@ export const validateCommandPermissions = (
 };
 
 export const filterCommandsByPermission = (
-	commands: Map<string, CommandObject[]>,
+	commands: Map<string, DzajCommand[]>,
 	member: GuildMember
-): Map<string, CommandObject[]> => {
-	const filteredCommands = new Map<string, CommandObject[]>();
+) => {
+	const filteredCommands = new Map<string, DzajCommand[]>();
 
 	for (const [category, commandArray] of commands) {
 		const filteredArray = commandArray.filter((command) =>
