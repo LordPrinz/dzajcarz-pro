@@ -22,6 +22,11 @@ type Props = Omit<
 	"type"
 >;
 
+export type StringSelectOptions = (
+	| SelectMenuComponentOptionData
+	| APISelectMenuOption
+)[];
+
 export const StringSelectMenu = ({ options, interaction, ...props }: Props) => {
 	const selectMenu = new StringSelectMenuBuilder({
 		customId: interaction.id,

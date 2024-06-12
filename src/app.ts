@@ -3,7 +3,7 @@ import { Client } from "discord.js";
 import WOK from "wokcommands";
 import path from "path";
 
-import { intents, partials } from "@/conf/bot";
+import { botOwners, intents, partials, testServers } from "@/conf/bot";
 import { syncPartyRedisMongo, syncVCRedis } from "./helpers/redis";
 import { configureRedis } from "./lib/redisClient";
 
@@ -22,8 +22,8 @@ client.on("ready", async () => {
 			dir: path.join(__dirname, "events"),
 		},
 		featuresDir: path.join(__dirname, "features"),
-		botOwners: ["520676533279522817"],
-		testServers: ["928638782952079391"],
+		botOwners,
+		testServers,
 	});
 
 	console.log(`Logged in as ${client.user?.tag}!`);

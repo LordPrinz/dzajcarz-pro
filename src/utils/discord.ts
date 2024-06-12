@@ -1,5 +1,7 @@
+import { botOwners, testServers } from "@/conf/bot";
 import {
 	ChannelType,
+	type GuildMember,
 	type Channel,
 	type Client,
 	type VoiceChannel,
@@ -63,4 +65,19 @@ export const getCommands = () => {
 	processDirectory(commandsDir, "");
 
 	return commandMap;
+};
+
+export const validateCommandPermissions = (
+	command: CommandObject,
+	user: GuildMember
+) => {
+	if (command.ownerOnly && !botOwners.includes(user.id)) {
+		return false;
+	}
+
+	if (command.testOnly && !testServers.includes(user.guild.id)) {
+		return false;
+	}
+
+	return true;
 };

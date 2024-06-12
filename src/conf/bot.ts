@@ -17,3 +17,6 @@ export const dzajcoRegex =
 	/\b[cC][oO]\b|\b[cC][oO]\??\b|\b[cC][oO]\s?\b|\b[cC][oO]{2,}\b|\b[cC][oO]o\s+aaa\b/m;
 
 export const dzajcoGifUrl = "https://tenor.com/view/jajco-gif-23924347";
+
+export const botOwners = ["520676533279522817"];
+export const testServers = ["928638782952079391"];

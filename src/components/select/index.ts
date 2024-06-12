@@ -1,9 +1,14 @@
 import {
 	StringSelectMenu,
 	createStringSelectMenuCollector,
+	type StringSelectOptions,
 } from "./StringSelectMenu";
 
-export { StringSelectMenu, createStringSelectMenuCollector };
+export {
+	StringSelectMenu,
+	createStringSelectMenuCollector,
+	type StringSelectOptions,
+};
 
 import {
 	RoleSelectMenu,
