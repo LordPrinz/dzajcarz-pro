@@ -4,7 +4,7 @@ import {
 	createStringSelectMenuCollector,
 	type StringSelectOptions,
 } from "@/components/select";
-import { getCommands } from "@/utils/discord";
+import { getCommands, validateCommandPermissions } from "@/utils/discord";
 import { CommandType, type CommandObject } from "wokcommands";
 
 export default {
@@ -12,8 +12,10 @@ export default {
 	type: CommandType.BOTH,
 	guildOnly: true,
 	testOnly: true,
-	callback: async ({ interaction }) => {
+	callback: async ({ interaction, member }) => {
 		const commands = getCommands();
+
+		// const filteredCommands = filterCommandsByPermission(commands, member);
 
 		const keysArray = Array.from(commands.keys());
 
@@ -50,7 +52,9 @@ export default {
 
 			const categoryCommands = commands.get(selectedCategory);
 
-			console.log(categoryCommands);
+			categoryCommands.forEach((command) => {
+				if (!validateCommandPermissions(command, member)) return;
+			});
 		});
 	},
 } as CommandObject;

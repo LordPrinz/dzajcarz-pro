@@ -5,6 +5,8 @@ import {
 	type Channel,
 	type Client,
 	type VoiceChannel,
+	PermissionsBitField,
+	PermissionFlagsBits,
 } from "discord.js";
 
 import fs from "fs";
@@ -77,6 +79,14 @@ export const validateCommandPermissions = (
 
 	if (command.testOnly && !testServers.includes(user.guild.id)) {
 		return false;
+	}
+
+	if (!command.permissions) return true;
+
+	for (const permission of command.permissions) {
+		if (!user.permissions.has(permission)) {
+			return false;
+		}
 	}
 
 	return true;
