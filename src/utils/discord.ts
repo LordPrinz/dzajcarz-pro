@@ -91,3 +91,22 @@ export const validateCommandPermissions = (
 
 	return true;
 };
+
+export const filterCommandsByPermission = (
+	commands: Map<string, CommandObject[]>,
+	member: GuildMember
+): Map<string, CommandObject[]> => {
+	const filteredCommands = new Map<string, CommandObject[]>();
+
+	for (const [category, commandArray] of commands) {
+		const filteredArray = commandArray.filter((command) =>
+			validateCommandPermissions(command, member)
+		);
+
+		if (filteredArray.length > 0) {
+			filteredCommands.set(category, filteredArray);
+		}
+	}
+
+	return filteredCommands;
+};
