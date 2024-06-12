@@ -19,7 +19,8 @@
 		"start": "ts-node src/main.ts",
 		"start:prod": "NODE_ENV=production ts-node src/main.ts",
 		"dev": "nodemon src/main.ts",
-		"test": "jest"
+		"test": "jest",
+		"reset:commands": "ts-node src/admin/reset-commands/main.ts"
 	},
 	"keywords": [
 		"bot",
