@@ -4,7 +4,7 @@ import WOK from "wokcommands";
 import path from "path";
 
 import { botOwners, intents, partials, testServers } from "@/conf/bot";
-import { syncPartyRedisMongo, syncVCRedis } from "./helpers/redis";
+import { syncCoRedis, syncPartyRedisMongo, syncVCRedis } from "./helpers/redis";
 import { configureRedis } from "./lib/redisClient";
 
 export const client = new Client({
@@ -35,4 +35,6 @@ client.on("ready", async () => {
 	await syncPartyRedisMongo();
 
 	await syncVCRedis(client);
+
+	await syncCoRedis();
 });
