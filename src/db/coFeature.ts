@@ -1,6 +1,6 @@
-import CoModel, { CoTypeData } from "@/models/coMode";
+import CoModel, { CoTypeData } from "@/models/coModel";
 
-export const disableCoFeature = async ({ id }: CoTypeData) =>
+export const disableCoFeature = async (id: string) =>
 	await CoModel.create({
 		_id: id,
 	});
