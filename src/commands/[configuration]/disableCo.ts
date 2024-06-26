@@ -12,7 +12,7 @@ export default {
 	callback: async ({ guild }) => {
 		const guildId = guild.id;
 
-		const isCoDisabled = checkElementExists("coDisabledFeature", guildId);
+		const isCoDisabled = await checkElementExists("coDisabledFeature", guildId);
 
 		if (isCoDisabled) {
 			return "Bot replies to 'co' are already disabled";
