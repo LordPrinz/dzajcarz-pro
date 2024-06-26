@@ -2,7 +2,7 @@ import { appendElement } from "@/helpers/redis/list";
 import { getElements } from "@/helpers/redis/set";
 import { PartyAreaData } from "@/models/partyAreaModel";
 import { replaceTagToUser } from "@/utils";
-import { type VoiceState } from "discord.js";
+import { type VoiceChannel, type VoiceState } from "discord.js";
 
 export default async (oldState: VoiceState, newState: VoiceState) => {
 	const oldChannel = oldState.channel;
@@ -39,10 +39,12 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
 
 	const newChannelName = replaceTagToUser(desiredParty.newChannelName, userName);
 
-	const customChannel = await newChannel.clone({
+	const customChannel = (await newChannel.clone({
 		name: newChannelName,
-	});
+	})) as VoiceChannel;
 
 	await user.voice.setChannel(customChannel);
 	await appendElement("customChannels", customChannel.id);
+
+	// sendCommandsToChannel(customChannel);
 };
