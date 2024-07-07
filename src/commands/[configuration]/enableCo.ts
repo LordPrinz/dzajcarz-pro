@@ -21,6 +21,6 @@ export default {
 		await deleteElement("coDisabledFeature", guildId);
 		await enableCoFeature(guildId);
 
-		return "Bot replies to 'co' are now disabled";
+		return "Bot replies to 'co' are now enabled";
 	},
 } as CommandObject;

@@ -10,7 +10,7 @@ export default async (message: Message) => {
 		return;
 	}
 
-	const randomNumber = getRandom(1, 2);
+	const randomNumber = getRandom(1, 10);
 
 	if (randomNumber !== 1) {
 		return;
