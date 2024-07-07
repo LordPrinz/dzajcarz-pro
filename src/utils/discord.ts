@@ -1,3 +1,4 @@
+import { client } from "@/app";
 import { botOwners, testServers } from "@/conf/bot";
 import { type DzajCommand } from "@/types";
 import {
@@ -108,4 +109,12 @@ export const filterCommandsByPermission = (
 	}
 
 	return filteredCommands;
+};
+
+export const deleteChannel = async (id: string) => {
+	const channel = await client.channels.fetch(id);
+
+	if (channel) {
+		await channel.delete();
+	}
 };

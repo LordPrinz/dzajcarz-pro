@@ -12,3 +12,6 @@ export const getPartyArea = async (id: string) =>
 
 export const getPartyAreas = async (filter?: FilterQuery<PartyAreaData>) =>
 	await PartyAreaModel.find(filter);
+
+export const deletePartyArea = async (id: string) =>
+	await PartyAreaModel.findByIdAndDelete(id);
