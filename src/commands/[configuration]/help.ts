@@ -12,7 +12,6 @@ export default {
 	description: "Help command, returns all possible for you commands",
 	type: CommandType.BOTH,
 	guildOnly: true,
-	testOnly: true,
 	callback: async ({ interaction, member, guild }) => {
 		const commands = getCommands();
 
