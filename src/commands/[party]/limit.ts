@@ -3,32 +3,29 @@ import { ApplicationCommandOptionType } from "discord.js";
 import { type CommandObject, CommandType } from "wokcommands";
 
 export default {
-	description: "Renames party channel",
+	description: "Limits party channel",
 	type: CommandType.BOTH,
 	guildOnly: true,
 	minArgs: 1,
-	expectedArgs: "<name>",
-	cooldowns: {
-		duration: "2 m",
-		type: "user",
-		errorMessage: "You are renaming too fast! Please wait before renaming again.",
-	},
+	expectedArgs: "<limit>",
 	options: [
 		{
-			name: "name",
-			description: "Name of the channel",
+			name: "limit",
+			description: "The new channel limit",
 			required: true,
-			type: ApplicationCommandOptionType.String,
+			type: ApplicationCommandOptionType.Integer,
+			maxValue: 99,
+			minValue: 1,
 		},
 	],
 	callback: async ({ args, member }) => {
 		if (!args.length) {
-			return { content: "Please provide a new channel name", ephemeral: true };
+			return { content: "Please provide a new limit", ephemeral: true };
 		}
 
 		if (!member?.voice.channel) {
 			return {
-				content: "You need to be in a voice channel to rename a channel",
+				content: "You need to be in a voice channel to limit a channel",
 				ephemeral: true,
 			};
 		}
@@ -39,17 +36,28 @@ export default {
 
 		if (!customChannels.includes(channel.id)) {
 			return {
-				content: "You can only rename party channels",
+				content: "You can only limit party channels",
+				ephemeral: true,
+			};
+		}
+
+		const limit = parseInt(args[0]);
+
+		if (limit < 1 || limit > 99) {
+			return {
+				content: "Limit must be between 1 and 99",
 				ephemeral: true,
 			};
 		}
 
 		try {
-			await channel.setName(args[0]);
+			await channel.edit({
+				userLimit: limit,
+			});
 		} catch (err) {}
 
 		return {
-			content: `Channel name updated!`,
+			content: `Channel limit updated!`,
 			ephemeral: true,
 		};
 	},
