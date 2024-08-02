@@ -1,4 +1,4 @@
-import { ApplicationCommandOptionType, GuildMember } from "discord.js";
+import { ApplicationCommandOptionType, type GuildMember } from "discord.js";
 import { type CommandObject, CommandType } from "wokcommands";
 
 export default {

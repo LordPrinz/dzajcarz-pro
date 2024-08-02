@@ -1,4 +1,4 @@
-import { ApplicationCommandOptionType } from "discord.js";
+import { ApplicationCommandOptionType, type GuildMember } from "discord.js";
 import { type CommandObject, CommandType } from "wokcommands";
 
 export default {
@@ -27,9 +27,9 @@ export default {
 			};
 		}
 
-		const user = await guild.members.fetch({
+		const user = (await guild.members.fetch({
 			user: args[0],
-		});
+		})) as GuildMember;
 
 		const channel = member.voice.channel;
 
