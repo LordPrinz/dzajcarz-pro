@@ -1,3 +1,4 @@
+import { getElements } from "@/helpers/redis/list";
 import { ApplicationCommandOptionType, type GuildMember } from "discord.js";
 import { type CommandObject, CommandType } from "wokcommands";
 
@@ -27,11 +28,20 @@ export default {
 			};
 		}
 
+		const channel = member.voice.channel;
+
+		const customChannels = await getElements("customChannels");
+
+		if (!customChannels.includes(channel.id)) {
+			return {
+				content: "You can only hide party channels",
+				ephemeral: true,
+			};
+		}
+
 		const user = (await guild.members.fetch({
 			user: args[0],
 		})) as GuildMember;
-
-		const channel = member.voice.channel;
 
 		channel.permissionOverwrites.edit(user, {
 			Connect: false,

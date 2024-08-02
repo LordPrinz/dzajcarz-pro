@@ -1,4 +1,4 @@
-import { getElements } from "@/helpers/redis/set";
+import { getElements } from "@/helpers/redis/list";
 import { type CommandObject, CommandType } from "wokcommands";
 
 export default {
@@ -15,7 +15,7 @@ export default {
 
 		const channel = member.voice.channel;
 
-		const customChannels = await getElements<string>("customChannels");
+		const customChannels = await getElements("customChannels");
 
 		if (!customChannels.includes(channel.id)) {
 			return {
