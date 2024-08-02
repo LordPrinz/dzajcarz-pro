@@ -15,7 +15,7 @@ export default {
 			type: ApplicationCommandOptionType.Mentionable,
 		},
 	],
-	callback: async ({ args, member }) => {
+	callback: async ({ args, guild, member }) => {
 		if (!args.length) {
 			return { content: "Please mention a user to block", ephemeral: true };
 		}
@@ -27,7 +27,9 @@ export default {
 			};
 		}
 
-		const user = args[0];
+		const user = await guild.members.fetch({
+			user: args[0],
+		});
 
 		const channel = member.voice.channel;
 

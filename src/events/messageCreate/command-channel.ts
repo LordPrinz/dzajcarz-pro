@@ -14,7 +14,9 @@ export default async (message: Message) => {
 
 	await sleep(1000 * 16);
 
-	if (message.deletable) {
-		await message.delete();
-	}
+	try {
+		if (message.deletable) {
+			await message.delete();
+		}
+	} catch (err) {}
 };
