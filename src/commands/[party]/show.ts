@@ -2,13 +2,13 @@ import { getElements } from "@/helpers/redis/set";
 import { type CommandObject, CommandType } from "wokcommands";
 
 export default {
-	description: "Hides party channel",
+	description: "Shows party channel",
 	type: CommandType.BOTH,
 	guildOnly: true,
 	callback: async ({ guild, member }) => {
 		if (!member?.voice.channel) {
 			return {
-				content: "You need to be in a voice channel to hide a channel",
+				content: "You need to be in a voice channel to show a channel",
 				ephemeral: true,
 			};
 		}
@@ -19,7 +19,7 @@ export default {
 
 		if (!customChannels.includes(channel.id)) {
 			return {
-				content: "You can only hide party channels",
+				content: "You can only show party channels",
 				ephemeral: true,
 			};
 		}
@@ -27,11 +27,11 @@ export default {
 		const roleID = guild.roles.everyone.id;
 
 		channel.permissionOverwrites.edit(roleID, {
-			ViewChannel: false,
+			ViewChannel: true,
 		});
 
 		return {
-			content: `Channel hidden`,
+			content: `Channel shown`,
 			ephemeral: true,
 		};
 	},
