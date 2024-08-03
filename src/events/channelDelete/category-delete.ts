@@ -1,7 +1,6 @@
 import { deletePartyArea } from "@/db/partyArea";
 import { getElements, setElements } from "@/helpers/redis/set";
 import { PartyAreaData } from "@/models/partyAreaModel";
-import { deleteChannel } from "@/utils";
 import { ChannelType, type Channel } from "discord.js";
 
 export default async (channel: Channel) => {
