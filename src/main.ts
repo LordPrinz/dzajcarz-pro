@@ -17,27 +17,27 @@ if (NODE_ENV === "development") {
 
 if (NODE_ENV === "production") {
 	botClient.login(process.env.PROD_TOKEN);
-
-	process.on("unhandledRejection", (reason, promise) => {
-		console.error("Unhandled Rejection at:", promise, "reason:", reason);
-	});
-
-	process.on("uncaughtException", (error) => {
-		console.error("Uncaught Exception thrown", error);
-	});
-
-	process.on("SIGINT", async () => {
-		await botClient.destroy();
-		process.exit(0);
-	});
-
-	process.on("SIGTERM", async () => {
-		await botClient.destroy();
-		process.exit(0);
-	});
-
-	process.on("exit", async () => {
-		await botClient.destroy();
-		process.exit(0);
-	});
 }
+
+process.on("unhandledRejection", (reason, promise) => {
+	console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+	console.error("Uncaught Exception thrown", error);
+});
+
+process.on("SIGINT", async () => {
+	await botClient.destroy();
+	process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+	await botClient.destroy();
+	process.exit(0);
+});
+
+process.on("exit", async () => {
+	await botClient.destroy();
+	process.exit(0);
+});
