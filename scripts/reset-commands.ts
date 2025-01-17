@@ -1,7 +1,4 @@
 import { Client, GatewayIntentBits } from "discord.js";
-import { config } from "dotenv";
-
-config();
 
 const { NODE_ENV } = process.env;
 

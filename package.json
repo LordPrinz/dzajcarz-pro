@@ -1,32 +1,31 @@
 {
-	"dependencies": {
-		"discord.js": "^14.15.3",
-		"dotenv": "^16.4.5",
-		"mongoose": "^8.3.4",
-		"redis": "^4.6.14",
-		"tsconfig-paths": "^4.2.0",
-		"wokcommands": "^2.1.9"
-	},
-	"devDependencies": {
-		"@types/node": "^20.12.11",
-		"@types/redis": "^4.0.11",
-		"typescript": "^5.4.5"
-	},
-	"name": "dzajcarz",
-	"version": "3.0.0",
-	"main": "src/main.ts",
-	"scripts": {
-		"start": "ts-node src/main.ts",
-		"start:prod": "NODE_ENV=production ts-node src/main.ts",
-		"dev": "nodemon src/main.ts",
-		"test": "jest",
-		"reset:commands": "ts-node src/admin/reset-commands/main.ts"
-	},
-	"keywords": [
+  "name": "dzajcarz",
+  "module": "src/main.ts",
+  "type": "module",
+  "description": "Not popular but powerful discord bot.",	
+  "author": "LordPrinz",
+  "license": "ISC",
+  "keywords": [
 		"bot",
-		"discord"
+		"discord",
+    "dzajcarz"
 	],
-	"author": "LordPrinz",
-	"license": "ISC",
-	"description": "Not popular but powerful discord bot."
+  "version": "4.0.0",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "start:prod": "NODE_ENV=production bun run src/main.ts",
+    "dev": "bun run src/main.ts --watch",
+    "test": "bun test",
+    "reset:commands": "bun run src/commands/reset.ts"
+  },
+
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.17.3"
+  }
 }
