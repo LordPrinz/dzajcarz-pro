@@ -17,11 +17,12 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false,
     "baseUrl": "./",
-		"paths": {
-			"@/validators/*": ["src/validators/*"],
-			"@/models/*": ["src/models/*"],
-			"@/lib/*": ["src/lib/*"],
-			"@/*": ["src/*"]
-		},
+    "paths": {
+      "@/validators/*": ["src/validators/*"],
+      "@/models/*": ["src/models/*"],
+      "@/lib/*": ["src/lib/*"],
+      "@/core/*": ["src/core/*"],
+      "@/*": ["src/*"]
+    }
   }
 }

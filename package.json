@@ -2,14 +2,14 @@
   "name": "dzajcarz",
   "module": "src/main.ts",
   "type": "module",
-  "description": "Not popular but powerful discord bot.",	
+  "description": "Not popular but powerful discord bot.",
   "author": "LordPrinz",
   "license": "ISC",
   "keywords": [
-		"bot",
-		"discord",
+    "bot",
+    "discord",
     "dzajcarz"
-	],
+  ],
   "version": "4.0.0",
   "scripts": {
     "start": "bun run src/main.ts",
@@ -27,14 +27,30 @@
     "test:watch": "bun run scripts/runner.ts --test:watch",
     "compile": "bun run scripts/runner.ts --compile"
   },
-
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/eslint-plugin-security": "^3.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "eslint": "8.47.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-security": "^3.0.1",
+    "eslint-plugin-unused-imports": "^4.1.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.4.1",
+    "prettier": "^3.4.2"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
     "discord.js": "^14.17.3"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ]
   }
 }

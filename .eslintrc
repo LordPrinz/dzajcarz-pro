@@ -1,69 +1,62 @@
 {
-    "root": true,
-    "parser": "@typescript-eslint/parser",
-    "env": {
-      "node": true,
-      "es6": true,
-    },
-    "plugins": ["@typescript-eslint", "import", "unused-imports", "security"],
-    "parserOptions": {
-      "ecmaVersion": "latest",
-      "project": ["./tsconfig.json"],
-    },
-    "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended", "prettier"],
-    "rules": {
-        "@typescript-eslint/consistent-type-imports":"error",
-      "import/no-unresolved": [2, { "caseSensitive": false }],
-      "@typescript-eslint/no-empty-function": [
-        "error",
-        {
-          "allow": ["constructors"],
-        },
-      ],
-      "no-restricted-syntax": [
-        "warn",
-        {
-          "selector": "ClassDeclaration[superClass.name=Error]",
-          "message": "Please use AppError instead",
-        },
-      ],
-      "no-else-return": [
-        "error",
-        {
-          "allowElseIf": false,
-        },
-      ],
-      "prefer-const": "warn",
-      "no-var": "error",
-      "no-constant-condition": "warn",
-      "no-useless-escape": "warn",
-      "@typescript-eslint/no-empty-interface": "error",
-      "@typescript-eslint/no-require-imports": "warn",
-      "@typescript-eslint/lines-between-class-members": [
-        "error",
-        "always",
-        {
-          "exceptAfterSingleLine": true,
-        },
-      ],
-      "@typescript-eslint/no-shadow": "error",
-      "no-return-await": "off",
-      "@typescript-eslint/return-await": "warn",
-      "@typescript-eslint/no-explicit-any": "warn",
-      "no-unused-vars": ["error", { "vars": "all", "args": "after-used", "ignoreRestSiblings": false }],
-      "import/no-unused-modules": [1, { "unusedExports": true }],
-      "unused-imports/no-unused-imports": "error",
-      "@typescript-eslint/no-duplicate-enum-values": "warn",
-      "unused-imports/no-unused-vars": ["warn", { "vars": "all", "varsIgnorePattern": "^_", "args": "after-used", "argsIgnorePattern": "^_" }],
-    },
-    "settings": {
-      "import/parsers": {
-        "@typescript-eslint/parser": [".ts"],
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "env": {
+    "node": true,
+    "es6": true,
+  },
+  "plugins": ["@typescript-eslint", "import", "unused-imports", "security"],
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "project": ["./tsconfig.json"],
+  },
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended", "prettier"],
+  "rules": {
+    "@typescript-eslint/consistent-type-imports": "error",
+    "import/no-unresolved": [2, { "caseSensitive": false }],
+    "@typescript-eslint/no-empty-function": [
+      "error",
+      {
+        "allow": ["constructors"],
       },
-      "import/resolver": {
-        "typescript": {
-          "alwaysTryTypes": true,
-        },
+    ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "ClassDeclaration[superClass.name=Error]",
+        "message": "Please use AppError instead",
+      },
+    ],
+    "no-else-return": [
+      "error",
+      {
+        "allowElseIf": false,
+      },
+    ],
+    "prefer-const": "warn",
+    "no-var": "error",
+    "no-constant-condition": "warn",
+    "no-useless-escape": "warn",
+    "@typescript-eslint/no-empty-interface": "error",
+    "@typescript-eslint/no-require-imports": "warn",
+    "@typescript-eslint/no-shadow": "error",
+    "no-return-await": "off",
+    "@typescript-eslint/return-await": "warn",
+    "@typescript-eslint/no-explicit-any": "warn",
+    "no-unused-vars": ["error", { "vars": "all", "args": "after-used", "ignoreRestSiblings": false }],
+    "import/no-unused-modules": [1, { "unusedExports": true }],
+    "unused-imports/no-unused-imports": "error",
+    "@typescript-eslint/no-duplicate-enum-values": "warn",
+    "unused-imports/no-unused-vars": ["warn", { "vars": "all", "varsIgnorePattern": "^_", "args": "after-used", "argsIgnorePattern": "^_" }],
+  },
+  "settings": {
+    "import/parsers": {
+      "@typescript-eslint/parser": [".ts"],
+    },
+    "import/resolver": {
+      "typescript": {
+        "alwaysTryTypes": true,
       },
     },
-  }
+  },
+}

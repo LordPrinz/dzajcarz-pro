@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 
 echo -e "┏━━━ 🚂 START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-bun run src/index.ts
+bun run src/main.ts
