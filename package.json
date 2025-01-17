@@ -14,9 +14,18 @@
   "scripts": {
     "start": "bun run src/main.ts",
     "start:prod": "NODE_ENV=production bun run src/main.ts",
-    "dev": "bun run src/main.ts --watch",
     "test": "bun test",
-    "reset:commands": "bun run src/commands/reset.ts"
+    "reset:commands": "bun run src/commands/reset.ts",
+    "prepare": "bun run scripts/runner.ts --prepare",
+    "build": "bun run scripts/runner.ts --build",
+    "format": "bun run scripts/runner.ts --format",
+    "lint": "bun run scripts/runner.ts --lint",
+    "clean": "bun run scripts/runner.ts --clean",
+    "dev": "bun run scripts/runner.ts --start:dev",
+    "start:dev": "bun run scripts/runner.ts --start:dev",
+    "test:cov": "bun run scripts/runner.ts --test:cov",
+    "test:watch": "bun run scripts/runner.ts --test:watch",
+    "compile": "bun run scripts/runner.ts --compile"
   },
 
   "devDependencies": {

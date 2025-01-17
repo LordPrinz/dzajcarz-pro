@@ -1,0 +1,1 @@
+./scripts/husky/format-commit-name.sh "$1"

@@ -1,0 +1,2 @@
+./scripts/husky/bump-version-verifier.sh "$1"
+./scripts/husky/protect-branch.sh

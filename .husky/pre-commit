@@ -1,0 +1,2 @@
+gitleaks protect --staged --verbose
+bunx lint-staged
