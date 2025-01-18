@@ -45,7 +45,9 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "discord.js": "^14.17.3"
+    "discord.js": "^14.17.3",
+    "postgres": "^3.4.5",
+    "redis": "^4.7.0"
   },
   "lint-staged": {
     "src/**/*.{ts,tsx}": [
