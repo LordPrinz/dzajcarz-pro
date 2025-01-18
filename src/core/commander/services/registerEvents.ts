@@ -1,5 +1,3 @@
-import type { Client } from "discord.js";
+import type { Client } from 'discord.js';
 
-export const registerEvents = async (client: Client, eventsDir: string) => {
-    
-};
+export const registerEvents = async (client: Client, eventsDir: string) => {};

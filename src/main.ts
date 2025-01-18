@@ -1,5 +1,5 @@
-import { dzajcarz } from "./app";
-import { logger } from "./core/logger";
+import { dzajcarz } from './app';
+import { logger } from './core/logger';
 
 logger;
 
