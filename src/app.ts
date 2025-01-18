@@ -8,14 +8,14 @@ const client = new Client({
     partials,
 });
 
-export const dzajcommander = new DzajCommander({
+export const dzajcarz = new DzajCommander({
     client,
     prefix: "!",
     featuresDir: join(__dirname, "features"),
     commandsDir: join(__dirname, "commands"),
     eventsDir: join(__dirname, "events"),
     redisUrl: process.env.REDIS_URL,
-    postgreUrl: process.env.POSTGRE_URL,
+    postgreUrl: process.env.POSTGRESQL_URL,
     ownersIds: botOwners,
     testServers: testServers
 });

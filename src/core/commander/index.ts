@@ -34,6 +34,13 @@ export class DzajCommander {
         this.featuresDir = featuresDir;
         this.testServers = testServers;
 
+        this.client.once("ready", () => {
+            console.log('Logged in as', this.client.user?.displayName);
+            this.init({postgreUrl, redisUrl});
+        });
+    }
+
+    public handleLogin() {
         if(process.env.NODE_ENV === "production") {
             this.client.login(process.env.BOT_PRODUCTION_TOKEN);
         };
@@ -41,11 +48,7 @@ export class DzajCommander {
         if(process.env.NODE_ENV === "development") {
             this.client.login(process.env.BOT_DEVELOPMENT_TOKEN);
         };
-
-        client.once("ready", () => {
-            this.init({postgreUrl, redisUrl});
-        });
-    }
+    };
 
     private async init({postgreUrl, redisUrl}: {postgreUrl: string, redisUrl: string}) {
         const {cacheConnection, DBConnection} = await estabilishDBConnection({postgreUrl, redisUrl});
@@ -59,6 +62,10 @@ export class DzajCommander {
 
     private getClient() {
         return this.client;
+    }
+
+    private setClient(client: Client) {
+        this.client = client;
     }
 
     private terminate() {
