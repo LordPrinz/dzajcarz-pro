@@ -2,7 +2,6 @@
 
 echo -e "┏━━━ 🔧 SETTING-UP GIT HOOKS ━━━━━━━━━━━━━━━━\n"
 
-bun install
 bunx husky
 
 DOTENV_FILE_DIR="$(pwd)"

@@ -4,10 +4,17 @@ WORKDIR /app
 
 COPY bun.lockb package.json ./
 
-RUN bun install
-
 COPY ./src ./src
 COPY ./config ./config
 COPY ./scripts ./scripts
 COPY .env .env
 COPY .husky .husky
+
+RUN chmod -R +x .husky
+RUN chmod -R +x scripts
+
+RUN bun install
+
+RUN bun run prepare
+
+CMD ["bun", "run", "start:prod"]
