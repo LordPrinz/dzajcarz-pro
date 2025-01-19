@@ -6,6 +6,9 @@ class Logger {
   constructor(logFileName: string = 'app.log') {
     this.logFilePath = logFileName;
     Bun.write(this.logFilePath, '');
+  }
+
+  public start(): void {
     this.overrideConsole();
   }
 

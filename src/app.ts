@@ -1,5 +1,5 @@
 import { DzajCommander } from '@/core/commander';
-import { botOwners, intents, partials, testServers } from 'config/bot';
+import { botOwners, intents, partials } from 'config/bot';
 import { Client } from 'discord.js';
 import { join } from 'node:path';
 
@@ -17,5 +17,4 @@ export const dzajcarz = new DzajCommander({
   redisUrl: process.env.REDIS_URL,
   postgreUrl: process.env.POSTGRESQL_URL,
   ownersIds: botOwners,
-  testServers: testServers,
 });
