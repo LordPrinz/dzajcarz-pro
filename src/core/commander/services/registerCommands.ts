@@ -47,7 +47,6 @@ type CommandUsage = {
   updateCooldown?: () => void;
 };
 export const registerCommands = async (instance: DzajCommander, commandsDir: string, prefix: string) => {
-  // Use 'await' to resolve the promise returned by getCommandsMap
   const commandsWithCategories = await getCommandsMap(commandsDir);
 
   const commands = new Map<string, DzajCommand>();

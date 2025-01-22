@@ -1,7 +1,7 @@
 import type { Client } from 'discord.js';
+import type { postgres } from 'bun';
 import { estabilishDBConnection, registerCommands, registerEvents, registerFeatures } from './services';
 import type { DzajCommand } from './services';
-import type postgres from 'postgres';
 import { createClient, type RedisClientType } from 'redis';
 
 type DzajCommanderOptions = {
@@ -23,7 +23,7 @@ export class DzajCommander {
   private ownersIds: string[];
   private featuresDir: string;
   private cacheClient: RedisClientType | null = null;
-  private DBClient: postgres.Sql | null = null;
+  private DBClient: typeof postgres | null = null;
 
   constructor({ client, commandsDir, eventsDir, prefix, ownersIds, featuresDir, postgreUrl, redisUrl }: DzajCommanderOptions) {
     this.client = client;
@@ -83,8 +83,10 @@ export class DzajCommander {
     this.client = client;
   }
 
-  private terminate() {
+  public terminate() {
     this.client.destroy();
+    this.cacheClient?.quit();
+    this.DBClient?.end();
   }
 }
 
