@@ -1,6 +1,5 @@
 import type { Client } from 'discord.js';
-import type { postgres } from 'bun';
-import { estabilishDBConnection, registerCommands, registerEvents, registerFeatures } from './services';
+import { buildDB, registerCommands, registerEvents, registerFeatures } from './services';
 import type { DzajCommand } from './services';
 import { createClient, type RedisClientType } from 'redis';
 
@@ -11,7 +10,6 @@ type DzajCommanderOptions = {
   prefix: string;
   ownersIds: string[];
   featuresDir: string;
-  postgreUrl: string;
   redisUrl: string;
 };
 
@@ -23,9 +21,8 @@ export class DzajCommander {
   private ownersIds: string[];
   private featuresDir: string;
   private cacheClient: RedisClientType | null = null;
-  private DBClient: typeof postgres | null = null;
 
-  constructor({ client, commandsDir, eventsDir, prefix, ownersIds, featuresDir, postgreUrl, redisUrl }: DzajCommanderOptions) {
+  constructor({ client, commandsDir, eventsDir, prefix, ownersIds, featuresDir, redisUrl }: DzajCommanderOptions) {
     this.client = client;
     this.commandsDir = commandsDir;
     this.eventsDir = eventsDir;
@@ -35,7 +32,7 @@ export class DzajCommander {
 
     this.client.once('ready', async () => {
       console.log('Logged in as', this.client.user?.displayName);
-      await this.init({ postgreUrl, redisUrl });
+      await this.init({ redisUrl });
     });
   }
 
@@ -49,11 +46,14 @@ export class DzajCommander {
     }
   }
 
-  private async init({ postgreUrl, redisUrl }: { postgreUrl: string; redisUrl: string }) {
-    this.DBClient = await estabilishDBConnection(postgreUrl);
+  private async init({ redisUrl }: { redisUrl: string }) {
     this.cacheClient = createClient({ url: redisUrl });
-    this.cacheClient.on('error', (err) => console.error('Redis Client Error', err)).connect();
+    this.cacheClient
+      .on('error', (err) => console.error('Redis Client Error', err))
+      .connect()
+      .then(() => console.log('Cache client connected'));
 
+    await buildDB();
     await registerEvents(this, this.eventsDir);
     await registerFeatures(this, this.featuresDir);
     await registerCommands(this, this.commandsDir, this.prefix);
@@ -75,10 +75,6 @@ export class DzajCommander {
     return this.cacheClient;
   }
 
-  public getDBClient() {
-    return this.DBClient;
-  }
-
   public setClient(client: Client) {
     this.client = client;
   }
@@ -86,7 +82,6 @@ export class DzajCommander {
   public terminate() {
     this.client.destroy();
     this.cacheClient?.quit();
-    this.DBClient?.end();
   }
 }
 

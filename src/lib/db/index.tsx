@@ -1,12 +1,10 @@
 import { dzajcarz } from '@/app';
 
-class DB {
-  private db;
+class HybridDB {
   private cache;
 
   constructor() {
     this.cache = dzajcarz.getCacheClient()!;
-    this.db = dzajcarz.getDBClient()!;
   }
 
   protected async getFromCache(key: string) {
@@ -16,20 +14,11 @@ class DB {
   protected async setToCache(key: string, value: string) {
     return this.cache.set(key, value);
   }
-
-  protected async query(query: string) {
-    return this.db`${query}`;
-  }
 }
 
-class DzajDB extends DB {
+class DzajDB extends HybridDB {
   constructor() {
     super();
-    this.buildDB();
-  }
-
-  private async buildDB() {
-    console.log('xd');
   }
 }
 

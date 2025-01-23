@@ -15,6 +15,5 @@ export const dzajcarz = new DzajCommander({
   commandsDir: join(__dirname, 'commands'),
   eventsDir: join(__dirname, 'events'),
   redisUrl: process.env.REDIS_URL,
-  postgreUrl: process.env.POSTGRESQL_URL,
   ownersIds: botOwners,
 });

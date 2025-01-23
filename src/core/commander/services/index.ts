@@ -1,7 +1,7 @@
 import { registerCommands, type DzajCommand } from './registerCommands';
-import { estabilishDBConnection } from './estabilishDBConnection';
+import { buildDB } from './estabilishDBConnection';
 import { registerEvents } from './registerEvents';
 import { registerFeatures } from './registerFeatures';
 
-export { registerCommands, estabilishDBConnection, registerEvents, registerFeatures };
+export { registerCommands, registerEvents, registerFeatures, buildDB };
 export type { DzajCommand };
