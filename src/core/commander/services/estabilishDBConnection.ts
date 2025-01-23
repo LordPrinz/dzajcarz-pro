@@ -97,6 +97,17 @@ export const buildDB = async () => {
     FOREIGN KEY (serviceID) REFERENCES Services(id) ON DELETE CASCADE
   );`;
 
+  await sql`CREATE TABLE IF NOT EXISTS Commands (
+    id VARCHAR(255) PRIMARY KEY
+  )`;
+
+  await sql`CREATE TABLE IF NOT EXISTS DisabledCommands (
+    id SERIAL PRIMARY KEY,
+    serverID VARCHAR(18) NOT NULL,
+    commandID VARCHAR(255) NOT NULL,
+    FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
+    );`;
+
   console.log('Database tables created');
 };
 
