@@ -5,6 +5,7 @@ export default {
   description: 'Answers the damn old question',
   type: 'both',
   guildOnly: true,
+
   ownerOnly: false,
   callback: async ({ interaction, message, channel }) => {
     const randomNumber = getRandom(0, 1);

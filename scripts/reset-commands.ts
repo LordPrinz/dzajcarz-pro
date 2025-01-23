@@ -16,10 +16,10 @@ client.on('ready', async () => {
 });
 
 if (NODE_ENV === 'development') {
-  client.login(process.env.DEV_TOKEN);
+  client.login(process.env.BOT_DEVELOPMENT_TOKEN);
 }
 if (NODE_ENV === 'production') {
-  client.login(process.env.PROD_TOKEN);
+  client.login(process.env.BOT_PRODUCTION_TOKEN);
 }
 
 async function deleteCommands(client: Client) {

@@ -1,4 +1,5 @@
 import {
+  ApplicationCommandType,
   MessageFlags,
   type ApplicationCommandOption,
   type Client,
@@ -13,6 +14,7 @@ import { getCommandsMap } from '../utils/fs';
 import type { DzajCommander } from '..';
 
 export type DzajCommand = {
+  // eslint-disable-next-line @typescript-eslint/no-shadow
   callback: (commandUsage: CommandUsage) => unknown;
   type: 'legacy' | 'slash' | 'both';
   init?: () => void;
@@ -58,8 +60,8 @@ export const registerCommands = async (instance: DzajCommander, commandsDir: str
     }
   }
 
-  const slashCommands = new Set();
-  const legacyCommands = new Set();
+  const slashCommands: Set<string> = new Set();
+  const legacyCommands: Set<string> = new Set();
 
   for (const commandObject of commands) {
     const [commandName, command] = commandObject;
@@ -131,6 +133,29 @@ export const registerCommands = async (instance: DzajCommander, commandsDir: str
       await message.reply(msg);
     }
   });
+
+  instance
+    .getClient()
+    .guilds.fetch()
+    .then((guilds) => {
+      const commandsToRegister = [];
+
+      slashCommands.forEach(async (commandName) => {
+        commandsToRegister.push({
+          name: commandName,
+          description: commands.get(commandName)?.description || '',
+          options: commands.get(commandName)?.options || [],
+          type: ApplicationCommandType.ChatInput,
+        });
+      });
+
+      guilds.forEach(async (guild) => {
+        const detaliedGuild = await guild.fetch();
+        await detaliedGuild.commands.set(commandsToRegister).then((createdCommands) => {
+          console.log(`Registered ${createdCommands.size} commands in ${detaliedGuild.name}`);
+        });
+      });
+    });
 
   instance.getClient().on('interactionCreate', async (interaction) => {
     if (!interaction.isCommand()) return;

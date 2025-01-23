@@ -15,7 +15,7 @@
     "start": "bun run src/main.ts",
     "start:prod": "NODE_ENV=production bun run src/main.ts",
     "test": "bun test",
-    "reset:commands": "bun run src/commands/reset.ts",
+    "reset:commands": "bun run scripts/reset-commands.ts",
     "prepare": "bun run scripts/runner.ts --prepare",
     "build": "bun run scripts/runner.ts --build",
     "format": "bun run scripts/runner.ts --format",
