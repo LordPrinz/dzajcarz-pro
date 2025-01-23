@@ -1,9 +1,10 @@
 import { sql } from 'bun';
+import { services } from 'config/bot';
 import type { Client } from 'discord.js';
 
 export const buildDB = async () => {
   await sql`CREATE TABLE IF NOT EXISTS Server (
-      id VARCHAR(18) PRIMARY KEY,
+      id VARCHAR(19) PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
       imageURL TEXT,
       prefix VARCHAR(10) DEFAULT '!',
@@ -13,7 +14,7 @@ export const buildDB = async () => {
 
   await sql`CREATE TABLE IF NOT EXISTS Channels (
       id VARCHAR(19) PRIMARY KEY,
-      serverID VARCHAR(18) NOT NULL,
+      serverID VARCHAR(19) NOT NULL,
       name VARCHAR(255) NOT NULL,
       type VARCHAR(2) NOT NULL,
       FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
@@ -29,7 +30,7 @@ export const buildDB = async () => {
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS ServerEvents (
-      serverID VARCHAR(18) NOT NULL,
+      serverID VARCHAR(19) NOT NULL,
       eventID INT NOT NULL,
       disabled BOOLEAN DEFAULT FALSE,
       PRIMARY KEY (serverID, eventID),
@@ -38,15 +39,15 @@ export const buildDB = async () => {
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS Users (
-      id VARCHAR(18) PRIMARY KEY,
+      id VARCHAR(19) PRIMARY KEY,
       birthday DATE,
       isPremium BOOLEAN DEFAULT FALSE
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS ServerUsers (
       id SERIAL PRIMARY KEY,
-      userID VARCHAR(18) NOT NULL,
-      serverID VARCHAR(18) NOT NULL,
+      userID VARCHAR(19) NOT NULL,
+      serverID VARCHAR(19) NOT NULL,
       sanity INT DEFAULT 100,
       credits INT DEFAULT 0,
       isDeleted BOOLEAN DEFAULT FALSE,
@@ -56,7 +57,7 @@ export const buildDB = async () => {
 
   await sql`CREATE TABLE IF NOT EXISTS UserEvents (
       eventID INT NOT NULL,
-      userID VARCHAR(18) NOT NULL,
+      userID VARCHAR(19) NOT NULL,
       disabled BOOLEAN DEFAULT FALSE,
       PRIMARY KEY (eventID, userID),
       FOREIGN KEY (eventID) REFERENCES Events(id) ON DELETE CASCADE,
@@ -74,27 +75,26 @@ export const buildDB = async () => {
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS Services (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL
+    id VARCHAR(255) PRIMARY KEY NOT NULL
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS ServerServices (
-    id SERIAL PRIMARY KEY,
     disabled BOOLEAN DEFAULT FALSE,
-    serverID VARCHAR(18) NOT NULL,
-    serviceID INT NOT NULL,
-    enabled BOOLEAN DEFAULT FALSE,
+    serverID VARCHAR(19) NOT NULL,
+    serviceID VARCHAR(255) NOT NULL,
+    PRIMARY KEY (serverID, serviceID),
     FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE,
     FOREIGN KEY (serviceID) REFERENCES Services(id) ON DELETE CASCADE
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS ServiceBlockChannels (
-    id SERIAL PRIMARY KEY,
-    channelID VARCHAR(19) NOT NULL,
-    serviceID INT NOT NULL,
-    serverID VARCHAR(18) NOT NULL,
+    channelID  VARCHAR(19)  NOT NULL,
+    serviceID  VARCHAR(255) NOT NULL,
+    serverID   VARCHAR(19)  NOT NULL,
+    PRIMARY KEY (channelID, serviceID, serverID),
     FOREIGN KEY (channelID) REFERENCES Channels(id) ON DELETE CASCADE,
-    FOREIGN KEY (serviceID) REFERENCES Services(id) ON DELETE CASCADE
+    FOREIGN KEY (serviceID) REFERENCES Services(id) ON DELETE CASCADE,
+    FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS Commands (
@@ -103,7 +103,7 @@ export const buildDB = async () => {
 
   await sql`CREATE TABLE IF NOT EXISTS DisabledCommands (
     id SERIAL PRIMARY KEY,
-    serverID VARCHAR(18) NOT NULL,
+    serverID VARCHAR(19) NOT NULL,
     commandID VARCHAR(255) NOT NULL,
     FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
     );`;
@@ -113,10 +113,16 @@ export const buildDB = async () => {
 
 export const syncDB = async (client: Client) => {
   const guilds = await client.guilds.fetch();
+
+  services.forEach(async (service) => {
+    const serviceName = service;
+    await sql`INSERT INTO Services (id) VALUES (${serviceName}) ON CONFLICT DO NOTHING;`;
+  });
+
   guilds.forEach(async (guild) => {
     const id = guild.id;
-    const name = guild.name;
-    const imageURL = guild.iconURL();
+    const name = guild.name || '';
+    const imageURL = guild.iconURL() || '';
     await sql`INSERT INTO Server (id, name, imageURL) VALUES (${id}, ${name}, ${imageURL}) ON CONFLICT DO NOTHING;`;
 
     const guildInfoDetalied = await guild.fetch();
@@ -129,5 +135,21 @@ export const syncDB = async (client: Client) => {
       const type = channel.type.toString();
       await sql`INSERT INTO Channels (id, serverID, name, type) VALUES (${chId}, ${serverID}, ${chName}, ${type}) ON CONFLICT DO NOTHING;`;
     });
+
+    const users = await guildInfoDetalied.members.fetch();
+
+    users.forEach(async (user) => {
+      const userId = user.id;
+      const birthday = null;
+      await sql`INSERT INTO Users (id, birthday) VALUES (${userId}, ${birthday}) ON CONFLICT DO NOTHING;`;
+      await sql`INSERT INTO ServerUsers (userID, serverID) VALUES (${userId}, ${guild.id}) ON CONFLICT DO NOTHING;`;
+    });
+
+    for (const service of services) {
+      await sql`
+      INSERT INTO ServerServices (serverID, serviceID) 
+      VALUES (${guild.id}, ${service})
+      ON CONFLICT (serverID, serviceID) DO NOTHING;`;
+    }
   });
 };

@@ -12,6 +12,7 @@ import {
 } from 'discord.js';
 import { getCommandsMap } from '../utils/fs';
 import type { DzajCommander } from '..';
+import { sql } from 'bun';
 
 export type DzajCommand = {
   // eslint-disable-next-line @typescript-eslint/no-shadow
@@ -59,6 +60,10 @@ export const registerCommands = async (instance: DzajCommander, commandsDir: str
       commands.set(commandName, command);
     }
   }
+
+  [...commands.keys()].forEach(async (commandName) => {
+    await sql`INSERT INTO Commands (id) VALUES (${commandName}) ON CONFLICT DO NOTHING;`;
+  });
 
   const slashCommands: Set<string> = new Set();
   const legacyCommands: Set<string> = new Set();
@@ -138,7 +143,7 @@ export const registerCommands = async (instance: DzajCommander, commandsDir: str
     .getClient()
     .guilds.fetch()
     .then((guilds) => {
-      const commandsToRegister = [];
+      const commandsToRegister: any = [];
 
       slashCommands.forEach(async (commandName) => {
         commandsToRegister.push({
