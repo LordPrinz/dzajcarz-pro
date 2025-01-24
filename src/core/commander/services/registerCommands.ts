@@ -1,3 +1,5 @@
+import type {
+  AutocompleteInteraction} from 'discord.js';
 import {
   ApplicationCommandType,
   MessageFlags,
@@ -6,16 +8,16 @@ import {
   type CommandInteraction,
   type Guild,
   type GuildMember,
+  type Interaction,
   type Message,
   type TextBasedChannel,
   type User,
 } from 'discord.js';
 import { getCommandsMap } from '../utils/fs';
-import type { DzajCommander } from '..';
 import { sql } from 'bun';
+import type { DzajCommander } from '..';
 
 export type DzajCommand = {
-  // eslint-disable-next-line @typescript-eslint/no-shadow
   callback: (commandUsage: CommandUsage) => unknown;
   type: 'legacy' | 'slash' | 'both';
   init?: () => void;
@@ -30,7 +32,7 @@ export type DzajCommand = {
   correctSyntax?: string;
   expectedArgs?: string;
   options?: ApplicationCommandOption[];
-  autocomplete?: () => void;
+  autocomplete?: (focusedOption: string, commandUsage: CommandUsage) => { name: string; value: string }[] | Promise<{ name: string; value: string }[]>;
   reply?: boolean;
   delete?: boolean;
 };
@@ -39,7 +41,7 @@ type CommandUsage = {
   client: Client;
   instance: DzajCommander;
   message?: Message | null;
-  interaction?: CommandInteraction | null;
+  interaction?: CommandInteraction | AutocompleteInteraction | null;
   args: string[];
   text: string;
   guild?: Guild | null;
@@ -49,6 +51,7 @@ type CommandUsage = {
   cancelCooldown?: () => void;
   updateCooldown?: () => void;
 };
+
 export const registerCommands = async (instance: DzajCommander, commandsDir: string, prefix: string) => {
   const commandsWithCategories = await getCommandsMap(commandsDir);
 
@@ -146,58 +149,103 @@ export const registerCommands = async (instance: DzajCommander, commandsDir: str
       const commandsToRegister: any = [];
 
       slashCommands.forEach(async (commandName) => {
+        const command = commands.get(commandName);
+        if (!command) return;
+
         commandsToRegister.push({
           name: commandName,
-          description: commands.get(commandName)?.description || '',
-          options: commands.get(commandName)?.options || [],
+          description: command.description || '',
+          options:
+            command.options?.map((option) => ({
+              ...option,
+              autocomplete: command.autocomplete ? true : undefined,
+            })) || [],
           type: ApplicationCommandType.ChatInput,
         });
       });
 
       guilds.forEach(async (guild) => {
-        const detaliedGuild = await guild.fetch();
-        await detaliedGuild.commands.set(commandsToRegister).then((createdCommands) => {
-          console.log(`Registered ${createdCommands.size} commands in ${detaliedGuild.name}`);
+        const detailedGuild = await guild.fetch();
+        await detailedGuild.commands.set(commandsToRegister).then((createdCommands) => {
+          console.log(`Registered ${createdCommands.size} commands in ${detailedGuild.name}`);
         });
       });
     });
 
-  instance.getClient().on('interactionCreate', async (interaction) => {
-    if (!interaction.isCommand()) return;
+  instance.getClient().on('interactionCreate', async (interaction: Interaction) => {
+    if (interaction.isAutocomplete()) {
+      const autocompleteInteraction = interaction as AutocompleteInteraction;
 
-    const command = commands.get(interaction.commandName);
-    if (!command) return;
+      const command = commands.get(autocompleteInteraction.commandName);
+      if (!command || !command.autocomplete) return;
 
-    if (command.ownerOnly && !instance.getOwnersIds().includes(interaction.user.id)) {
-      return interaction.reply({ content: 'This command can only be used by the bot owner.', flags: MessageFlags.Ephemeral });
-    }
+      const focusedOption = autocompleteInteraction.options.getFocused();
+      const commandUsage: CommandUsage = {
+        client: instance.getClient(),
+        interaction: autocompleteInteraction,
+        instance,
+        args: [],
+        text: autocompleteInteraction.commandName,
+        user: autocompleteInteraction.user,
+        channel: autocompleteInteraction.channel,
+        message: null,
+      };
 
-    if (command.guildOnly && !interaction.guild) {
-      return interaction.reply({ content: 'This command can only be used within a server.', flags: MessageFlags.Ephemeral });
-    }
-
-    if (command.permissions) {
-      const member = interaction.member as GuildMember;
-      if (!member.permissions.has(command.permissions)) {
-        return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+      try {
+        const suggestions = await command.autocomplete(focusedOption, commandUsage);
+        await autocompleteInteraction.respond(suggestions);
+      } catch (error) {
+        console.error(`Autocomplete error for command "${autocompleteInteraction.commandName}":`, error);
       }
+      return;
     }
 
-    const commandUsage: CommandUsage = {
-      client: instance.getClient(),
-      interaction,
-      instance,
-      args: interaction.options.data.map((option) => option.value) as string[],
-      text: interaction.commandName,
-      user: interaction.user,
-      channel: interaction.channel,
-      message: null,
-    };
+    if (interaction.isCommand()) {
+      const commandInteraction = interaction as CommandInteraction;
 
-    const msg = await command.callback(commandUsage);
+      const command = commands.get(commandInteraction.commandName);
+      if (!command) return;
 
-    if (msg) {
-      await interaction.reply(msg);
+      if (command.ownerOnly && !instance.getOwnersIds().includes(commandInteraction.user.id)) {
+        return commandInteraction.reply({
+          content: 'This command can only be used by the bot owner.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      if (command.guildOnly && !commandInteraction.guild) {
+        return commandInteraction.reply({
+          content: 'This command can only be used within a server.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      if (command.permissions) {
+        const member = commandInteraction.member as GuildMember;
+        if (!member.permissions.has(command.permissions)) {
+          return commandInteraction.reply({
+            content: 'You do not have permission to use this command.',
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+      }
+
+      const commandUsage: CommandUsage = {
+        client: instance.getClient(),
+        interaction: commandInteraction,
+        instance,
+        args: commandInteraction.options.data.map((option) => option.value) as string[],
+        text: commandInteraction.commandName,
+        user: commandInteraction.user,
+        channel: commandInteraction.channel,
+        message: null,
+      };
+
+      const msg = await command.callback(commandUsage);
+
+      if (msg) {
+        await commandInteraction.reply(msg);
+      }
     }
   });
 };

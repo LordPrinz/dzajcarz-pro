@@ -38,12 +38,25 @@ class DzajDB extends HybridDB {
     return this.deleteFromCache(key);
   }
 
-  /**
-   * Returns whether a service is disabled for an entire server
-   * and which channels are specifically blocked for that service.
-   *
-   * Caches results under a key like: "servicePrivileges:<guildId>:<service>"
-   */
+  async updateServicePrivileges(guildId: string, service: string, disabled: boolean, disabledChannel: string) {
+    const cacheKey = `servicePrivileges:${guildId}:${service}`;
+
+    await this.deleteFromCache(cacheKey);
+
+    await sql`
+        INSERT INTO serverservices (serverid, serviceid, disabled)
+        VALUES (${guildId}, ${service}, ${disabled})
+        ON DUPLICATE KEY UPDATE disabled = ${disabled}
+      `;
+
+    if (disabledChannel) {
+      await sql`
+          INSERT INTO serviceblockchannels (serverid, serviceid, channelid)
+          VALUES (${guildId}, ${service}, ${disabledChannel})
+        `;
+    }
+  }
+
   async getServicePrivileges(guildId: string, service: string): Promise<[boolean, string[]]> {
     const cacheKey = `servicePrivileges:${guildId}:${service}`;
 
