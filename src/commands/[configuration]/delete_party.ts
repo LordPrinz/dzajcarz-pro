@@ -1,6 +1,6 @@
 import type { DzajCommand } from '@/core/commander';
 import { database } from '@/lib/db';
-import type { CategoryChannel} from 'discord.js';
+import type { CategoryChannel } from 'discord.js';
 import { ApplicationCommandOptionType, MessageFlags, PermissionFlagsBits } from 'discord.js';
 
 export default {
@@ -22,19 +22,19 @@ export default {
   deferReply: true,
   autocomplete: async (focusedOption, { interaction }) => {
     const partyAreas = await database.getServerPartyAreas(interaction?.guildId as string);
-    const partyAreaNames = (await Promise.all(partyAreas.map((party) => party.categoryId).map(async (id) => interaction?.guild?.channels.fetch(id)))).map(
+    const partyAreaNames = (await Promise.all(partyAreas.map((party) => party?.categoryId).map(async (id) => interaction?.guild?.channels.fetch(id!)))).map(
       (channel) => channel?.name,
     );
 
     return partyAreaNames
       .filter((service) => service?.toLowerCase().startsWith(focusedOption.toLowerCase()))
-      .map((service, index) => ({ name: service, value: partyAreas[index].categoryId }));
+      .map((service, index) => ({ name: service, value: partyAreas?.at(index)?.categoryId }));
   },
   callback: async ({ guild, args, interaction }) => {
     const party = args[0] as string;
     const partyAreas = await database.getServerPartyAreas(guild!.id);
 
-    if (!partyAreas.find((partyArea) => partyArea.categoryId === party)) {
+    if (!partyAreas.find((partyArea) => partyArea?.categoryId === party)) {
       return { content: `Party <#${party}> doesn't exist`, flags: MessageFlags.Ephemeral };
     }
 
@@ -43,9 +43,9 @@ export default {
     const category = guild?.channels.cache.get(party) as CategoryChannel;
     await category?.delete().catch(() => console.warn('Error deleting category'));
 
-    const targetSplitChannelId = partyAreas.find((partyArea) => partyArea.categoryId === party)?.splitChannelId;
+    const targetSplitChannelId = partyAreas.find((partyArea) => partyArea?.categoryId === party)?.splitChannelId;
 
-    await database.deletePartyArea(guild!.id, targetSplitChannelId);
+    await database.deletePartyArea(guild!.id, targetSplitChannelId!, category.id);
 
     if (interaction?.isRepliable()) {
       await interaction.reply({ content: `Deleted party <#${party}>`, flags: MessageFlags.Ephemeral }).catch(() => console.warn('Error sending reply'));

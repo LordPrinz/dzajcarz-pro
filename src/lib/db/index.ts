@@ -261,7 +261,7 @@ class DzajDB extends HybridDB {
   }
 
   async savePartyArea({ guildId, categoryId, generationTemplate, commandChannelId, splitChannelId }: PartyArea & { guildId: string }) {
-    const cacheKey = `partyArea:${guildId}:${splitChannelId}`;
+    const cacheKey = `partyArea:${guildId}:${categoryId}`;
 
     await this.setToCache(cacheKey, JSON.stringify({ categoryId, generationTemplate, commandChannelId, splitChannelId }));
 
@@ -272,7 +272,7 @@ class DzajDB extends HybridDB {
       DO UPDATE SET generationtemplate = EXCLUDED.generationtemplate, commandchannelid = EXCLUDED.commandchannelid, splitchannelid = EXCLUDED.splitchannelid;
     `;
 
-    await this.savePartyChannel(guildId, splitChannelId);
+    await this.savePartyChannel(guildId, categoryId);
     if (commandChannelId) {
       await this.saveCommandChannel(guildId, commandChannelId);
     }
@@ -280,8 +280,8 @@ class DzajDB extends HybridDB {
     await this.saveSplitChannelToCache(guildId, splitChannelId);
   }
 
-  async getPartyArea(guildId: string, splitChannelId: string): Promise<PartyArea | null> {
-    const cacheKey = `partyArea:${guildId}:${splitChannelId}`;
+  async getPartyArea(guildId: string, categoryId: string): Promise<PartyArea | null> {
+    const cacheKey = `partyArea:${guildId}:${categoryId}`;
 
     const cachedValue = await this.getFromCache(cacheKey);
 
@@ -293,7 +293,7 @@ class DzajDB extends HybridDB {
       SELECT categoryid, generationtemplate, commandchannelid, splitchannelid
       FROM partyarea
       WHERE serverid = ${guildId}
-      AND splitchannelid = ${splitChannelId}
+      AND categoryid = ${categoryId}
     `;
 
     if (!res || res.length === 0) {
@@ -352,12 +352,12 @@ class DzajDB extends HybridDB {
     await this.deleteFromCache(cacheKey);
   }
 
-  async deletePartyArea(guildId: string, splitChannelId: string) {
-    const cacheKey = `partyArea:${guildId}:${splitChannelId}`;
+  async deletePartyArea(guildId: string, splitChannelId: string, categoryId: string) {
+    const cacheKey = `partyArea:${guildId}:${categoryId}`;
     const cachedValue = JSON.parse((await this.getFromCache(cacheKey)) || '[]');
     await this.deleteSplitChannelFromCache(guildId, splitChannelId);
     await this.deleteCommandChannel(guildId, cachedValue.commandChannelId);
-    await this.deletePartyChannel(guildId, splitChannelId);
+    await this.deletePartyChannel(guildId, categoryId);
     await this.deleteFromCache(cacheKey);
     await this.deleteCustomVoiceChannels(guildId);
 
