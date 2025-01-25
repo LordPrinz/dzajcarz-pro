@@ -16,6 +16,8 @@ export default async (message: Message) => {
     return;
   }
 
+  console.log('JAA');
+
   const randomNumber = getRandom(1, 10);
 
   if (randomNumber !== 1) {
