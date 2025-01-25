@@ -1,5 +1,4 @@
-import type {
-  AutocompleteInteraction} from 'discord.js';
+import type { AutocompleteInteraction } from 'discord.js';
 import {
   ApplicationCommandType,
   MessageFlags,
@@ -132,6 +131,8 @@ export const registerCommands = async (instance: DzajCommander, commandsDir: str
       text: message.content,
       user: message.author,
       channel: message.channel,
+      guild: message.guild,
+      member: message.member!,
       interaction: null,
     };
 
@@ -189,6 +190,8 @@ export const registerCommands = async (instance: DzajCommander, commandsDir: str
         user: autocompleteInteraction.user,
         channel: autocompleteInteraction.channel,
         message: null,
+        guild: autocompleteInteraction.guild,
+        member: autocompleteInteraction.member as GuildMember,
       };
 
       try {
@@ -239,6 +242,8 @@ export const registerCommands = async (instance: DzajCommander, commandsDir: str
         user: commandInteraction.user,
         channel: commandInteraction.channel,
         message: null,
+        guild: commandInteraction.guild,
+        member: commandInteraction.member as GuildMember,
       };
 
       const msg = await command.callback(commandUsage);

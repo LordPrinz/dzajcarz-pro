@@ -1,10 +1,11 @@
 import { sql } from 'bun';
 import { services } from 'config/bot';
 import type { Client } from 'discord.js';
+import type { DzajCommander } from '..';
 
 export const buildDB = async () => {
   await sql`CREATE TABLE IF NOT EXISTS Server (
-      id VARCHAR(19) PRIMARY KEY,
+      id VARCHAR(20) PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
       imageURL TEXT,
       prefix VARCHAR(10) DEFAULT '!',
@@ -13,8 +14,8 @@ export const buildDB = async () => {
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS Channels (
-      id VARCHAR(19) PRIMARY KEY,
-      serverID VARCHAR(19) NOT NULL,
+      id VARCHAR(20) PRIMARY KEY,
+      serverID VARCHAR(20) NOT NULL,
       name VARCHAR(255) NOT NULL,
       type VARCHAR(2) NOT NULL,
       FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
@@ -25,12 +26,12 @@ export const buildDB = async () => {
       command VARCHAR(255) NOT NULL,
       type VARCHAR(50) NOT NULL,
       time TIMESTAMP,
-      channelID VARCHAR(19),
+      channelID VARCHAR(20),
       FOREIGN KEY (channelID) REFERENCES Channels(id) ON DELETE SET NULL
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS ServerEvents (
-      serverID VARCHAR(19) NOT NULL,
+      serverID VARCHAR(20) NOT NULL,
       eventID INT NOT NULL,
       disabled BOOLEAN DEFAULT FALSE,
       PRIMARY KEY (serverID, eventID),
@@ -39,15 +40,15 @@ export const buildDB = async () => {
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS Users (
-      id VARCHAR(19) PRIMARY KEY,
+      id VARCHAR(20) PRIMARY KEY,
       birthday DATE,
       isPremium BOOLEAN DEFAULT FALSE
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS ServerUsers (
       id SERIAL PRIMARY KEY,
-      userID VARCHAR(19) NOT NULL,
-      serverID VARCHAR(19) NOT NULL,
+      userID VARCHAR(20) NOT NULL,
+      serverID VARCHAR(20) NOT NULL,
       sanity INT DEFAULT 100,
       credits INT DEFAULT 0,
       isDeleted BOOLEAN DEFAULT FALSE,
@@ -57,7 +58,7 @@ export const buildDB = async () => {
 
   await sql`CREATE TABLE IF NOT EXISTS UserEvents (
       eventID INT NOT NULL,
-      userID VARCHAR(19) NOT NULL,
+      userID VARCHAR(20) NOT NULL,
       disabled BOOLEAN DEFAULT FALSE,
       PRIMARY KEY (eventID, userID),
       FOREIGN KEY (eventID) REFERENCES Events(id) ON DELETE CASCADE,
@@ -80,7 +81,7 @@ export const buildDB = async () => {
 
   await sql`CREATE TABLE IF NOT EXISTS ServerServices (
     disabled BOOLEAN DEFAULT FALSE,
-    serverID VARCHAR(19) NOT NULL,
+    serverID VARCHAR(20) NOT NULL,
     serviceID VARCHAR(255) NOT NULL,
     PRIMARY KEY (serverID, serviceID),
     FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE,
@@ -88,9 +89,9 @@ export const buildDB = async () => {
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS ServiceBlockChannels (
-    channelID  VARCHAR(19)  NOT NULL,
+    channelID  VARCHAR(20)  NOT NULL,
     serviceID  VARCHAR(255) NOT NULL,
-    serverID   VARCHAR(19)  NOT NULL,
+    serverID   VARCHAR(20)  NOT NULL,
     PRIMARY KEY (channelID, serviceID, serverID),
     FOREIGN KEY (channelID) REFERENCES Channels(id) ON DELETE CASCADE,
     FOREIGN KEY (serviceID) REFERENCES Services(id) ON DELETE CASCADE,
@@ -103,10 +104,20 @@ export const buildDB = async () => {
 
   await sql`CREATE TABLE IF NOT EXISTS DisabledCommands (
     id SERIAL PRIMARY KEY,
-    serverID VARCHAR(19) NOT NULL,
+    serverID VARCHAR(20) NOT NULL,
     commandID VARCHAR(255) NOT NULL,
     FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
     );`;
+
+  await sql`CREATE TABLE IF NOT EXISTS PartyArea (
+    categoryID VARCHAR(20),
+    serverID VARCHAR(20),
+    generationTemplate VARCHAR(255),
+    commandChannelId VARCHAR(20) DEFAULT NULL,
+    splitChannelId VARCHAR(20) DEFAULT NULL,
+    PRIMARY KEY (categoryID, serverID),
+    FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
+  );`;
 
   console.log('Database tables created');
 };
@@ -152,4 +163,12 @@ export const syncDB = async (client: Client) => {
       ON CONFLICT (serverID, serviceID) DO NOTHING;`;
     }
   });
+};
+
+export const syncCache = async (instance: DzajCommander) => {
+  const cacheClient = instance.getCacheClient();
+
+  if (!cacheClient) {
+    return;
+  }
 };

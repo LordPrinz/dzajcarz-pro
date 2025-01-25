@@ -26,18 +26,6 @@ class DzajDB extends HybridDB {
     super();
   }
 
-  async get(key: string) {
-    return this.getFromCache(key);
-  }
-
-  async set(key: string, value: string) {
-    return this.setToCache(key, value);
-  }
-
-  async delete(key: string) {
-    return this.deleteFromCache(key);
-  }
-
   async updateServicePrivileges(
     guildId: string,
     service: string,
@@ -223,6 +211,258 @@ class DzajDB extends HybridDB {
 
   async enableServiceChannel(guildId: string, service: string, channelId: string) {
     await this.updateServicePrivileges(guildId, service, 'no-action', [{ id: channelId, action: 'remove' }]);
+  }
+
+  async saveSplitChannelToCache(guildId: string, splitChannelId: string) {
+    const cacheKey = `splitChannel:${guildId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue?.length == 0) {
+      const newCacheValue = [splitChannelId];
+      await this.setToCache(cacheKey, JSON.stringify(newCacheValue));
+    } else {
+      const splitChannels = JSON.parse(cachedValue || '[]');
+      if (!splitChannels.includes(splitChannelId)) {
+        splitChannels.push(splitChannelId);
+        await this.setToCache(cacheKey, JSON.stringify(splitChannels));
+      }
+    }
+  }
+
+  async deleteSplitChannelFromCache(guildId: string, splitChannelId: string) {
+    const cacheKey = `splitChannel:${guildId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue?.length == 0) {
+      return;
+    }
+
+    const splitChannels = JSON.parse(cachedValue || '[]');
+    const newSplitChannels = splitChannels.filter((id: string) => id !== splitChannelId);
+
+    await this.setToCache(cacheKey, JSON.stringify(newSplitChannels));
+  }
+
+  async isSplitChannel(guildId: string, splitChannelId: string) {
+    const cacheKey = `splitChannel:${guildId}`;
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    return cachedValue?.includes(splitChannelId);
+  }
+
+  async savePartyArea({
+    guildId,
+    categoryId,
+    generationTemplate,
+    commandChannelId,
+    splitChannelId,
+  }: {
+    guildId: string;
+    categoryId: string;
+    generationTemplate: string;
+    commandChannelId: string | null;
+    splitChannelId: string;
+  }) {
+    const cacheKey = `partyArea:${guildId}:${splitChannelId}`;
+
+    await this.setToCache(cacheKey, JSON.stringify({ categoryId, generationTemplate, commandChannelId, splitChannelId }));
+
+    await sql`
+      INSERT INTO partyarea (categoryid, serverid, generationtemplate, commandchannelid, splitchannelid)
+      VALUES (${categoryId}, ${guildId}, ${generationTemplate}, ${commandChannelId}, ${splitChannelId})
+      ON CONFLICT (categoryid, serverid)
+      DO UPDATE SET generationtemplate = EXCLUDED.generationtemplate, commandchannelid = EXCLUDED.commandchannelid, splitchannelid = EXCLUDED.splitchannelid;
+    `;
+
+    await this.savePartyChannel(guildId, splitChannelId);
+    if (commandChannelId) {
+      await this.saveCommandChannel(guildId, commandChannelId);
+    }
+
+    await this.saveSplitChannelToCache(guildId, splitChannelId);
+  }
+
+  async getPartyArea(guildId: string, splitChannelId: string) {
+    const cacheKey = `partyArea:${guildId}:${splitChannelId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue) {
+      return JSON.parse(cachedValue);
+    }
+
+    const res = await sql`
+      SELECT categoryid, generationtemplate, commandchannelid, splitchannelid
+      FROM partyarea
+      WHERE serverid = ${guildId}
+      AND splitchannelid = ${splitChannelId}
+    `;
+
+    if (!res || res.length === 0) {
+      return null;
+    }
+
+    const partyArea = res[0];
+
+    await this.setToCache(cacheKey, JSON.stringify(partyArea));
+
+    return partyArea;
+  }
+
+  async addCustomVoiceChannel(guildId: string, channelId: string, splitChannelId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}:${splitChannelId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue?.length == 0) {
+      const newCacheValue = [channelId];
+      await this.setToCache(cacheKey, JSON.stringify(newCacheValue));
+    } else {
+      const customVoiceChannels = JSON.parse(cachedValue || '[]');
+      if (!customVoiceChannels.includes(channelId)) {
+        customVoiceChannels.push(channelId);
+        await this.setToCache(cacheKey, JSON.stringify(customVoiceChannels));
+      }
+    }
+  }
+
+  async getCustomVoiceChannels(guildId: string, splitChannelId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}:${splitChannelId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    return JSON.parse(cachedValue || '[]');
+  }
+
+  async deleteCustomVoiceChannel(guildId: string, splitChannelId: string, voiceChannelId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}:${splitChannelId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue?.length == 0) {
+      return;
+    }
+
+    const customVoiceChannels = JSON.parse(cachedValue || '[]');
+    const newCustomVoiceChannels = customVoiceChannels.filter((id: string) => id !== voiceChannelId);
+
+    await this.setToCache(cacheKey, JSON.stringify(newCustomVoiceChannels));
+  }
+
+  async deleteCustomVoiceChannels(guildId: string, splitChannelId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}:${splitChannelId}`;
+    await this.deleteFromCache(cacheKey);
+  }
+
+  async deletePartyArea(guildId: string, splitChannelId: string) {
+    const cacheKey = `partyArea:${guildId}:${splitChannelId}`;
+    const cachedValue = JSON.parse((await this.getFromCache(cacheKey)) || '[]');
+    await this.deleteSplitChannelFromCache(guildId, splitChannelId);
+    await this.deleteCommandChannel(guildId, cachedValue.commandChannelId);
+    await this.deletePartyChannel(guildId, splitChannelId);
+    await this.deleteFromCache(cacheKey);
+    await this.deleteCustomVoiceChannels(guildId, splitChannelId);
+
+    await sql`
+      DELETE FROM partyarea
+      WHERE serverid = ${guildId}
+      AND splitchannelid = ${splitChannelId}
+    `;
+  }
+
+  async savePartyChannel(guildId: string, channelId: string) {
+    const cacheKey = `partyChannel:${guildId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue?.length == 0) {
+      const newCacheValue = [channelId];
+      await this.setToCache(cacheKey, JSON.stringify(newCacheValue));
+    } else {
+      const partyChannels = JSON.parse(cachedValue || '[]');
+      if (!partyChannels.includes(channelId)) {
+        partyChannels.push(channelId);
+        await this.setToCache(cacheKey, JSON.stringify(partyChannels));
+      }
+    }
+  }
+
+  async isPartyChannel(guildId: string, channelId: string) {
+    const cacheKey = `partyChannel:${guildId}`;
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    return cachedValue?.includes(channelId);
+  }
+
+  async deletePartyChannel(guildId: string, channelId: string) {
+    const cacheKey = `partyChannel:${guildId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue?.length == 0) {
+      return;
+    }
+
+    const partyChannels = JSON.parse(cachedValue || '[]');
+    const newPartyChannels = partyChannels.filter((id: string) => id !== channelId);
+
+    await this.setToCache(cacheKey, JSON.stringify(newPartyChannels));
+  }
+
+  async saveCommandChannel(guildId: string, channelId: string) {
+    const cacheKey = `commandChannel:${guildId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue?.length == 0) {
+      const newCacheValue = [channelId];
+      await this.setToCache(cacheKey, JSON.stringify(newCacheValue));
+    } else {
+      const commandChannels = JSON.parse(cachedValue || '[]');
+      if (!commandChannels.includes(channelId)) {
+        commandChannels.push(channelId);
+        await this.setToCache(cacheKey, JSON.stringify(commandChannels));
+      }
+    }
+  }
+
+  async getServerPartyAreas(guildId: string) {
+    const cacheKey = `splitChannel:${guildId}`;
+
+    const splitChannels = JSON.parse((await this.getFromCache(cacheKey)) || '[]');
+
+    const partyAreas = [];
+
+    for (const splitChannel of splitChannels) {
+      const partyArea = await this.getPartyArea(guildId, splitChannel);
+      partyAreas.push(partyArea);
+    }
+
+    return partyAreas;
+  }
+
+  async isCommandChannel(guildId: string, channelId: string) {
+    const cacheKey = `commandChannel:${guildId}`;
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    return cachedValue?.includes(channelId);
+  }
+
+  async deleteCommandChannel(guildId: string, channelId: string) {
+    const cacheKey = `commandChannel:${guildId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue?.length == 0) {
+      return;
+    }
+
+    const commandChannels = JSON.parse(cachedValue || '[]');
+    const newCommandChannels = commandChannels.filter((id: string) => id !== channelId);
+
+    await this.setToCache(cacheKey, JSON.stringify(newCommandChannels));
   }
 }
 
