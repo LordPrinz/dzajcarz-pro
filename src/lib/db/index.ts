@@ -1,6 +1,14 @@
 import { dzajcarz } from '@/app';
 import { sql } from 'bun';
 
+export type PartyArea = {
+  categoryId: string;
+  serverId: string;
+  generationTemplate: string;
+  commandChannelId: string | null;
+  splitChannelId: string;
+};
+
 class HybridDB {
   private cache;
 
@@ -252,19 +260,7 @@ class DzajDB extends HybridDB {
     return cachedValue?.includes(splitChannelId);
   }
 
-  async savePartyArea({
-    guildId,
-    categoryId,
-    generationTemplate,
-    commandChannelId,
-    splitChannelId,
-  }: {
-    guildId: string;
-    categoryId: string;
-    generationTemplate: string;
-    commandChannelId: string | null;
-    splitChannelId: string;
-  }) {
+  async savePartyArea({ guildId, categoryId, generationTemplate, commandChannelId, splitChannelId }: PartyArea & { guildId: string }) {
     const cacheKey = `partyArea:${guildId}:${splitChannelId}`;
 
     await this.setToCache(cacheKey, JSON.stringify({ categoryId, generationTemplate, commandChannelId, splitChannelId }));
@@ -284,7 +280,7 @@ class DzajDB extends HybridDB {
     await this.saveSplitChannelToCache(guildId, splitChannelId);
   }
 
-  async getPartyArea(guildId: string, splitChannelId: string) {
+  async getPartyArea(guildId: string, splitChannelId: string): Promise<PartyArea | null> {
     const cacheKey = `partyArea:${guildId}:${splitChannelId}`;
 
     const cachedValue = await this.getFromCache(cacheKey);
@@ -311,8 +307,8 @@ class DzajDB extends HybridDB {
     return partyArea;
   }
 
-  async addCustomVoiceChannel(guildId: string, channelId: string, splitChannelId: string) {
-    const cacheKey = `customVoiceChannels:${guildId}:${splitChannelId}`;
+  async addCustomVoiceChannel(guildId: string, channelId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}`;
 
     const cachedValue = await this.getFromCache(cacheKey);
 
@@ -328,16 +324,16 @@ class DzajDB extends HybridDB {
     }
   }
 
-  async getCustomVoiceChannels(guildId: string, splitChannelId: string) {
-    const cacheKey = `customVoiceChannels:${guildId}:${splitChannelId}`;
+  async getCustomVoiceChannels(guildId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}`;
 
     const cachedValue = await this.getFromCache(cacheKey);
 
     return JSON.parse(cachedValue || '[]');
   }
 
-  async deleteCustomVoiceChannel(guildId: string, splitChannelId: string, voiceChannelId: string) {
-    const cacheKey = `customVoiceChannels:${guildId}:${splitChannelId}`;
+  async deleteCustomVoiceChannel(guildId: string, voiceChannelId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}`;
 
     const cachedValue = await this.getFromCache(cacheKey);
 
@@ -351,8 +347,8 @@ class DzajDB extends HybridDB {
     await this.setToCache(cacheKey, JSON.stringify(newCustomVoiceChannels));
   }
 
-  async deleteCustomVoiceChannels(guildId: string, splitChannelId: string) {
-    const cacheKey = `customVoiceChannels:${guildId}:${splitChannelId}`;
+  async deleteCustomVoiceChannels(guildId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}`;
     await this.deleteFromCache(cacheKey);
   }
 
@@ -363,7 +359,7 @@ class DzajDB extends HybridDB {
     await this.deleteCommandChannel(guildId, cachedValue.commandChannelId);
     await this.deletePartyChannel(guildId, splitChannelId);
     await this.deleteFromCache(cacheKey);
-    await this.deleteCustomVoiceChannels(guildId, splitChannelId);
+    await this.deleteCustomVoiceChannels(guildId);
 
     await sql`
       DELETE FROM partyarea
@@ -445,6 +441,13 @@ class DzajDB extends HybridDB {
 
   async isCommandChannel(guildId: string, channelId: string) {
     const cacheKey = `commandChannel:${guildId}`;
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    return cachedValue?.includes(channelId);
+  }
+
+  async isCustomVoiceChannel(guildId: string, channelId: string) {
+    const cacheKey = `customVoiceChannels:${guildId}`;
     const cachedValue = await this.getFromCache(cacheKey);
 
     return cachedValue?.includes(channelId);
