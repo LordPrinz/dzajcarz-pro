@@ -1,5 +1,5 @@
 import type { Client } from 'discord.js';
-import { buildDB, registerCommands, registerEvents, registerFeatures, syncCache, syncDB } from './services';
+import { buildDB, registerCommands, registerEvents, registerFeatures, syncDB } from './services';
 import type { DzajCommand } from './services';
 import { createClient, type RedisClientType } from 'redis';
 
@@ -55,10 +55,9 @@ export class DzajCommander {
 
     await buildDB();
     await syncDB(this.client);
-    await syncCache(this);
-    await registerEvents(this, this.eventsDir);
-    await registerFeatures(this, this.featuresDir);
     await registerCommands(this, this.commandsDir, this.prefix);
+    await registerFeatures(this, this.featuresDir);
+    await registerEvents(this, this.eventsDir);
   }
 
   public getClient() {

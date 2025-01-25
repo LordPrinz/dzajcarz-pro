@@ -1,7 +1,6 @@
 import { sql } from 'bun';
 import { services } from 'config/bot';
 import type { Client } from 'discord.js';
-import type { DzajCommander } from '..';
 
 export const buildDB = async () => {
   await sql`CREATE TABLE IF NOT EXISTS Server (
@@ -163,12 +162,4 @@ export const syncDB = async (client: Client) => {
       ON CONFLICT (serverID, serviceID) DO NOTHING;`;
     }
   });
-};
-
-export const syncCache = async (instance: DzajCommander) => {
-  const cacheClient = instance.getCacheClient();
-
-  if (!cacheClient) {
-    return;
-  }
 };

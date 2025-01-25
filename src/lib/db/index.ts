@@ -260,24 +260,24 @@ class DzajDB extends HybridDB {
     return cachedValue?.includes(splitChannelId);
   }
 
-  async savePartyArea({ guildId, categoryId, generationTemplate, commandChannelId, splitChannelId }: PartyArea & { guildId: string }) {
-    const cacheKey = `partyArea:${guildId}:${categoryId}`;
+  async savePartyArea({ serverId, categoryId, generationTemplate, commandChannelId, splitChannelId }: PartyArea) {
+    const cacheKey = `partyArea:${serverId}:${categoryId}`;
 
     await this.setToCache(cacheKey, JSON.stringify({ categoryId, generationTemplate, commandChannelId, splitChannelId }));
 
     await sql`
       INSERT INTO partyarea (categoryid, serverid, generationtemplate, commandchannelid, splitchannelid)
-      VALUES (${categoryId}, ${guildId}, ${generationTemplate}, ${commandChannelId}, ${splitChannelId})
+      VALUES (${categoryId}, ${serverId}, ${generationTemplate}, ${commandChannelId}, ${splitChannelId})
       ON CONFLICT (categoryid, serverid)
       DO UPDATE SET generationtemplate = EXCLUDED.generationtemplate, commandchannelid = EXCLUDED.commandchannelid, splitchannelid = EXCLUDED.splitchannelid;
     `;
 
-    await this.savePartyChannel(guildId, categoryId);
+    await this.savePartyChannel(serverId, categoryId);
     if (commandChannelId) {
-      await this.saveCommandChannel(guildId, commandChannelId);
+      await this.saveCommandChannel(serverId, commandChannelId);
     }
 
-    await this.saveSplitChannelToCache(guildId, splitChannelId);
+    await this.saveSplitChannelToCache(serverId, splitChannelId);
   }
 
   async getPartyArea(guildId: string, categoryId: string): Promise<PartyArea | null> {

@@ -116,7 +116,7 @@ export default {
         commandChannelId: commandChannel.id,
         categoryId: newCategoryChannel.id,
         splitChannelId: splitChannel.id,
-        guildId: guild!.id,
+        serverId: guild!.id,
       });
       return;
     }
@@ -126,7 +126,7 @@ export default {
       commandChannelId: null,
       categoryId: newCategoryChannel.id,
       splitChannelId: splitChannel.id,
-      guildId: guild!.id,
+      serverId: guild!.id,
     });
   },
 } as DzajCommand;
