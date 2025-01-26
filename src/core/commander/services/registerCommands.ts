@@ -53,7 +53,6 @@ type CommandUsage = {
 
 export const registerCommands = async (instance: DzajCommander, commandsDir: string, prefix: string) => {
   const commandsWithCategories = await getCommandsMap(commandsDir);
-
   const commands = new Map<string, DzajCommand>();
 
   for (const commandCategory of commandsWithCategories) {

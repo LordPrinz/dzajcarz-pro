@@ -56,8 +56,8 @@ export class DzajCommander {
     await buildDB();
     await syncDB(this.client);
     await registerCommands(this, this.commandsDir, this.prefix);
-    await registerFeatures(this, this.featuresDir);
     await registerEvents(this, this.eventsDir);
+    await registerFeatures(this, this.featuresDir);
   }
 
   public getClient() {
