@@ -17,6 +17,7 @@
     "test": "bun test",
     "checkdeps": "bun outdated | awk '!/eslint/'",
     "reset:commands": "bun run scripts/reset-commands.ts",
+    "reset:commands:prod": "NODE_ENV=production bun run scripts/reset-commands.ts",
     "prepare": "bun run scripts/runner.ts --prepare",
     "build": "bun run scripts/runner.ts --build",
     "format": "bun run scripts/runner.ts --format",
@@ -39,7 +40,7 @@
     "eslint-plugin-security": "^3.0.1",
     "eslint-plugin-unused-imports": "^4.1.4",
     "husky": "^9.1.7",
-    "lint-staged": "^15.4.2",
+    "lint-staged": "^15.4.3",
     "prettier": "^3.4.2"
   },
   "peerDependencies": {

@@ -84,6 +84,10 @@ export class DzajCommander {
     this.client.destroy();
     this.cacheClient?.quit();
   }
+
+  public getCommandsDir() {
+    return this.commandsDir;
+  }
 }
 
 export type { DzajCommand };
