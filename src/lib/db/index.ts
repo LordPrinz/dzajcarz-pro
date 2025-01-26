@@ -467,6 +467,58 @@ class DzajDB extends HybridDB {
 
     await this.setToCache(cacheKey, JSON.stringify(newCommandChannels));
   }
+
+  async setWelcomeChannelToCache(guildId: string, channelId: string, message: string) {
+    const cacheKey = `welcomeChannel:${guildId}`;
+    await this.setToCache(cacheKey, JSON.stringify({ channelId, message }));
+  }
+
+  async saveWelcomeChannel(guildId: string, channelId: string, message: string) {
+    await this.setWelcomeChannelToCache(guildId, channelId, message).catch(() => console.warn('Failed to save welcome channel to cache'));
+
+    await sql`
+      INSERT INTO WelcomeChannel (serverid, channelid, message)
+      VALUES (${guildId}, ${channelId}, ${message})
+      ON CONFLICT (serverid)
+      DO UPDATE SET channelid = EXCLUDED.channelid, message = EXCLUDED.message;
+    `.catch(() => console.warn('Failed to save welcome channel to database'));
+  }
+
+  async getWelcomeChannel(guildId: string) {
+    const cacheKey = `welcomeChannel:${guildId}`;
+
+    const cachedValue = await this.getFromCache(cacheKey);
+
+    if (cachedValue) {
+      return JSON.parse(cachedValue);
+    }
+
+    const res = await sql`
+      SELECT channelid, message
+      FROM WelcomeChannel
+      WHERE serverid = ${guildId}
+    `;
+
+    if (!res || res.length === 0) {
+      return null;
+    }
+
+    const welcomeChannel = res[0];
+
+    await this.setToCache(cacheKey, JSON.stringify(welcomeChannel));
+
+    return welcomeChannel;
+  }
+
+  async deleteWelcomeChannel(guildId: string) {
+    const cacheKey = `welcomeChannel:${guildId}`;
+    await this.deleteFromCache(cacheKey);
+
+    await sql`
+      DELETE FROM WelcomeChannel
+      WHERE serverid = ${guildId}
+    `;
+  }
 }
 
 export const database = new DzajDB();

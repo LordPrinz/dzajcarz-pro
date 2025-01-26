@@ -112,9 +112,17 @@ export const buildDB = async () => {
     categoryID VARCHAR(20),
     serverID VARCHAR(20),
     generationTemplate VARCHAR(255),
-    commandChannelId VARCHAR(20) DEFAULT NULL,
-    splitChannelId VARCHAR(20) DEFAULT NULL,
+    commandChannelID VARCHAR(20) DEFAULT NULL,
+    splitChannelID VARCHAR(20) DEFAULT NULL,
     PRIMARY KEY (categoryID, serverID),
+    FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
+  );`;
+
+  await sql`CREATE TABLE IF NOT EXISTS WelcomeChannel (
+    serverID VARCHAR(20),
+    channelID VARCHAR(20),
+    message TEXT,
+    PRIMARY KEY (serverID),
     FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
   );`;
 
