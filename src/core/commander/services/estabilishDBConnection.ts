@@ -143,6 +143,10 @@ export const syncDB = async (client: Client) => {
     const imageURL = guild.iconURL() || '';
     await sql`INSERT INTO Server (id, name, imageURL) VALUES (${id}, ${name}, ${imageURL}) ON CONFLICT DO NOTHING;`;
 
+    services.forEach(async (service) => {
+      await sql`INSERT INTO ServerServices (serverID, serviceID, disabled) VALUES (${id}, ${service}, FALSE) ON CONFLICT DO NOTHING;`;
+    });
+
     const guildInfoDetalied = await guild.fetch();
     const channels = guildInfoDetalied.channels;
 
