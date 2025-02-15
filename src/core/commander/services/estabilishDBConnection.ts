@@ -1,6 +1,8 @@
+import type { DBPartyArea } from '@/lib/db';
 import { sql } from 'bun';
 import { services } from 'config/bot';
 import type { Client } from 'discord.js';
+import type { RedisClientType } from 'redis';
 
 export const buildDB = async () => {
   await sql`CREATE TABLE IF NOT EXISTS Server (
@@ -130,7 +132,7 @@ export const buildDB = async () => {
   console.log('Database tables created');
 };
 
-export const syncDB = async (client: Client) => {
+export const syncDB = async (client: Client, cacheClient: RedisClientType) => {
   const guilds = await client.guilds.fetch();
 
   services.forEach(async (service) => {
@@ -174,5 +176,25 @@ export const syncDB = async (client: Client) => {
       VALUES (${guild.id}, ${service})
       ON CONFLICT (serverID, serviceID) DO NOTHING;`;
     }
+
+    const partyAreas: DBPartyArea[] = await sql`SELECT * FROM PartyArea WHERE serverID = ${guild.id};`;
+
+    const splitChannels = partyAreas.map((area) => area.splitchannelid).flat();
+    const splitChannelCacheKey = `splitChannel:${guild.id}`;
+    await cacheClient.set(splitChannelCacheKey, JSON.stringify(splitChannels));
+
+    partyAreas.forEach(async (area) => {
+      const partyAreaCacheKey = `partyArea:${guild.id}:${area.categoryid}`;
+      await cacheClient.set(
+        partyAreaCacheKey,
+        JSON.stringify({
+          generationTemplate: area.generationtemplate,
+          commandChannelId: area.commandchannelid,
+          splitChannelId: area.splitchannelid,
+          categoryId: area.categoryid,
+          serverId: area.serverid,
+        }),
+      );
+    });
   });
 };

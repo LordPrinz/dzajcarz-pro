@@ -10,6 +10,14 @@ export type PartyArea = {
   splitChannelId: string;
 };
 
+export type DBPartyArea = {
+  categoryid: string;
+  serverid: string;
+  generationtemplate: string;
+  commandchannelid: string | null;
+  splitchannelid: string;
+};
+
 class HybridDB {
   private cache;
 

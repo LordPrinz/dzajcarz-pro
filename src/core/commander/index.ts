@@ -54,7 +54,7 @@ export class DzajCommander {
       .then(() => console.log('Cache client connected'));
 
     await buildDB();
-    await syncDB(this.client);
+    await syncDB(this.client, this.cacheClient);
     await registerCommands(this, this.commandsDir, this.prefix);
     await registerEvents(this, this.eventsDir);
     await registerFeatures(this, this.featuresDir);

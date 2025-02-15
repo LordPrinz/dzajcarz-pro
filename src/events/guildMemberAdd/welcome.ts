@@ -1,5 +1,6 @@
 import { database } from '@/lib/db';
-import { ChannelType, type GuildMember } from 'discord.js';
+import type { TextChannel} from 'discord.js';
+import { type GuildMember } from 'discord.js';
 
 export default async (member: GuildMember) => {
   const { guild } = member;
@@ -8,13 +9,9 @@ export default async (member: GuildMember) => {
 
   if (!data) return;
 
-  const { channelId, message } = data as { channelId: string; message: string };
-
-  const channel = await guild.channels.fetch(channelId);
+  const channel = await guild.channels.fetch(data.channelid || data.channelId);
 
   if (!channel) return;
 
-  if (channel.type !== ChannelType.GuildText) return;
-
-  await channel.send(message.replaceAll('@', `<@${member.id}>`));
+  await (channel as TextChannel).send(data.message.replaceAll('@', `<@${member.id}>`)).catch(() => console.warn('Failed to send welcome message'));
 };
