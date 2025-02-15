@@ -21,10 +21,10 @@ export default {
   minArgs: 1,
   deferReply: true,
   autocomplete: async (focusedOption, { interaction }) => {
-    const partyAreas = await database.getServerPartyAreas(interaction?.guildId as string);
-    const partyAreaNames = (await Promise.all(partyAreas.map((party) => party?.categoryId).map(async (id) => interaction?.guild?.channels.fetch(id!)))).map(
-      (channel) => channel?.name,
-    );
+    const partyAreas = await database.getServerPartyAreas(interaction?.guild!); // eslint-disable-line @typescript-eslint/no-non-null-asserted-optional-chain
+    const partyAreaNames = (
+      await Promise.all(partyAreas.map((party) => party?.categoryId ?? '').map(async (id) => (id ? interaction?.guild?.channels.fetch(id) : null)))
+    ).map((channel) => channel?.name ?? 'Unknown');
 
     return partyAreaNames
       .filter((service) => service?.toLowerCase().startsWith(focusedOption.toLowerCase()))
@@ -32,7 +32,7 @@ export default {
   },
   callback: async ({ guild, args, interaction }) => {
     const party = args[0] as string;
-    const partyAreas = await database.getServerPartyAreas(guild!.id);
+    const partyAreas = await database.getServerPartyAreas(guild!);
 
     if (!partyAreas.find((partyArea) => partyArea?.categoryId === party)) {
       return { content: `Party <#${party}> doesn't exist`, flags: MessageFlags.Ephemeral };

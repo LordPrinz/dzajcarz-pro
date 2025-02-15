@@ -1,5 +1,6 @@
 import { dzajcarz } from '@/app';
 import { sql } from 'bun';
+import type { Guild } from 'discord.js';
 
 export type PartyArea = {
   categoryId: string;
@@ -424,15 +425,17 @@ class DzajDB extends HybridDB {
     }
   }
 
-  async getServerPartyAreas(guildId: string) {
-    const cacheKey = `splitChannel:${guildId}`;
+  async getServerPartyAreas(guild: Guild) {
+    const cacheKey = `splitChannel:${guild.id}`;
 
     const splitChannels = JSON.parse((await this.getFromCache(cacheKey)) || '[]');
 
     const partyAreas = [];
 
     for (const splitChannel of splitChannels) {
-      const partyArea = await this.getPartyArea(guildId, splitChannel);
+      const categoryID = await guild.channels.fetch(splitChannel).then((channel) => channel!.parentId!);
+
+      const partyArea = await this.getPartyArea(guild.id, categoryID);
       partyAreas.push(partyArea);
     }
 

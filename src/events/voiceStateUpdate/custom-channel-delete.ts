@@ -4,7 +4,7 @@ import type { VoiceBasedChannel, VoiceState } from 'discord.js';
 
 const handleChannelDelete = async ({ oldChannel, guildId, voiceChannelId }: { oldChannel: VoiceBasedChannel; guildId: string; voiceChannelId: string }) => {
   await database.deleteCustomVoiceChannel(guildId, voiceChannelId);
-  return oldChannel.delete();
+  return oldChannel.delete().catch(() => console.warn('Error deleting channel'));
 };
 
 export default async (oldState: VoiceState, newState: VoiceState) => {

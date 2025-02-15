@@ -21,7 +21,9 @@ export default async (oldState: VoiceState, newState: VoiceState) => {
     return;
   }
 
-  const partyArea = await database.getPartyArea(guildId, targetChannelId);
+  const categoryId = newChannel.parent!.id;
+
+  const partyArea = await database.getPartyArea(guildId, categoryId);
 
   if (!partyArea) {
     return;

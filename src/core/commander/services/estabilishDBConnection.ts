@@ -45,12 +45,12 @@ export const buildDB = async () => {
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS ServerUsers (
-      id SERIAL PRIMARY KEY,
       userID VARCHAR(20) NOT NULL,
       serverID VARCHAR(20) NOT NULL,
       sanity INT DEFAULT 100,
       credits INT DEFAULT 0,
       isDeleted BOOLEAN DEFAULT FALSE,
+      PRIMARY KEY (userID, serverID),
       FOREIGN KEY (userID) REFERENCES Users(id) ON DELETE NO ACTION,
       FOREIGN KEY (serverID) REFERENCES Server(id) ON DELETE CASCADE
   );`;
@@ -67,11 +67,12 @@ export const buildDB = async () => {
   await sql`CREATE TABLE IF NOT EXISTS Warns (
       id SERIAL PRIMARY KEY,
       message TEXT NOT NULL,
-      warnedUserID INT NOT NULL,
-      executorUserID INT NOT NULL,
+      warnedUserID VARCHAR(20) NOT NULL,
+      executorUserID VARCHAR(20) NOT NULL,
+      serverID VARCHAR(20) NOT NULL,
       punishmentSanity INT NOT NULL,
-      FOREIGN KEY (warnedUserID) REFERENCES ServerUsers(id) ON DELETE CASCADE,
-      FOREIGN KEY (executorUserID) REFERENCES ServerUsers(id) ON DELETE CASCADE
+      FOREIGN KEY (warnedUserID, serverID) REFERENCES ServerUsers(userID, serverID) ON DELETE CASCADE,
+      FOREIGN KEY (executorUserID, serverID) REFERENCES ServerUsers(userID, serverID) ON DELETE CASCADE
   );`;
 
   await sql`CREATE TABLE IF NOT EXISTS Services (
