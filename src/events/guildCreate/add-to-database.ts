@@ -35,4 +35,6 @@ export default async (guild: Guild) => {
     const type = channel.type.toString();
     await sql`INSERT INTO Channels (id, serverID, name, type) VALUES (${chId}, ${serverID}, ${chName}, ${type}) ON CONFLICT DO NOTHING;`;
   });
+
+  console.info(`Added guild ${guild.name} to the database`);
 };
