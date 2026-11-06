@@ -41,9 +41,22 @@ services:
       retries: 10
 
   # Audio node for the music module (ADR 0004). Only started with --profile music.
+  # The image has no plugins directory, so Docker creates the volume owned by root and Lavalink
+  # (uid 322) cannot download the YouTube plugin into it. This one-shot step fixes the ownership.
+  lavalink-plugins-init:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    profiles: ["music"]
+    user: "0"
+    entrypoint: ["chown", "322", "/opt/Lavalink/plugins"]
+    volumes:
+      - lavalink-plugins:/opt/Lavalink/plugins
+
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
     profiles: ["music"]
+    depends_on:
+      lavalink-plugins-init:
+        condition: service_completed_successfully
     environment:
       LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env}
       _JAVA_OPTIONS: -Xmx512M
