@@ -10,5 +10,10 @@ export function createGuildChannels(client: Client): GuildChannels {
       const channel = await guild.channels.fetch(channelId).catch(() => null);
       return channel?.guildId === guildId;
     },
+    async isThread(guildId, channelId) {
+      const guild = client.guilds.cache.get(guildId);
+      const channel = await guild?.channels.fetch(channelId).catch(() => null);
+      return channel?.isThread() ?? false;
+    },
   };
 }
