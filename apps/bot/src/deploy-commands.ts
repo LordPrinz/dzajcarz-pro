@@ -14,7 +14,13 @@ const unused = () => {
   throw new Error("Module services are not available while deploying commands");
 };
 const registry = createRegistry(
-  createModules({ commands: unused, gatewayPing: unused, prefixFor: unused }),
+  createModules({
+    commands: unused,
+    gatewayPing: unused,
+    prefixFor: unused,
+    prefixSettings: { get: unused, set: unused, reset: unused },
+    defaultPrefix: "",
+  }),
 );
 const body = registry.commands().map(toSlashCommand);
 

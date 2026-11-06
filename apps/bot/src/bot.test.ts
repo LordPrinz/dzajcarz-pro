@@ -14,5 +14,10 @@ describe("matchInvocation", () => {
     expect(matchInvocation(`<@!${BOT}>help`, "!", BOT)).toEqual({ name: "help", rest: "" });
     expect(matchInvocation("<@222222222222222222> ping", "!", BOT)).toBeNull();
     expect(matchInvocation(`<@${BOT}>`, "!", BOT)).toBeNull();
+    // Still works after a guild switches to a prefix of its own.
+    expect(matchInvocation(`<@${BOT}> prefix reset`, "dz", BOT)).toEqual({
+      name: "prefix",
+      rest: "reset",
+    });
   });
 });
