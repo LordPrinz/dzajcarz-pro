@@ -82,8 +82,11 @@ export interface CommandContext<A = Record<string, unknown>> {
   /** Permission bit field of the calling member; null in direct messages. */
   readonly memberPermissions: bigint | null;
   reply(reply: Reply): Promise<void>;
-  /** Tells Discord that work is under way (slash: deferred reply, prefix: typing indicator). */
-  defer(): Promise<void>;
+  /**
+   * Tells Discord that work is under way (slash: deferred reply, prefix: typing indicator). `ephemeral`
+   * fixes the visibility of the later reply on slash; prefix ignores it.
+   */
+  defer(options?: { ephemeral?: boolean }): Promise<void>;
 }
 
 interface CommandBase {
