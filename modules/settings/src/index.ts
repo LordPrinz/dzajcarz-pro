@@ -41,11 +41,15 @@ const MANAGE_GUILD = 1n << 5n;
 const MAX_PREFIX_LENGTH = 5;
 
 /** Throws a UserError (Polish) unless the prefix is 1-5 characters of non-whitespace, non-backtick text. */
-export function validatePrefix(prefix: string): void {
-  if (prefix.length < 1 || prefix.length > MAX_PREFIX_LENGTH) {
+function validatePrefix(prefix: string): void {
+  const length = [...prefix].length;
+  if (length < 1 || length > MAX_PREFIX_LENGTH) {
     throw new UserError(`Prefiks musi mieć od 1 do ${MAX_PREFIX_LENGTH} znaków.`);
   }
-  if (/\s/u.test(prefix)) throw new UserError("Prefiks nie może zawierać spacji.");
+  // \p{Cf} covers invisible characters such as zero-width spaces, which would look like an empty prefix.
+  if (/[\s\p{Cf}]/u.test(prefix)) {
+    throw new UserError("Prefiks nie może zawierać spacji ani niewidocznych znaków.");
+  }
   // The prefix is echoed inside code spans, where a backtick would close the span.
   if (prefix.includes("`")) throw new UserError("Prefiks nie może zawierać znaku `.");
 }

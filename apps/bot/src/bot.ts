@@ -1,6 +1,7 @@
 import {
   type AnyCommand,
   type CommandRegistry,
+  checkAccess,
   executeCommand,
   type Logger,
   matchPrefix,
@@ -108,6 +109,14 @@ export async function handleMessage(
   if (!command) return;
   // Silent like an unknown name: a reply to every attempt in a muted channel would be noise.
   if (!(await commandEnabled(deps, command, message.guildId, message.channelId))) return;
+
+  // Checked before parsing so a member without access never learns the usage of a command they cannot run.
+  const context = contextFromMessage(message, {});
+  const denied = checkAccess(command, context);
+  if (denied) {
+    await message.reply({ content: denied, allowedMentions: NO_MENTIONS });
+    return;
+  }
 
   const parsed = parsePrefixArgs(command, invocation.rest);
   if (!parsed.ok) {

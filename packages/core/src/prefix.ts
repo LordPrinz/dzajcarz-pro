@@ -9,7 +9,8 @@ export interface PrefixInvocation {
 
 /** `!play  never gonna` with prefix `!` → `{ name: "play", rest: "never gonna" }`; null if no command. */
 export function matchPrefix(content: string, prefix: string): PrefixInvocation | null {
-  if (!prefix || !content.startsWith(prefix)) return null;
+  if (!prefix || content.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase())
+    return null;
   // Word prefixes read naturally with a space ("dz ping"), so whitespace after any prefix is allowed.
   return splitInvocation(content.slice(prefix.length).trimStart());
 }
@@ -65,7 +66,7 @@ export function parsePrefixArgs(command: AnyCommand, input: string): ParseResult
   const subcommand = Object.hasOwn(subcommands, picked.name) ? subcommands[picked.name] : undefined;
   if (!subcommand) {
     // Backticks would close the code span around the echoed word and let it inject markdown.
-    const word = picked.name.replaceAll("`", "");
+    const word = picked.name.replaceAll("`", "").slice(0, 32);
     return { ok: false, error: `Nieznana podkomenda \`${word}\`. ${usage(command)}` };
   }
   const parsed = parseOptions(command, subcommand.options ?? {}, picked.rest, picked.name);

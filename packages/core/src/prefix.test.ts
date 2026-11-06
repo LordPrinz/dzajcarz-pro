@@ -10,6 +10,13 @@ describe("matchPrefix", () => {
     expect(matchPrefix("dz ping", "dz")).toEqual({ name: "ping", rest: "" });
   });
 
+  test("matches the prefix regardless of case", () => {
+    expect(matchPrefix("Dz ping", "dz")).toEqual({ name: "ping", rest: "" });
+    expect(matchPrefix("DZPING", "dz")).toEqual({ name: "ping", rest: "" });
+    expect(matchPrefix("dz ping", "DZ")).toEqual({ name: "ping", rest: "" });
+    expect(matchPrefix("dx ping", "dz")).toBeNull();
+  });
+
   test("ignores messages without the prefix or without a command", () => {
     expect(matchPrefix("hello", "!")).toBeNull();
     expect(matchPrefix("!", "!")).toBeNull();
@@ -212,6 +219,14 @@ describe("parsePrefixArgs with subcommands", () => {
       error: "Nieznana podkomenda `wipe`. Użycie: `prefix set|reset|show`",
     });
     expect(parsePrefixArgs(prefix, "constructor")).toMatchObject({ ok: false });
+  });
+
+  test("an unknown subcommand is echoed at most 32 characters long", () => {
+    const result = parsePrefixArgs(prefix, "x".repeat(500));
+    expect(result).toEqual({
+      ok: false,
+      error: `Nieznana podkomenda \`${"x".repeat(32)}\`. Użycie: \`prefix set|reset|show\``,
+    });
   });
 
   test("argument errors name the subcommand in the usage line", () => {

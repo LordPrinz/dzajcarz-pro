@@ -87,12 +87,20 @@ describe("settings module: /prefix", () => {
     ["toolong", "od 1 do 5"],
     ["a b", "spacji"],
     ["a\tb", "spacji"],
+    ["a\u200bb", "niewidocznych"],
     ["`", "znaku `"],
   ])("rejects the prefix %j", async (prefix, message) => {
     const { run, store } = setup();
     const [reply] = await run("set", { prefix });
     expect(reply).toContain(message);
     expect(store.size).toBe(0);
+  });
+
+  test("counts characters by code point, so five emoji fit", async () => {
+    const { run } = setup();
+    expect(await run("set", { prefix: "😀😀😀😀😀" })).toEqual(["Prefiks to teraz `😀😀😀😀😀`."]);
+    const [reply] = await run("set", { prefix: "😀😀😀😀😀😀" });
+    expect(reply).toContain("od 1 do 5");
   });
 
   test("accepts 5 characters and multi-character prefixes", async () => {
