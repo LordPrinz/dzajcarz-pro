@@ -9,6 +9,7 @@ import {
 import {
   createWelcomeModule,
   type GuildLookup,
+  type TextChannels,
   type WelcomeConfigStore,
   type WelcomeSender,
 } from "@dzajcarz/module-welcome";
@@ -20,7 +21,7 @@ export interface ModuleServices {
   prefixFor: (guildId: string | null) => Promise<string>;
   prefixSettings: PrefixSettings;
   moduleToggles: ModuleToggles;
-  channels: GuildChannels;
+  channels: GuildChannels & TextChannels;
   defaultPrefix: string;
   welcomeConfigs: WelcomeConfigStore;
   welcomeSender: WelcomeSender;
@@ -42,6 +43,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       store: services.welcomeConfigs,
       sender: services.welcomeSender,
       guilds: services.guildLookup,
+      channels: services.channels,
       logger: services.logger.child({ module: "welcome" }),
     }),
   ];

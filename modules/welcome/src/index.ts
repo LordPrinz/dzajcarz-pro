@@ -30,7 +30,14 @@ export interface WelcomeConfigStore {
  * Rejects when the channel is missing, not text-based, or the bot may not write there.
  */
 export interface WelcomeSender {
-  send(channelId: string, text: string, memberId: string): Promise<void>;
+  /** `guildId` is the guild the greeting belongs to: a channel of any other guild must be refused. */
+  send(guildId: string, channelId: string, text: string, memberId: string): Promise<void>;
+}
+
+/** Asks Discord about channels, so a channel id typed by a member is never trusted on its own. */
+export interface TextChannels {
+  /** Whether the channel is a text or announcement channel of this guild. */
+  isTextChannelOf(guildId: string, channelId: string): Promise<boolean>;
 }
 
 /** Name and size of a guild, for `/welcome test`. */
@@ -42,6 +49,7 @@ export interface WelcomeModuleDeps {
   store: WelcomeConfigStore;
   sender: WelcomeSender;
   guilds: GuildLookup;
+  channels: TextChannels;
   logger: Logger;
 }
 
@@ -52,6 +60,7 @@ export function createWelcomeModule({
   store,
   sender,
   guilds,
+  channels,
   logger,
 }: WelcomeModuleDeps): BotModule {
   const guildOf = (guildId: string | null): string => {
@@ -79,8 +88,11 @@ export function createWelcomeModule({
           const guildId = guildOf(ctx.guildId);
           const template = ctx.args.message.trim();
           if (template.length === 0) throw new UserError("Treść powitania nie może być pusta.");
-          if (template.length > MAX_MESSAGE_LENGTH) {
+          if ([...template].length > MAX_MESSAGE_LENGTH) {
             throw new UserError(`Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`);
+          }
+          if (!(await channels.isTextChannelOf(guildId, ctx.args.channel))) {
+            throw new UserError("Wybierz kanał tekstowy z tego serwera.");
           }
           await store.set(guildId, { channelId: ctx.args.channel, template });
           await ctx.reply({
@@ -103,6 +115,8 @@ export function createWelcomeModule({
         description: "Wysyła powitanie dla Ciebie na skonfigurowany kanał",
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
+          // Fetching the guild and posting can take longer than the 3 s a slash command may stay silent.
+          await ctx.defer();
           const config = await store.get(guildId);
           if (!config) {
             throw new UserError("Powitania nie są ustawione. Użyj `welcome set`.");
@@ -116,7 +130,7 @@ export function createWelcomeModule({
             memberCount: guild.memberCount,
           });
           try {
-            await sender.send(config.channelId, text, ctx.user.id);
+            await sender.send(guildId, config.channelId, text, ctx.user.id);
           } catch (error) {
             logger.warn("Welcome test could not be sent", { guildId, error });
             throw new UserError(
@@ -149,7 +163,7 @@ export function createWelcomeModule({
         serverName: member.guild.name,
         memberCount: member.guild.memberCount,
       });
-      await sender.send(config.channelId, text, member.id);
+      await sender.send(guildId, config.channelId, text, member.id);
     } catch (error) {
       logger.warn("Welcome message not sent", { guildId, memberId: member.id, error });
     }

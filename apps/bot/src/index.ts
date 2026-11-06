@@ -12,7 +12,7 @@ import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
-import { createGuildLookup, createWelcomeSender } from "./discord/welcome.ts";
+import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
@@ -67,11 +67,11 @@ const modules = createModules({
   moduleToggles: createModuleToggles(moduleToggleRepository, gate, () =>
     modules.map((module) => module.name),
   ),
-  channels: createGuildChannels(client),
+  channels: { ...createGuildChannels(client), ...createTextChannels(client) },
   defaultPrefix: env.BOT_PREFIX,
   welcomeConfigs: createWelcomeRepository(sql),
   welcomeSender: createWelcomeSender(client),
-  guildLookup: createGuildLookup(client),
+  guildLookup: createGuildLookup(client, logger.child({ component: "guild-lookup" })),
   logger,
 });
 const registry = createRegistry(modules);

@@ -11,6 +11,7 @@ import type { GuildMember } from "discord.js";
 import {
   createWelcomeModule,
   type GuildLookup,
+  type TextChannels,
   type WelcomeConfig,
   type WelcomeConfigStore,
   type WelcomeSender,
@@ -19,6 +20,7 @@ import {
 const MANAGE_GUILD = 1n << 5n;
 const guildId = "100000000000000001";
 const channelId = "400000000000000004";
+const foreignChannelId = "900000000000000009";
 
 function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
   const configs = new Map<string, WelcomeConfig>();
@@ -29,10 +31,14 @@ function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
   };
   const sent: { channelId: string; text: string; memberId: string }[] = [];
   const sender: WelcomeSender = {
-    async send(channel, text, memberId) {
+    async send(_guildId, channel, text, memberId) {
       if (sendFails) throw new Error("Missing Permissions");
       sent.push({ channelId: channel, text, memberId });
     },
+  };
+  // Only the guild's own text channel is known; everything else counts as foreign or not text.
+  const channels: TextChannels = {
+    isTextChannelOf: async (id, channel) => id === guildId && channel === channelId,
   };
   const guilds: GuildLookup = {
     describe: async () => ({ name: "Dżajsy", memberCount: 12 }),
@@ -43,7 +49,7 @@ function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
     warn: (message, fields) => void warnings.push({ message, fields }),
     child: () => logger,
   };
-  const module = createWelcomeModule({ store, sender, guilds, logger });
+  const module = createWelcomeModule({ store, sender, guilds, channels, logger });
   const registry = createRegistry([module]);
   const command = registry.find("welcome");
   if (!command) throw new Error("welcome command missing");
@@ -57,7 +63,10 @@ function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
   ) => {
     const ctx = createFakeContext({ args, subcommand, memberPermissions });
     await executeCommand(command, ctx, silentLogger);
-    return ctx.replies.map((r) => replyText(r));
+    return Object.assign(
+      ctx.replies.map((r) => replyText(r)),
+      { deferred: ctx.deferred },
+    );
   };
   return { run, configs, sent, warnings, event };
 }
@@ -77,6 +86,19 @@ describe("/welcome commands", () => {
     const [reply] = await run("set", { channel: channelId, message: "  Hej {user}  " });
     expect(configs.get(guildId)).toEqual({ channelId, template: "Hej {user}" });
     expect(reply).toContain(`<#${channelId}>`);
+  });
+
+  test("set refuses a channel of another guild or one that is not text", async () => {
+    const { run, configs } = setup();
+    const [reply] = await run("set", { channel: foreignChannelId, message: "Hej" });
+    expect(reply).toBe("Wybierz kanał tekstowy z tego serwera.");
+    expect(configs.size).toBe(0);
+  });
+
+  test("set counts the length in code points", async () => {
+    const { run, configs } = setup();
+    await run("set", { channel: channelId, message: "😀".repeat(2000) });
+    expect(configs.size).toBe(1);
   });
 
   test("set rejects an empty or over-long message", async () => {
@@ -114,6 +136,12 @@ describe("/welcome commands", () => {
       },
     ]);
     expect(reply).toContain("Wysłano");
+  });
+
+  test("test defers before it does any slow work", async () => {
+    const { run, configs } = setup();
+    configs.set(guildId, { channelId, template: "x" });
+    expect((await run("test")).deferred).toBe(true);
   });
 
   test("test without config points at set", async () => {
@@ -178,6 +206,7 @@ describe("guildMemberAdd handler", () => {
       },
       sender: { send: async () => {} },
       guilds: { describe: async () => null },
+      channels: { isTextChannelOf: async () => true },
       logger: {
         ...silentLogger,
         warn: (message, fields) => void warnings.push({ message, fields }),
