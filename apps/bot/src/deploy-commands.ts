@@ -1,7 +1,7 @@
 // Registers slash commands with Discord: in DISCORD_DEV_GUILD_ID when set (instant), otherwise
 // globally (may take a while to show up). Run after adding, renaming or removing a command:
 //   bun run commands:deploy
-import { createRegistry } from "@dzajcarz/core";
+import { createRegistry, silentLogger } from "@dzajcarz/core";
 import { REST, Routes } from "discord.js";
 import { toSlashCommand } from "./discord/slash.ts";
 import { loadDeployEnv } from "./env.ts";
@@ -21,6 +21,10 @@ const registry = createRegistry(
     prefixSettings: { get: unused, set: unused, reset: unused },
     moduleToggles: { moduleNames: unused, list: unused, disable: unused, enable: unused },
     defaultPrefix: "",
+    welcomeConfigs: { get: unused, set: unused, delete: unused },
+    welcomeSender: { send: unused },
+    guildLookup: { describe: unused },
+    logger: silentLogger,
   }),
 );
 const body = registry.commands().map(toSlashCommand);

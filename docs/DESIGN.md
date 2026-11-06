@@ -75,6 +75,15 @@ command runs (slash answers ephemerally, prefix stays silent) and wraps every ev
 `eventScope` to find the guild and channel of the event. Events that are not in `eventScope` and events
 outside a guild are never gated. `general` and `settings` cannot be disabled.
 
+### Welcome messages
+
+`welcome_config` holds one row per guild: the channel and a template of at most 2000 characters (Discord's
+message limit). `renderWelcome` fills `{user}`, `{username}`, `{server}` and `{memberCount}` in a single
+pass, so substituted text is never re-expanded and unknown placeholders stay as written. The
+`guildMemberAdd` handler skips bots and never throws: a missing config, channel or permission is a logged
+warning. It needs the privileged `GuildMembers` intent. The welcome sender is the one place that overrides
+`NO_MENTIONS`: it allows a ping for the joining member only (`allowedMentions: { users: [memberId] }`).
+
 ### Mentions
 
 The client and every reply set `allowedMentions: { parse: [] }`. Commands echo user input (song titles,

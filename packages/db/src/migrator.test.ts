@@ -29,6 +29,7 @@ describe.skipIf(!sql)("migrator", () => {
       "guild_settings",
       "module_disabled",
       "schema_migrations",
+      "welcome_config",
     ]);
   });
 });

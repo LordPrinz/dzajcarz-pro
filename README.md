@@ -36,7 +36,8 @@ packages/
 modules/
   general/          ping, help
   settings/         prefix (set, reset, show), modules (list, disable, enable)
-  …                 music, party, moderation, welcome, fun (see the board)
+  welcome/          welcome (set, off, test), greets new members
+  …                 music, party, moderation, fun (see the board)
 infra/              docker-compose: Postgres, Redis, Lavalink (profile "music")
 scripts/            git hooks and GitHub automation (Bun scripts)
 docs/               design doc and ADRs
@@ -46,7 +47,8 @@ docs/               design doc and ADRs
 
 Requirements: Bun ≥ 1.4.4, Docker, a Discord application with a bot user
 ([developer portal](https://discord.com/developers/applications)). In the portal, turn on the
-**Message Content** intent, or prefix commands will not see any messages.
+**Message Content** intent, or prefix commands will not see any messages, and the
+**Server Members** intent, or welcome messages are never sent (the bot does not receive member joins).
 
 ```bash
 bun install                       # also installs the git hooks
