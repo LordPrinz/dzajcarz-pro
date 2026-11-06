@@ -4,6 +4,7 @@ import { createGeneralModule } from "@dzajcarz/module-general";
 import {
   createPartyModule,
   type PartyChannels,
+  type PartyPermissions,
   type PartyRepository,
 } from "@dzajcarz/module-party";
 import {
@@ -35,6 +36,7 @@ export interface ModuleServices {
   guildLookup: GuildLookup;
   partyAreas: PartyRepository;
   partyChannels: PartyChannels;
+  partyPermissions: PartyPermissions;
   partyLock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
   presence: Presence;
   clock: Clock;
@@ -61,6 +63,7 @@ export function createModules(services: ModuleServices): BotModule[] {
     createPartyModule({
       repository: services.partyAreas,
       channels: services.partyChannels,
+      permissions: services.partyPermissions,
       lock: services.partyLock,
       logger: services.logger.child({ module: "party" }),
     }),

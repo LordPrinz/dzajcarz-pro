@@ -95,8 +95,20 @@ named "Kanał {name}" in that category, stores it in `party_channel` and moves t
 needs Manage Channels (create and delete channels) and Move Members (put the member into their channel);
 `/party create` says so when Discord refuses. A member owns **one party channel per server**, across all
 areas (`UNIQUE (guild_id, owner_id)`): joining again moves them back to it. A composite foreign key keeps
-a channel's `guild_id` equal to its area's. Both commands need Manage Channels for the caller, and `/party`
-is a command with subcommands so more actions can be added next to `create` and `delete`.
+a channel's `guild_id` equal to its area's. `create` and `delete` need Manage Channels for the caller. That check is on the subcommands, not on `/party`
+itself, because a command-level permission would hide the owner controls from regular members.
+
+Owner controls are further subcommands: `lock`, `unlock`, `limit <0-99>`, `rename <name>`, `invite <user>`,
+`block <user>`, `hide`, `show`. The caller must be in a party channel (their current voice channel, from
+`PartyChannels.voiceChannelOf`) and own it or have Manage Channels; otherwise a `UserError`. The module
+changes Discord only through the `PartyPermissions` port: `lock`/`unlock` set `Connect` on `@everyone` to
+deny or clear, `hide`/`show` do the same with `ViewChannel`, `invite` and `block` write a member overwrite
+(allow or deny both), and `block` also disconnects the member when they are inside. `invite` and `block`
+refuse the caller, the bot and non-members, and `block` refuses the owner. A new party channel gets an allow
+overwrite for its owner so locking or hiding never shuts the owner out; on ownership transfer the new owner
+gets one and the old owner's is removed. Names are counted in code points (1-100). Discord allows two
+renames per ten minutes, so the bot client rejects rate-limited channel edits (`rejectOnRateLimit`) instead
+of queueing them, and the adapter turns that into `RenameRateLimited`, which the command answers in Polish.
 
 `/party delete` defers first (it makes several Discord calls). `deleteArea` removes the area and its channel
 rows in one transaction and returns them; the module then deletes those Discord channels, the join channel

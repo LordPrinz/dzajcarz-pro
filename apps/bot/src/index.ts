@@ -12,7 +12,11 @@ import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
-import { createPartyChannels } from "./discord/party.ts";
+import {
+  createPartyChannels,
+  createPartyPermissions,
+  rejectChannelEditsOnRateLimit,
+} from "./discord/party.ts";
 import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
@@ -60,6 +64,8 @@ const client = new Client({
   // DM channels are not cached, so without this partial the bot never sees DM messages.
   partials: [Partials.Channel],
   allowedMentions: NO_MENTIONS,
+  // Lets the party rename command answer at once when Discord's 2-per-10-minutes limit is spent.
+  rest: { rejectOnRateLimit: rejectChannelEditsOnRateLimit },
 });
 
 const modules = createModules({
@@ -77,6 +83,7 @@ const modules = createModules({
   guildLookup: createGuildLookup(client, logger.child({ component: "guild-lookup" })),
   partyAreas: createPartyRepository(sql),
   partyChannels: createPartyChannels(client),
+  partyPermissions: createPartyPermissions(client),
   partyLock: createRedisStore(redis),
   presence: createPresence(client),
   clock: createClock(),
