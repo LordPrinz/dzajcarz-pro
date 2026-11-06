@@ -30,6 +30,8 @@ export interface ModuleToggles {
 export interface GuildChannels {
   /** Whether the channel exists and belongs to this guild. */
   belongsTo(guildId: string, channelId: string): Promise<boolean>;
+  /** Whether the channel is a thread; toggles follow the parent channel, so threads cannot be switched. */
+  isThread(guildId: string, channelId: string): Promise<boolean>;
 }
 
 export interface SettingsModuleDeps {
@@ -147,10 +149,19 @@ export function createSettingsModule({
     return module;
   };
 
-  /** The channel option is only an id, so check that it is a channel of this guild before storing it. */
-  const requireGuildChannel = async (guildId: string, channelId: string | null) => {
-    if (channelId !== null && !(await channels.belongsTo(guildId, channelId))) {
+  /**
+   * The channel option is only an id, so check that it is a channel of this guild before storing it.
+   * `enable` skips this: a row for a deleted channel must stay removable.
+   */
+  const requireToggleableChannel = async (guildId: string, channelId: string | null) => {
+    if (channelId === null) return;
+    if (!(await channels.belongsTo(guildId, channelId))) {
       throw new UserError("Nie znalazłem takiego kanału na tym serwerze.");
+    }
+    if (await channels.isThread(guildId, channelId)) {
+      throw new UserError(
+        "Wątki dziedziczą ustawienia kanału nadrzędnego. Wybierz kanał, w którym wątek leży.",
+      );
     }
   };
 
@@ -189,7 +200,7 @@ export function createSettingsModule({
           const module = toggleable(ctx.args.module);
           const channelId = ctx.args.channel ?? null;
           const guildId = guildOf(ctx.guildId);
-          await requireGuildChannel(guildId, channelId);
+          await requireToggleableChannel(guildId, channelId);
           await modules.disable(guildId, module, channelId);
           await ctx.reply({
             content: `Moduł \`${module}\` jest wyłączony ${where(channelId)}.`,
@@ -207,7 +218,6 @@ export function createSettingsModule({
           const module = toggleable(ctx.args.module);
           const channelId = ctx.args.channel ?? null;
           const guildId = guildOf(ctx.guildId);
-          await requireGuildChannel(guildId, channelId);
           const changed = await modules.enable(guildId, module, channelId);
           await ctx.reply({
             content: changed

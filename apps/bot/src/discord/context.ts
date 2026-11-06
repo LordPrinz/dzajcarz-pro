@@ -47,8 +47,12 @@ export function contextFromInteraction(interaction: ChatInputCommandInteraction)
         await interaction.reply({ ...payload, flags });
       }
     },
-    async defer() {
-      if (!interaction.deferred && !interaction.replied) await interaction.deferReply();
+    async defer(options) {
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply({
+          flags: options?.ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+      }
     },
   };
 }

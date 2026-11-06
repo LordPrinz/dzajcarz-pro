@@ -27,9 +27,10 @@ const noModules: ModuleToggles = {
 const GUILD_ID = "100000000000000001";
 
 /** Knows the channels of one guild only. */
-function channelsOf(ids: readonly string[]): GuildChannels {
+function channelsOf(ids: readonly string[], threads: readonly string[] = []): GuildChannels {
   return {
     belongsTo: async (guildId, channelId) => guildId === GUILD_ID && ids.includes(channelId),
+    isThread: async (_guildId, channelId) => threads.includes(channelId),
   };
 }
 
@@ -138,7 +139,9 @@ describe("settings module: /prefix", () => {
 describe("settings module: /modules", () => {
   const CHANNEL = "400000000000000004";
 
-  function setupModules() {
+  const THREAD = "500000000000000005";
+
+  function setupModules({ threads = [] as string[] } = {}) {
     const disabled: DisabledModule[] = [];
     const modules: ModuleToggles = {
       moduleNames: () => ["general", "settings", "music", "welcome"],
@@ -162,7 +165,7 @@ describe("settings module: /modules", () => {
         prefixes,
         defaultPrefix: "!",
         modules,
-        channels: channelsOf([CHANNEL]),
+        channels: channelsOf([CHANNEL, THREAD], threads),
       }),
     ]);
     const command = registry.find("modules");
@@ -229,15 +232,28 @@ describe("settings module: /modules", () => {
     expect(disabled).toEqual([]);
   });
 
-  test("a channel outside the guild is refused by disable and enable", async () => {
+  test("a channel outside the guild is refused by disable", async () => {
     const { run, disabled } = setupModules();
     const foreign = "900000000000000009";
     expect((await run("disable", { module: "music", channel: foreign }))[0]).toContain(
       "Nie znalazłem takiego kanału",
     );
-    expect((await run("enable", { module: "music", channel: foreign }))[0]).toContain(
-      "Nie znalazłem takiego kanału",
+    expect(disabled).toEqual([]);
+  });
+
+  test("enable removes a row whose channel no longer exists", async () => {
+    const { run, disabled } = setupModules();
+    const deleted = "900000000000000009";
+    disabled.push({ module: "music", channelId: deleted });
+    expect((await run("enable", { module: "music", channel: deleted }))[0]).toContain(
+      "jest znów włączony",
     );
+    expect(disabled).toEqual([]);
+  });
+
+  test("disable refuses a thread because toggles follow the parent channel", async () => {
+    const { run, disabled } = setupModules({ threads: [THREAD] });
+    expect((await run("disable", { module: "music", channel: THREAD }))[0]).toContain("Wątki");
     expect(disabled).toEqual([]);
   });
 
