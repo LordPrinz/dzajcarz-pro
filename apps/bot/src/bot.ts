@@ -1,5 +1,6 @@
 import {
   type CommandRegistry,
+  checkAccess,
   executeCommand,
   type Logger,
   matchPrefix,
@@ -71,6 +72,14 @@ async function handleMessage(
   // Another bot may share the prefix, so unknown names stay silent.
   const command = registry.find(invocation.name);
   if (!command) return;
+
+  // Checked before parsing so a member without access never learns the usage of a command they cannot run.
+  const context = contextFromMessage(message, {});
+  const denied = checkAccess(command, context);
+  if (denied) {
+    await message.reply({ content: denied, allowedMentions: NO_MENTIONS });
+    return;
+  }
 
   const parsed = parsePrefixArgs(command, invocation.rest);
   if (!parsed.ok) {

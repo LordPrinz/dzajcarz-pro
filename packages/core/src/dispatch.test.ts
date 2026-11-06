@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { defineCommand, defineSubcommand } from "./command.ts";
-import { executeCommand, GENERIC_ERROR } from "./dispatch.ts";
+import { checkAccess, executeCommand, GENERIC_ERROR } from "./dispatch.ts";
 import { UserError } from "./errors.ts";
 import { createJsonLogger, silentLogger } from "./logger.ts";
 import { createFakeContext, replyText } from "./testing/context.ts";
@@ -195,3 +195,28 @@ describe("executeCommand with subcommands", () => {
 });
 
 async function noRun() {}
+
+describe("checkAccess", () => {
+  test("lets a command without restrictions through, in a DM too", () => {
+    expect(checkAccess({}, { guildId: null, memberPermissions: null })).toBeNull();
+  });
+
+  test("refuses guild-only and permissioned commands in a DM", () => {
+    const message = "Ta komenda działa tylko na serwerze.";
+    expect(checkAccess({ guildOnly: true }, { guildId: null, memberPermissions: null })).toBe(
+      message,
+    );
+    expect(checkAccess({ permissions: BAN }, { guildId: null, memberPermissions: null })).toBe(
+      message,
+    );
+  });
+
+  test("refuses a member without the permission and lets administrators through", () => {
+    const guildId = "1";
+    expect(checkAccess({ permissions: BAN }, { guildId, memberPermissions: 0n })).toBe(
+      "Nie masz uprawnień do tej komendy.",
+    );
+    expect(checkAccess({ permissions: BAN }, { guildId, memberPermissions: BAN })).toBeNull();
+    expect(checkAccess({ permissions: BAN }, { guildId, memberPermissions: 1n << 3n })).toBeNull();
+  });
+});
