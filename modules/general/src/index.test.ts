@@ -1,0 +1,56 @@
+import { describe, expect, test } from "bun:test";
+import { createRegistry, executeCommand, silentLogger } from "@dzajcarz/core";
+import { createFakeContext } from "@dzajcarz/core/testing";
+import { createGeneralModule, type GeneralModuleDeps } from "./index.ts";
+
+function setup(overrides: Partial<GeneralModuleDeps> = {}) {
+  const module = createGeneralModule({
+    commands: () => registry.summaries(),
+    gatewayPing: () => 42.4,
+    prefixFor: async () => "!",
+    ...overrides,
+  });
+  const registry = createRegistry([
+    module,
+    {
+      name: "music",
+      commands: [{ name: "play", description: "Gra muzykę", aliases: ["p"], run: async () => {} }],
+    },
+  ]);
+  const run = async (name: string, args: Record<string, unknown> = {}) => {
+    const command = registry.find(name);
+    if (!command) throw new Error(`no command ${name}`);
+    const ctx = createFakeContext({ args });
+    await executeCommand(command, ctx, silentLogger);
+    return ctx.replies;
+  };
+  return { run };
+}
+
+describe("general module", () => {
+  test("ping reports the gateway latency", async () => {
+    expect(await setup().run("ping")).toEqual(["Pong! 42 ms"]);
+    expect(await setup({ gatewayPing: () => -1 }).run("ping")).toEqual(["Pong!"]);
+  });
+
+  test("help lists commands grouped by module with the guild prefix", async () => {
+    const [reply] = await setup({ prefixFor: async () => "?" }).run("help");
+    expect(reply).toMatchObject({ ephemeral: true });
+    const embed = typeof reply === "object" ? reply.embeds?.[0] : undefined;
+    expect(embed?.description).toContain("`?nazwa`");
+    expect(embed?.fields?.map((f) => f.name)).toEqual(["general", "music"]);
+    expect(embed?.fields?.[1]?.value).toBe("`play` Gra muzykę");
+  });
+
+  test("help describes one command, found by alias", async () => {
+    const [reply] = await setup().run("pomoc", { command: "P" });
+    const embed = typeof reply === "object" ? reply.embeds?.[0] : undefined;
+    expect(embed).toMatchObject({ title: "/play", fields: [{ name: "Aliasy", value: "`!p`" }] });
+  });
+
+  test("help says when a command does not exist", async () => {
+    expect(await setup().run("help", { command: "nope" })).toEqual([
+      { content: "Nie znam komendy `nope`.", ephemeral: true },
+    ]);
+  });
+});

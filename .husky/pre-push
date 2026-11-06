@@ -1,0 +1,3 @@
+bun scripts/git/check-branch.ts
+bun run typecheck
+bun test --bail

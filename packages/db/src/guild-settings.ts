@@ -1,0 +1,29 @@
+import type { SQL } from "bun";
+import type { GuildSettingsRow } from "./types.ts";
+
+export interface GuildSettingsRepository {
+  find(guildId: string): Promise<GuildSettingsRow | null>;
+  /** Sets the guild's prefix; null goes back to the bot default. */
+  setPrefix(guildId: string, prefix: string | null): Promise<GuildSettingsRow>;
+}
+
+export function createGuildSettingsRepository(sql: SQL): GuildSettingsRepository {
+  return {
+    async find(guildId) {
+      const [row] = await sql<GuildSettingsRow[]>`
+        SELECT * FROM guild_settings WHERE guild_id = ${guildId}
+      `;
+      return row ?? null;
+    },
+
+    async setPrefix(guildId, prefix) {
+      const [row] = await sql<GuildSettingsRow[]>`
+        INSERT INTO guild_settings (guild_id, prefix) VALUES (${guildId}, ${prefix})
+        ON CONFLICT (guild_id) DO UPDATE SET prefix = EXCLUDED.prefix, updated_at = now()
+        RETURNING *
+      `;
+      if (!row) throw new Error("Upsert into guild_settings returned no row");
+      return row;
+    },
+  };
+}

@@ -1,0 +1,31 @@
+name: Bug
+description: Something does not work as expected
+labels: ["type:bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [core, music, moderation, party, welcome, fun, infra, docs]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Command or event that triggers it (e.g. `/play` with a playlist URL, `!ban` without a reason).
+      value: |
+        1. 
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Bot logs, guild setup (permissions, intents), slash or prefix command, Lavalink node version.

@@ -1,0 +1,16 @@
+{
+  "name": "@dzajcarz/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./migrator": "./src/migrator.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "migrate": "bun --env-file=../../.env scripts/migrate.ts",
+    "new": "bun scripts/new-migration.ts"
+  }
+}

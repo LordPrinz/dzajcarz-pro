@@ -1,0 +1,7 @@
+# Each area has an owner who is requested for review automatically.
+*                @LordPrinz
+/packages/core/  @LordPrinz
+/apps/bot/       @LordPrinz
+/modules/        @LordPrinz
+/packages/db/    @LordPrinz
+/.github/        @LordPrinz
