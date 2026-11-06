@@ -10,6 +10,25 @@ describe("eventScope", () => {
     expect(eventScope("messageCreate", [{ guildId: null, channelId: "dm" }])).toBeNull();
   });
 
+  test("a message in a thread is scoped to the parent channel", () => {
+    const channel = { isThread: () => true, parentId: "parent" };
+    expect(eventScope("messageCreate", [{ guildId: "g", channelId: "thread", channel }])).toEqual({
+      guildId: "g",
+      channelId: "parent",
+    });
+    const plain = { isThread: () => false, parentId: null };
+    expect(
+      eventScope("messageCreate", [{ guildId: "g", channelId: "c", channel: plain }])?.channelId,
+    ).toBe("c");
+  });
+
+  test("an interaction in a thread is scoped to the parent channel", () => {
+    const channel = { isThread: () => true, parentId: "parent" };
+    expect(
+      eventScope("interactionCreate", [{ guildId: "g", channelId: "thread", channel }]),
+    ).toEqual({ guildId: "g", channelId: "parent" });
+  });
+
   test("guildMemberAdd is guild-wide", () => {
     expect(eventScope("guildMemberAdd", [{ guild: { id: "g" } }])).toEqual({
       guildId: "g",

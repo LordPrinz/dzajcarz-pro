@@ -13,7 +13,7 @@ import {
 import { type Client, Events, type Message } from "discord.js";
 import { contextFromInteraction, contextFromMessage } from "./discord/context.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
-import { eventScope } from "./event-scope.ts";
+import { eventScope, toggleChannelId } from "./event-scope.ts";
 import type { ModuleGate } from "./module-gate.ts";
 import type { PrefixResolver } from "./prefix-resolver.ts";
 
@@ -67,19 +67,24 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
   }
 
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-    const command = registry.find(interaction.commandName);
-    if (!command) {
-      // Registered on Discord but not in this build: deploy commands again after removing one.
-      logger.warn("Unknown slash command", { command: interaction.commandName });
-      return;
+    try {
+      if (!interaction.isChatInputCommand()) return;
+      const command = registry.find(interaction.commandName);
+      if (!command) {
+        // Registered on Discord but not in this build: deploy commands again after removing one.
+        logger.warn("Unknown slash command", { command: interaction.commandName });
+        return;
+      }
+      const ctx = contextFromInteraction(interaction);
+      const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
+      if (!(await commandEnabled(deps, command, ctx.guildId, toggleChannel))) {
+        await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
+        return;
+      }
+      await executeCommand(command, ctx, logger);
+    } catch (error) {
+      logger.error("Interaction handling failed", { interactionId: interaction.id, error });
     }
-    const ctx = contextFromInteraction(interaction);
-    if (!(await commandEnabled(deps, command, ctx.guildId, ctx.channelId))) {
-      await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
-      return;
-    }
-    await executeCommand(command, ctx, logger);
   });
 
   client.on(Events.MessageCreate, async (message) => {
@@ -108,7 +113,15 @@ export async function handleMessage(
   const command = registry.find(invocation.name);
   if (!command) return;
   // Silent like an unknown name: a reply to every attempt in a muted channel would be noise.
-  if (!(await commandEnabled(deps, command, message.guildId, message.channelId))) return;
+  if (
+    !(await commandEnabled(
+      deps,
+      command,
+      message.guildId,
+      toggleChannelId(message.channel, message.channelId),
+    ))
+  )
+    return;
 
   // Checked before parsing so a member without access never learns the usage of a command they cannot run.
   const context = contextFromMessage(message, {});

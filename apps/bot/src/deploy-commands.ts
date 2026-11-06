@@ -20,6 +20,7 @@ const registry = createRegistry(
     prefixFor: unused,
     prefixSettings: { get: unused, set: unused, reset: unused },
     moduleToggles: { moduleNames: unused, list: unused, disable: unused, enable: unused },
+    channels: { belongsTo: unused },
     defaultPrefix: "",
   }),
 );

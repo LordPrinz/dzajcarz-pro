@@ -73,7 +73,10 @@ Redis as JSON for 10 minutes, with the same fallbacks as the prefix, except that
 every module counts as enabled. The check is central, not in the modules: `bot.ts` asks the gate before a
 command runs (slash answers ephemerally, prefix stays silent) and wraps every event handler, using
 `eventScope` to find the guild and channel of the event. Events that are not in `eventScope` and events
-outside a guild are never gated. `general` and `settings` cannot be disabled.
+outside a guild are never gated. A thread has no toggle of its own and follows its parent channel, both for
+events and for commands. The lookup is bounded to 1.5 s (Discord wants an answer to an interaction within
+3 s); a slower lookup counts as enabled. `/modules` only accepts channels the guild really has, checked
+through the `GuildChannels` port. `general` and `settings` cannot be disabled.
 
 ### Mentions
 
