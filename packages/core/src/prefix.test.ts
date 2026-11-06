@@ -214,6 +214,14 @@ describe("parsePrefixArgs with subcommands", () => {
     expect(parsePrefixArgs(prefix, "constructor")).toMatchObject({ ok: false });
   });
 
+  test("an unknown subcommand is echoed at most 32 characters long", () => {
+    const result = parsePrefixArgs(prefix, "x".repeat(500));
+    expect(result).toEqual({
+      ok: false,
+      error: `Nieznana podkomenda \`${"x".repeat(32)}\`. Użycie: \`prefix set|reset|show\``,
+    });
+  });
+
   test("argument errors name the subcommand in the usage line", () => {
     expect(parsePrefixArgs(prefix, "set")).toEqual({
       ok: false,

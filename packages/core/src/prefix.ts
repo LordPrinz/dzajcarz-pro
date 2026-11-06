@@ -65,7 +65,7 @@ export function parsePrefixArgs(command: AnyCommand, input: string): ParseResult
   const subcommand = Object.hasOwn(subcommands, picked.name) ? subcommands[picked.name] : undefined;
   if (!subcommand) {
     // Backticks would close the code span around the echoed word and let it inject markdown.
-    const word = picked.name.replaceAll("`", "");
+    const word = picked.name.replaceAll("`", "").slice(0, 32);
     return { ok: false, error: `Nieznana podkomenda \`${word}\`. ${usage(command)}` };
   }
   const parsed = parseOptions(command, subcommand.options ?? {}, picked.rest, picked.name);
