@@ -73,6 +73,8 @@ export type Invocation = "slash" | "prefix";
 export interface CommandContext<A = Record<string, unknown>> {
   readonly args: A;
   readonly invocation: Invocation;
+  /** Name of the chosen subcommand; undefined for a plain command. */
+  readonly subcommand?: string;
   readonly user: { readonly id: string; readonly displayName: string };
   /** null in direct messages. */
   readonly guildId: string | null;
@@ -84,28 +86,68 @@ export interface CommandContext<A = Record<string, unknown>> {
   defer(): Promise<void>;
 }
 
-export interface Command<O extends OptionsDef = OptionsDef> {
+interface CommandBase {
   /** Lowercase, 1–32 characters: Discord's rule for slash command names. */
   name: string;
   description: string;
   /** Extra names for the prefix form only (`!p` for `!play`). */
   aliases?: readonly string[];
-  options?: O;
   /** Refuse to run in direct messages. */
   guildOnly?: boolean;
   /** Discord permission bits (PermissionFlagsBits) the member needs. Implies guildOnly. */
   permissions?: bigint;
+}
+
+/** A command that runs directly. */
+export interface Command<O extends OptionsDef = OptionsDef> extends CommandBase {
+  options?: O;
   run(ctx: CommandContext<OptionValues<O>>): Promise<void>;
 }
 
-/** Type-erased command, as stored in the registry; adapters pass the parsed arguments as a record. */
-export type AnyCommand = Omit<Command<OptionsDef>, "run"> & {
+/** One action of a command (`/prefix set`). Its permissions are checked on top of the command's. */
+export interface Subcommand<O extends OptionsDef = OptionsDef> {
+  description: string;
+  options?: O;
+  /** Extra permission bits, checked when the subcommand runs (Discord only gates the whole command). */
+  permissions?: bigint;
+  run(ctx: CommandContext<OptionValues<O>>): Promise<void>;
+}
+
+/** A command that only groups subcommands (one level); it has no `options` or `run` of its own. */
+export interface CommandWithSubcommands extends CommandBase {
+  /** Key = subcommand name, which is also the first word of the prefix form. */
+  subcommands: Record<string, AnySubcommand>;
+  options?: never;
+  run?: never;
+}
+
+/** Type-erased subcommand, as stored on a command. */
+export type AnySubcommand = Omit<Subcommand<OptionsDef>, "run"> & {
   run(ctx: CommandContext): Promise<void>;
 };
+
+/**
+ * Type-erased command, as stored in the registry; adapters pass the parsed arguments as a record.
+ * The registry rejects a command that has both or neither of `run` and `subcommands`.
+ */
+export interface AnyCommand extends CommandBase {
+  options?: OptionsDef;
+  run?(ctx: CommandContext): Promise<void>;
+  subcommands?: Record<string, AnySubcommand>;
+}
 
 /** Infers argument types from `options`, so `ctx.args` is fully typed in `run`. */
 export function defineCommand<const O extends OptionsDef = Record<never, OptionDef>>(
   command: Command<O>,
-): AnyCommand {
+): AnyCommand;
+export function defineCommand(command: CommandWithSubcommands): AnyCommand;
+export function defineCommand(command: object): AnyCommand {
   return command as unknown as AnyCommand;
+}
+
+/** Like `defineCommand` for one subcommand: `ctx.args` is typed from its own `options`. */
+export function defineSubcommand<const O extends OptionsDef = Record<never, OptionDef>>(
+  subcommand: Subcommand<O>,
+): AnySubcommand {
+  return subcommand as unknown as AnySubcommand;
 }

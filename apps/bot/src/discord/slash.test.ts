@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { defineCommand } from "@dzajcarz/core";
+import { defineCommand, defineSubcommand } from "@dzajcarz/core";
 import {
   ApplicationCommandOptionType,
   InteractionContextType,
@@ -66,5 +66,50 @@ describe("toSlashCommand", () => {
     );
     expect(body.contexts).toEqual([InteractionContextType.Guild]);
     expect(body.default_member_permissions).toBe(PermissionFlagsBits.BanMembers.toString());
+  });
+});
+
+describe("toSlashCommand with subcommands", () => {
+  test("maps each subcommand to a SUB_COMMAND option holding its own options", () => {
+    const body = toSlashCommand(
+      defineCommand({
+        name: "prefix",
+        description: "Prefix",
+        permissions: PermissionFlagsBits.ManageGuild,
+        subcommands: {
+          set: defineSubcommand({
+            description: "Set",
+            permissions: PermissionFlagsBits.Administrator,
+            options: { value: { type: "string", description: "Value", required: true } },
+            run: noop,
+          }),
+          show: defineSubcommand({ description: "Show", run: noop }),
+        },
+      }),
+    );
+    expect(body.options).toEqual([
+      {
+        type: ApplicationCommandOptionType.Subcommand,
+        name: "set",
+        description: "Set",
+        options: [
+          {
+            name: "value",
+            description: "Value",
+            required: true,
+            type: ApplicationCommandOptionType.String,
+            choices: undefined,
+          },
+        ],
+      },
+      {
+        type: ApplicationCommandOptionType.Subcommand,
+        name: "show",
+        description: "Show",
+        options: [],
+      },
+    ]);
+    // Only the command-level permission reaches Discord; subcommand permissions are checked at runtime.
+    expect(body.default_member_permissions).toBe(PermissionFlagsBits.ManageGuild.toString());
   });
 });

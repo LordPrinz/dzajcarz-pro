@@ -1,6 +1,7 @@
 import type { AnyCommand, CommandContext } from "./command.ts";
 import { UserError } from "./errors.ts";
 import type { Logger } from "./logger.ts";
+import { usage } from "./prefix.ts";
 
 /** PermissionFlagsBits.Administrator: Discord grants every permission to it. */
 const ADMINISTRATOR = 1n << 3n;
@@ -27,14 +28,22 @@ export async function executeCommand(
     if ((command.guildOnly || command.permissions !== undefined) && ctx.guildId === null) {
       throw new UserError("Ta komenda działa tylko na serwerze.");
     }
-    if (command.permissions !== undefined) {
-      const granted = ctx.memberPermissions ?? 0n;
-      const isAdmin = (granted & ADMINISTRATOR) === ADMINISTRATOR;
-      if (!isAdmin && (granted & command.permissions) !== command.permissions) {
-        throw new UserError("Nie masz uprawnień do tej komendy.");
+    requirePermissions(command.permissions, ctx);
+    if (command.subcommands) {
+      const { subcommand } = ctx;
+      const target =
+        subcommand !== undefined && Object.hasOwn(command.subcommands, subcommand)
+          ? command.subcommands[subcommand]
+          : undefined;
+      if (!target) throw new UserError(`Nieznana podkomenda. ${usage(command)}`);
+      if (target.permissions !== undefined && ctx.guildId === null) {
+        throw new UserError("Ta komenda działa tylko na serwerze.");
       }
+      requirePermissions(target.permissions, ctx);
+      await target.run(ctx);
+    } else {
+      await command.run?.(ctx);
     }
-    await command.run(ctx);
   } catch (error) {
     const userFacing = error instanceof UserError;
     if (!userFacing) log.error("Command failed", { error });
@@ -44,5 +53,14 @@ export async function executeCommand(
       // The interaction may have expired or the channel may be gone; nothing left to tell the user.
       log.warn("Could not report a command error to the caller", { error: replyError });
     }
+  }
+}
+
+function requirePermissions(required: bigint | undefined, ctx: CommandContext): void {
+  if (required === undefined) return;
+  const granted = ctx.memberPermissions ?? 0n;
+  const isAdmin = (granted & ADMINISTRATOR) === ADMINISTRATOR;
+  if (!isAdmin && (granted & required) !== required) {
+    throw new UserError("Nie masz uprawnień do tej komendy.");
   }
 }

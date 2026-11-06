@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { createRegistry, executeCommand, silentLogger } from "@dzajcarz/core";
+import {
+  createRegistry,
+  defineCommand,
+  defineSubcommand,
+  executeCommand,
+  silentLogger,
+} from "@dzajcarz/core";
 import { createFakeContext } from "@dzajcarz/core/testing";
 import { createGeneralModule, type GeneralModuleDeps } from "./index.ts";
 
@@ -14,7 +20,21 @@ function setup(overrides: Partial<GeneralModuleDeps> = {}) {
     module,
     {
       name: "music",
-      commands: [{ name: "play", description: "Gra muzykę", aliases: ["p"], run: async () => {} }],
+      commands: [
+        { name: "play", description: "Gra muzykę", aliases: ["p"], run: async () => {} },
+        defineCommand({
+          name: "queue",
+          description: "Kolejka",
+          subcommands: {
+            add: defineSubcommand({
+              description: "Dodaje utwór",
+              options: { song: { type: "string", description: "Utwór", required: true } },
+              run: async () => {},
+            }),
+            clear: defineSubcommand({ description: "Czyści kolejkę", run: async () => {} }),
+          },
+        }),
+      ],
     },
   ]);
   const run = async (name: string, args: Record<string, unknown> = {}) => {
@@ -39,13 +59,24 @@ describe("general module", () => {
     const embed = typeof reply === "object" ? reply.embeds?.[0] : undefined;
     expect(embed?.description).toContain("`?nazwa`");
     expect(embed?.fields?.map((f) => f.name)).toEqual(["general", "music"]);
-    expect(embed?.fields?.[1]?.value).toBe("`play` Gra muzykę");
+    expect(embed?.fields?.[1]?.value).toBe("`play` Gra muzykę\n`queue` Kolejka");
   });
 
   test("help describes one command, found by alias", async () => {
     const [reply] = await setup().run("pomoc", { command: "P" });
     const embed = typeof reply === "object" ? reply.embeds?.[0] : undefined;
     expect(embed).toMatchObject({ title: "/play", fields: [{ name: "Aliasy", value: "`!p`" }] });
+  });
+
+  test("help lists the subcommands of a command with their usage", async () => {
+    const [reply] = await setup({ prefixFor: async () => "?" }).run("help", { command: "queue" });
+    const embed = typeof reply === "object" ? reply.embeds?.[0] : undefined;
+    expect(embed?.fields).toEqual([
+      {
+        name: "Podkomendy",
+        value: "`?queue add <song>` Dodaje utwór\n`?queue clear` Czyści kolejkę",
+      },
+    ]);
   });
 
   test("help says when a command does not exist", async () => {

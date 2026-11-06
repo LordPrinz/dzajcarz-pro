@@ -38,13 +38,12 @@ const client = new Client({
   allowedMentions: NO_MENTIONS,
 });
 
-const registry = createRegistry(
-  createModules({
-    commands: () => registry.summaries(),
-    gatewayPing: () => client.ws.ping,
-    prefixFor: (guildId) => prefixes.resolve(guildId),
-  }),
-);
+const modules = createModules({
+  commands: () => registry.summaries(),
+  gatewayPing: () => client.ws.ping,
+  prefixFor: (guildId) => prefixes.resolve(guildId),
+});
+const registry = createRegistry(modules);
 attachHandlers(client, { registry, prefixes, logger });
 
 client.once(Events.ClientReady, (ready) => {
@@ -61,6 +60,13 @@ async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
   logger.info("Shutting down", { signal });
+  for (const module of modules) {
+    try {
+      await module.dispose?.();
+    } catch (error) {
+      logger.error("Module dispose failed", { module: module.name, error });
+    }
+  }
   await client.destroy();
   redis.close();
   await sql.close();

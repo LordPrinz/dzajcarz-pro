@@ -1,11 +1,22 @@
 import type { CommandContext } from "@dzajcarz/core";
-import { type ChatInputCommandInteraction, type Message, MessageFlags } from "discord.js";
+import {
+  ApplicationCommandOptionType,
+  type ChatInputCommandInteraction,
+  type Message,
+  MessageFlags,
+} from "discord.js";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 /** Reads the options a command declared from a slash interaction. */
 export function slashArgs(interaction: ChatInputCommandInteraction): Record<string, unknown> {
   const args: Record<string, unknown> = {};
-  for (const option of interaction.options.data) {
+  // A subcommand arrives as one option whose own `options` hold the arguments.
+  const first = interaction.options.data[0];
+  const given =
+    first?.type === ApplicationCommandOptionType.Subcommand
+      ? (first.options ?? [])
+      : interaction.options.data;
+  for (const option of given) {
     // user / channel / role options carry the id in `value`, like their prefix form.
     if (option.value !== undefined) args[option.name] = option.value;
   }
@@ -16,6 +27,7 @@ export function contextFromInteraction(interaction: ChatInputCommandInteraction)
   return {
     args: slashArgs(interaction),
     invocation: "slash",
+    subcommand: interaction.options.getSubcommand(false) ?? undefined,
     user: { id: interaction.user.id, displayName: interaction.user.displayName },
     guildId: interaction.guildId,
     channelId: interaction.channelId,
@@ -44,12 +56,14 @@ export function contextFromInteraction(interaction: ChatInputCommandInteraction)
 export function contextFromMessage(
   message: Message,
   args: Record<string, unknown>,
+  subcommand?: string,
 ): CommandContext {
   const member = message.member;
   const channel = message.channel;
   return {
     args,
     invocation: "prefix",
+    subcommand,
     user: { id: message.author.id, displayName: member?.displayName ?? message.author.displayName },
     guildId: message.guildId,
     channelId: message.channelId,

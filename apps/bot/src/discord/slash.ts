@@ -1,5 +1,6 @@
-import type { AnyCommand, OptionDef, OptionType } from "@dzajcarz/core";
+import type { AnyCommand, OptionDef, OptionsDef, OptionType } from "@dzajcarz/core";
 import {
+  type APIApplicationCommandBasicOption,
   ApplicationCommandOptionType,
   ApplicationCommandType,
   ApplicationIntegrationType,
@@ -28,7 +29,14 @@ export function toSlashCommand(
     type: ApplicationCommandType.ChatInput,
     name: command.name,
     description: command.description,
-    options: Object.entries(command.options ?? {}).map(([name, option]) => toOption(name, option)),
+    options: command.subcommands
+      ? Object.entries(command.subcommands).map(([name, subcommand]) => ({
+          type: ApplicationCommandOptionType.Subcommand as const,
+          name,
+          description: subcommand.description,
+          options: toOptions(subcommand.options) as APIApplicationCommandBasicOption[],
+        }))
+      : toOptions(command.options),
     integration_types: [ApplicationIntegrationType.GuildInstall],
     contexts: guildOnly
       ? [InteractionContextType.Guild]
@@ -37,6 +45,10 @@ export function toSlashCommand(
     default_member_permissions:
       command.permissions === undefined ? undefined : command.permissions.toString(),
   };
+}
+
+function toOptions(options: OptionsDef = {}) {
+  return Object.entries(options).map(([name, option]) => toOption(name, option));
 }
 
 function toOption(name: string, option: OptionDef): OptionJSON {

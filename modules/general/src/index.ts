@@ -68,6 +68,18 @@ export function describeCommand(command: CommandSummary, prefix: string): Embed 
     title: `/${command.name}`,
     description: command.description,
     color: BRAND_COLOR,
-    fields: aliases ? [{ name: "Aliasy", value: aliases }] : [],
+    fields: [
+      ...(command.subcommands.length > 0
+        ? [
+            {
+              name: "Podkomendy",
+              value: command.subcommands
+                .map((s) => `\`${prefix}${s.usage}\` ${s.description}`)
+                .join("\n"),
+            },
+          ]
+        : []),
+      ...(aliases ? [{ name: "Aliasy", value: aliases }] : []),
+    ],
   };
 }

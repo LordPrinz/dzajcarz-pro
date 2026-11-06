@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { defineCommand } from "./command.ts";
+import { defineCommand, defineSubcommand } from "./command.ts";
 import { executeCommand, GENERIC_ERROR } from "./dispatch.ts";
 import { UserError } from "./errors.ts";
 import { createJsonLogger, silentLogger } from "./logger.ts";
@@ -114,3 +114,84 @@ test("administrators pass every permission check", async () => {
   await executeCommand(command, createFakeContext({ memberPermissions: 1n << 3n }), silentLogger);
   expect(ran).toBe(true);
 });
+
+describe("executeCommand with subcommands", () => {
+  const MANAGE = 1n << 5n;
+  const ran: string[] = [];
+  const command = defineCommand({
+    name: "prefix",
+    description: "Prefix",
+    permissions: 1n << 1n,
+    subcommands: {
+      show: defineSubcommand({ description: "Show", run: async () => void ran.push("show") }),
+      set: defineSubcommand({
+        description: "Set",
+        permissions: MANAGE,
+        options: { value: { type: "string", description: "v", required: true } },
+        run: async (ctx) => void ran.push(`set ${ctx.args.value}`),
+      }),
+    },
+  });
+  const KICK = 1n << 1n;
+
+  test("runs the chosen subcommand with its arguments", async () => {
+    ran.length = 0;
+    const ctx = createFakeContext({
+      subcommand: "set",
+      args: { value: "?" },
+      memberPermissions: KICK | MANAGE,
+    });
+    await executeCommand(command, ctx, silentLogger);
+    expect(ran).toEqual(["set ?"]);
+  });
+
+  test("checks the command permissions, then the subcommand's own", async () => {
+    ran.length = 0;
+    const noCommandPermission = createFakeContext({ subcommand: "show", memberPermissions: 0n });
+    await executeCommand(command, noCommandPermission, silentLogger);
+    expect(replyText(noCommandPermission.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
+
+    const noSubPermission = createFakeContext({ subcommand: "set", memberPermissions: KICK });
+    await executeCommand(command, noSubPermission, silentLogger);
+    expect(replyText(noSubPermission.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
+
+    await executeCommand(
+      command,
+      createFakeContext({ subcommand: "show", memberPermissions: KICK }),
+      silentLogger,
+    );
+    expect(ran).toEqual(["show"]);
+  });
+
+  test("administrators skip the subcommand permission too", async () => {
+    ran.length = 0;
+    const ctx = createFakeContext({
+      subcommand: "set",
+      args: { value: "x" },
+      memberPermissions: 1n << 3n,
+    });
+    await executeCommand(command, ctx, silentLogger);
+    expect(ran).toEqual(["set x"]);
+  });
+
+  test("refuses a subcommand with permissions in direct messages", async () => {
+    const open = defineCommand({
+      name: "x",
+      description: "X",
+      subcommands: { a: defineSubcommand({ description: "A", permissions: MANAGE, run: noRun }) },
+    });
+    const ctx = createFakeContext({ subcommand: "a", guildId: null });
+    await executeCommand(open, ctx, silentLogger);
+    expect(replyText(ctx.replies[0])).toBe("Ta komenda działa tylko na serwerze.");
+  });
+
+  test("a missing or unknown subcommand gets a Polish error", async () => {
+    for (const subcommand of [undefined, "nope"]) {
+      const ctx = createFakeContext({ subcommand, memberPermissions: KICK });
+      await executeCommand(command, ctx, silentLogger);
+      expect(replyText(ctx.replies[0])).toBe("Nieznana podkomenda. Użycie: `prefix show|set`");
+    }
+  });
+});
+
+async function noRun() {}

@@ -1,34 +1,55 @@
-import type { AnyCommand, OptionDef } from "./command.ts";
+import type { AnyCommand, OptionDef, OptionsDef } from "./command.ts";
 import type { AnyEventHandler, BotModule } from "./module.ts";
+import { usageLine } from "./prefix.ts";
 
 /** Discord's rule for slash command and option names (lowercase only, since we never localise). */
 const NAME_PATTERN = /^[\p{Ll}\p{Lo}\p{N}_-]{1,32}$/u;
 const MAX_DESCRIPTION = 100;
+const MAX_SUBCOMMANDS = 25;
+
+export interface SubcommandSummary {
+  name: string;
+  description: string;
+  /** Prefix-form syntax without the prefix: `prefix set <value>`. */
+  usage: string;
+}
 
 export interface CommandSummary {
   name: string;
   description: string;
   aliases: readonly string[];
   module: string;
+  /** Empty for a plain command. */
+  subcommands: readonly SubcommandSummary[];
+}
+
+export interface RegisteredEvent {
+  /** Name of the module that owns the handler. */
+  module: string;
+  handler: AnyEventHandler;
 }
 
 export interface CommandRegistry {
   /** Looks up a command by name or prefix alias. */
   find(name: string): AnyCommand | undefined;
   commands(): readonly AnyCommand[];
-  events(): readonly AnyEventHandler[];
+  events(): readonly RegisteredEvent[];
+  /** Name of the module that registered the command (a value returned by `find` or `commands`). */
+  moduleOf(command: AnyCommand): string | undefined;
   /** What `/help` shows. */
   summaries(): readonly CommandSummary[];
 }
 
 /**
  * Collects commands and event handlers from every module and rejects a broken setup at startup:
- * duplicate names or aliases, names Discord would refuse, required options after optional ones.
+ * duplicate names or aliases, names Discord would refuse, required options after optional ones, a
+ * command with both or neither of `run` and `subcommands`.
  */
 export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
   const byName = new Map<string, { command: AnyCommand; module: string }>();
   const commands: AnyCommand[] = [];
-  const events: AnyEventHandler[] = [];
+  const events: RegisteredEvent[] = [];
+  const owners = new Map<AnyCommand, string>();
   const summaries: CommandSummary[] = [];
   const moduleNames = new Set<string>();
 
@@ -49,14 +70,20 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
         byName.set(key, { command, module: module.name });
       }
       commands.push(command);
+      owners.set(command, module.name);
       summaries.push({
         name: command.name,
         description: command.description,
         aliases: command.aliases ?? [],
         module: module.name,
+        subcommands: Object.entries(command.subcommands ?? {}).map(([name, sub]) => ({
+          name,
+          description: sub.description,
+          usage: usageLine(command, name),
+        })),
       });
     }
-    events.push(...(module.events ?? []));
+    for (const handler of module.events ?? []) events.push({ module: module.name, handler });
   }
 
   return {
@@ -64,6 +91,7 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
     commands: () => commands,
     events: () => events,
     summaries: () => summaries,
+    moduleOf: (command) => owners.get(command),
   };
 }
 
@@ -78,7 +106,29 @@ function validateCommand(command: AnyCommand, module: string): void {
   }
   checkDescription(command.description, where);
 
-  const options = Object.entries(command.options ?? {});
+  const { subcommands } = command;
+  if ((command.run === undefined) === (subcommands === undefined)) {
+    throw new Error(`${where} needs exactly one of "run" and "subcommands"`);
+  }
+  if (!subcommands) {
+    validateOptions(command.options ?? {}, where);
+    return;
+  }
+  if (command.options) throw new Error(`${where} has subcommands, so options belong on them`);
+  const entries = Object.entries(subcommands);
+  if (entries.length < 1 || entries.length > MAX_SUBCOMMANDS) {
+    throw new Error(`${where} must have 1–${MAX_SUBCOMMANDS} subcommands`);
+  }
+  for (const [name, subcommand] of entries) {
+    const at = `subcommand "${name}" of ${where}`;
+    if (!NAME_PATTERN.test(name)) throw new Error(`Invalid name for ${at}`);
+    checkDescription(subcommand.description, at);
+    validateOptions(subcommand.options ?? {}, at);
+  }
+}
+
+function validateOptions(optionDefs: OptionsDef, where: string): void {
+  const options = Object.entries(optionDefs);
   if (options.length > 25) throw new Error(`${where} has more than 25 options`);
   let seenOptional = false;
   options.forEach(([name, option], index) => {

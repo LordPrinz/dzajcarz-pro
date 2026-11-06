@@ -20,7 +20,7 @@ export interface BotDeps {
 
 /** Routes Discord events to module handlers and commands. */
 export function attachHandlers(client: Client, { registry, prefixes, logger }: BotDeps): void {
-  for (const handler of registry.events()) {
+  for (const { handler } of registry.events()) {
     const listener = async (...args: unknown[]) => {
       try {
         await handler.run(...args);
@@ -77,7 +77,11 @@ async function handleMessage(
     await message.reply({ content: parsed.error, allowedMentions: NO_MENTIONS });
     return;
   }
-  await executeCommand(command, contextFromMessage(message, parsed.args), logger);
+  await executeCommand(
+    command,
+    contextFromMessage(message, parsed.args, parsed.subcommand),
+    logger,
+  );
 }
 
 /** A text command starts with the guild prefix or with a mention of the bot (`@Dżajcarz ping`). */

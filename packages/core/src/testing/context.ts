@@ -9,6 +9,7 @@ export interface FakeContext<A> extends CommandContext<A> {
 export interface FakeContextOptions<A> {
   args?: A;
   invocation?: Invocation;
+  subcommand?: string;
   guildId?: string | null;
   memberPermissions?: bigint | null;
   userId?: string;
@@ -18,6 +19,7 @@ export interface FakeContextOptions<A> {
 export function createFakeContext<A = Record<string, unknown>>({
   args = {} as A,
   invocation = "slash",
+  subcommand,
   guildId = "100000000000000001",
   memberPermissions = 0n,
   userId = "200000000000000002",
@@ -25,6 +27,7 @@ export function createFakeContext<A = Record<string, unknown>>({
   const ctx: FakeContext<A> = {
     args,
     invocation,
+    subcommand,
     guildId,
     channelId: "300000000000000003",
     memberPermissions: guildId === null ? null : memberPermissions,

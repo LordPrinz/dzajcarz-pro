@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type AnyCommand, defineCommand } from "./command.ts";
+import { type AnyCommand, defineCommand, defineSubcommand } from "./command.ts";
 import { defineEvent } from "./module.ts";
 import { createRegistry } from "./registry.ts";
 
@@ -14,14 +14,32 @@ describe("createRegistry", () => {
     expect(registry.find("P")).toBe(play);
     expect(registry.find("nope")).toBeUndefined();
     expect(registry.summaries()).toEqual([
-      { name: "play", description: "play command", aliases: ["p"], module: "music" },
+      {
+        name: "play",
+        description: "play command",
+        aliases: ["p"],
+        module: "music",
+        subcommands: [],
+      },
     ]);
   });
 
   test("collects event handlers from every module", () => {
     const ready = defineEvent({ name: "log-ready", event: "clientReady", run: () => {} });
     const registry = createRegistry([{ name: "a", events: [ready] }, { name: "b" }]);
-    expect(registry.events()).toEqual([ready]);
+    expect(registry.events()).toEqual([{ module: "a", handler: ready }]);
+  });
+
+  test("knows which module owns a command", () => {
+    const play = command("play");
+    const ping = command("ping");
+    const registry = createRegistry([
+      { name: "music", commands: [play] },
+      { name: "general", commands: [ping] },
+    ]);
+    expect(registry.moduleOf(play)).toBe("music");
+    expect(registry.moduleOf(registry.find("ping") as AnyCommand)).toBe("general");
+    expect(registry.moduleOf(command("other"))).toBeUndefined();
   });
 
   test("rejects a name or alias used twice, naming both modules", () => {
@@ -79,6 +97,62 @@ describe("createRegistry", () => {
     });
     expect(() => createRegistry([{ name: "m", commands: [notLast] }])).toThrow('"rest"');
     expect(() => createRegistry([{ name: "m", commands: [notString] }])).toThrow('"rest"');
+  });
+});
+
+describe("subcommands", () => {
+  const sub = (extra = {}) =>
+    defineSubcommand({ description: "Sub", run: async () => {}, ...extra });
+  const group = (subcommands: Record<string, ReturnType<typeof sub>>, extra = {}) =>
+    defineCommand({ name: "prefix", description: "Prefix", subcommands, ...extra });
+  const register = (c: AnyCommand) => () => createRegistry([{ name: "m", commands: [c] }]);
+
+  test("accepts a command with subcommands and summarises them", () => {
+    const prefix = group({
+      set: sub({ options: { value: { type: "string", description: "v", required: true } } }),
+      show: sub(),
+    });
+    const registry = createRegistry([{ name: "settings", commands: [prefix] }]);
+    expect(registry.summaries()[0]?.subcommands).toEqual([
+      { name: "set", description: "Sub", usage: "prefix set <value>" },
+      { name: "show", description: "Sub", usage: "prefix show" },
+    ]);
+  });
+
+  test("rejects a command with both run and subcommands", () => {
+    const both = { ...group({ a: sub() }), run: async () => {} } as AnyCommand;
+    expect(register(both)).toThrow('exactly one of "run" and "subcommands"');
+  });
+
+  test("rejects a command with neither run nor subcommands", () => {
+    const neither = { name: "x", description: "X" } as AnyCommand;
+    expect(register(neither)).toThrow('exactly one of "run" and "subcommands"');
+  });
+
+  test("rejects options next to subcommands", () => {
+    const mixed = {
+      ...group({ a: sub() }),
+      options: { q: { type: "string", description: "q" } },
+    } as AnyCommand;
+    expect(register(mixed)).toThrow("options belong on them");
+  });
+
+  test("rejects an empty set, more than 25, and bad names or descriptions", () => {
+    expect(register(group({}))).toThrow("1–25 subcommands");
+    const many = Object.fromEntries(Array.from({ length: 26 }, (_, i) => [`s${i}`, sub()]));
+    expect(register(group(many))).toThrow("1–25 subcommands");
+    expect(register(group({ Bad: sub() }))).toThrow('Invalid name for subcommand "Bad"');
+    expect(register(group({ a: sub({ description: "" }) }))).toThrow("Description");
+  });
+
+  test("applies the option rules to each subcommand", () => {
+    const bad = sub({
+      options: {
+        a: { type: "string", description: "a" },
+        b: { type: "string", description: "b", required: true },
+      },
+    });
+    expect(register(group({ a: bad }))).toThrow('subcommand "a"');
   });
 });
 

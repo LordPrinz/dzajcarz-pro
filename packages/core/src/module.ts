@@ -27,4 +27,6 @@ export interface BotModule {
   name: string;
   commands?: readonly AnyCommand[];
   events?: readonly AnyEventHandler[];
+  /** Called on shutdown, before the Discord client is destroyed: stop timers, flush buffers. */
+  dispose?(): Promise<void> | void;
 }
