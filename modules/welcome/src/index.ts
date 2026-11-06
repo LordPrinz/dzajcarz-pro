@@ -116,7 +116,7 @@ export function createWelcomeModule({
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
           // Fetching the guild and posting can take longer than the 3 s a slash command may stay silent.
-          await ctx.defer();
+          await ctx.defer({ ephemeral: true });
           const config = await store.get(guildId);
           if (!config) {
             throw new UserError("Powitania nie są ustawione. Użyj `welcome set`.");
