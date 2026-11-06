@@ -1,7 +1,7 @@
 import type { AnyCommand, CommandContext } from "./command.ts";
 import { UserError } from "./errors.ts";
 import type { Logger } from "./logger.ts";
-import { usage } from "./prefix.ts";
+import { splitInvocation, usage } from "./prefix.ts";
 
 /** PermissionFlagsBits.Administrator: Discord grants every permission to it. */
 const ADMINISTRATOR = 1n << 3n;
@@ -50,6 +50,25 @@ export async function executeCommand(
       log.warn("Could not report a command error to the caller", { error: replyError });
     }
   }
+}
+
+/**
+ * The pre-parse gate of a prefix invocation: the command's own access plus the permissions of the subcommand
+ * named by the first word, so a member without access gets "no permission" instead of a usage error.
+ */
+export function checkPrefixAccess(
+  command: AnyCommand,
+  rest: string,
+  ctx: Pick<CommandContext, "guildId" | "memberPermissions">,
+): string | null {
+  const denied = checkAccess(command, ctx);
+  if (denied || !command.subcommands) return denied;
+  const word = splitInvocation(rest)?.name;
+  const picked =
+    word !== undefined && Object.hasOwn(command.subcommands, word)
+      ? command.subcommands[word]
+      : undefined;
+  return picked ? checkAccess(picked, ctx) : null;
 }
 
 /**

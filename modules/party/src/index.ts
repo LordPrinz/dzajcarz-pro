@@ -224,7 +224,7 @@ export function createPartyModule({
         },
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
-          await ctx.defer();
+          await ctx.defer({ ephemeral: true });
           const area = await pickArea(guildId, ctx.args.channel);
           await dismantleArea(area);
           await ctx.reply({ content: "Strefa imprezowa usunięta.", ephemeral: true });

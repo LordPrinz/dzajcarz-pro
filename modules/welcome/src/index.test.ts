@@ -65,7 +65,7 @@ function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
     await executeCommand(command, ctx, silentLogger);
     return Object.assign(
       ctx.replies.map((r) => replyText(r)),
-      { deferred: ctx.deferred },
+      { deferred: ctx.deferred, deferOptions: ctx.deferOptions },
     );
   };
   return { run, configs, sent, warnings, event };
@@ -138,10 +138,12 @@ describe("/welcome commands", () => {
     expect(reply).toContain("Wysłano");
   });
 
-  test("test defers before it does any slow work", async () => {
+  test("test defers ephemerally before it does any slow work", async () => {
     const { run, configs } = setup();
     configs.set(guildId, { channelId, template: "x" });
-    expect((await run("test")).deferred).toBe(true);
+    const result = await run("test");
+    expect(result.deferred).toBe(true);
+    expect(result.deferOptions).toEqual({ ephemeral: true });
   });
 
   test("test without config points at set", async () => {

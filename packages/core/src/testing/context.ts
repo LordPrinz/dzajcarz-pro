@@ -4,6 +4,8 @@ export interface FakeContext<A> extends CommandContext<A> {
   /** Every reply, in order. */
   readonly replies: Reply[];
   deferred: boolean;
+  /** The options of the last defer() call. */
+  deferOptions?: { ephemeral?: boolean };
 }
 
 export interface FakeContextOptions<A> {
@@ -37,8 +39,9 @@ export function createFakeContext<A = Record<string, unknown>>({
     async reply(reply) {
       ctx.replies.push(reply);
     },
-    async defer() {
+    async defer(options) {
       ctx.deferred = true;
+      ctx.deferOptions = options;
     },
   };
   return ctx;

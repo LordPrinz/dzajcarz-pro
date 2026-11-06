@@ -184,7 +184,10 @@ function setup({
   ) => {
     const ctx = createFakeContext({ args, subcommand, memberPermissions, userId });
     await executeCommand(command, ctx, silentLogger);
-    return ctx.replies.map((r) => replyText(r));
+    return Object.assign(
+      ctx.replies.map((r) => replyText(r)),
+      { deferOptions: ctx.deferOptions },
+    );
   };
   /** Discord changes its state first, then calls every listener in registration order without waiting. */
   const voice = async (oldChannel: string | null, newChannel: string | null, userId = "u1") => {
@@ -307,8 +310,9 @@ describe("/party delete", () => {
     t.discord.set("300", new Set());
     await t.voice(null, "400");
     expect(t.owned.size).toBe(1);
-    const [reply] = await t.run("delete");
-    expect(reply).toContain("usunięta");
+    const replies = await t.run("delete");
+    expect(replies[0]).toContain("usunięta");
+    expect(replies.deferOptions).toEqual({ ephemeral: true });
     expect(t.areas.size).toBe(0);
     expect(t.owned.size).toBe(0);
     expect([...t.discord.keys()]).toEqual([]);

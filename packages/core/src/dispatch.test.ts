@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { defineCommand, defineSubcommand } from "./command.ts";
-import { checkAccess, executeCommand, GENERIC_ERROR } from "./dispatch.ts";
+import { checkAccess, checkPrefixAccess, executeCommand, GENERIC_ERROR } from "./dispatch.ts";
 import { UserError } from "./errors.ts";
 import { createJsonLogger, silentLogger } from "./logger.ts";
 import { createFakeContext, replyText } from "./testing/context.ts";
@@ -195,6 +195,39 @@ describe("executeCommand with subcommands", () => {
 });
 
 async function noRun() {}
+
+describe("checkPrefixAccess", () => {
+  const MANAGE = 1n << 5n;
+  const command = defineCommand({
+    name: "party",
+    description: "Party",
+    subcommands: {
+      create: defineSubcommand({
+        description: "Create",
+        permissions: MANAGE,
+        options: { name: { type: "string", description: "n", required: true } },
+        run: noRun,
+      }),
+      info: defineSubcommand({ description: "Info", run: noRun }),
+    },
+  });
+  const guildId = "100000000000000001";
+
+  test("enforces the permissions of the subcommand named by the first word", () => {
+    expect(checkPrefixAccess(command, "create", { guildId, memberPermissions: 0n })).toBe(
+      "Nie masz uprawnień do tej komendy.",
+    );
+    expect(
+      checkPrefixAccess(command, "CREATE x", { guildId, memberPermissions: MANAGE }),
+    ).toBeNull();
+  });
+
+  test("leaves subcommands without permissions and unknown words to the parser", () => {
+    expect(checkPrefixAccess(command, "info", { guildId, memberPermissions: 0n })).toBeNull();
+    expect(checkPrefixAccess(command, "nope", { guildId, memberPermissions: 0n })).toBeNull();
+    expect(checkPrefixAccess(command, "", { guildId, memberPermissions: 0n })).toBeNull();
+  });
+});
 
 describe("checkAccess", () => {
   test("lets a command without restrictions through, in a DM too", () => {
