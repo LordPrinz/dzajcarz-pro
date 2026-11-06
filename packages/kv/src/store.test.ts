@@ -55,6 +55,16 @@ describe.each(adapters)("KeyValueStore (%s)", (_name, make) => {
     expect(await store.setIfAbsent("lock", "b", 50)).toBe(true);
   });
 
+  test("delIfEquals deletes only while the value matches", async () => {
+    const store = make();
+    expect(await store.delIfEquals("lock", "a")).toBe(false);
+    await store.set("lock", "a");
+    expect(await store.delIfEquals("lock", "b")).toBe(false);
+    expect(await store.get("lock")).toBe("a");
+    expect(await store.delIfEquals("lock", "a")).toBe(true);
+    expect(await store.get("lock")).toBeNull();
+  });
+
   test("setIfAbsent lets only one of many concurrent callers win", async () => {
     const store = make();
     const results = await Promise.all(

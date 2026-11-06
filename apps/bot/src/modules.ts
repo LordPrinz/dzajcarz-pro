@@ -34,7 +34,7 @@ export interface ModuleServices {
   guildLookup: GuildLookup;
   partyAreas: PartyRepository;
   partyChannels: PartyChannels;
-  partyLock: Pick<KeyValueStore, "setIfAbsent" | "del">;
+  partyLock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
   logger: Logger;
 }
 

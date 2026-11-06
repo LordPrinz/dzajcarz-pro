@@ -21,24 +21,28 @@ export interface PartyChannel {
   ownerId: string;
   /** The join channel of the area the channel was created for. */
   joinChannelId: string;
+  createdAt: Date;
 }
 
 /** Where areas and owned channels are stored. */
 export interface PartyRepository {
   addArea(area: PartyArea): Promise<void>;
   listAreas(guildId: string): Promise<PartyArea[]>;
+  listAllAreas(): Promise<PartyArea[]>;
   findAreaByJoinChannel(joinChannelId: string): Promise<PartyArea | null>;
   findAreaByCategory(categoryId: string): Promise<PartyArea | null>;
-  /** Also removes the area's channel rows. False when the area was unknown. */
-  deleteArea(joinChannelId: string): Promise<boolean>;
+  /** Removes the area and its channel rows in one transaction and returns those rows; null when the area was unknown. */
+  deleteArea(joinChannelId: string): Promise<PartyChannel[] | null>;
   /** Rejects when the member already owns a channel in the guild. */
-  addChannel(channel: PartyChannel): Promise<void>;
+  addChannel(channel: Omit<PartyChannel, "createdAt">): Promise<void>;
   findChannel(channelId: string): Promise<PartyChannel | null>;
   findChannelByOwner(guildId: string, ownerId: string): Promise<PartyChannel | null>;
   listChannelsOfArea(joinChannelId: string): Promise<PartyChannel[]>;
   listChannels(): Promise<PartyChannel[]>;
   /** False when the row was already gone. */
   deleteChannel(channelId: string): Promise<boolean>;
+  /** False when the channel is gone or the member already owns another channel in the guild. */
+  transferOwner(channelId: string, newOwnerId: string): Promise<boolean>;
 }
 
 /** What the bot does on Discord. Every method rejects when Discord refuses. */
@@ -53,8 +57,10 @@ export interface PartyChannels {
   moveMember(guildId: string, userId: string, channelId: string): Promise<void>;
   /** A channel that is already gone counts as deleted. */
   deleteChannel(channelId: string): Promise<void>;
-  /** People (bots excluded) in the voice channel; null when the channel no longer exists. */
-  memberCount(channelId: string): Promise<number | null>;
+  /** Ids of the people (bots excluded) in the voice channel; null when the channel no longer exists. */
+  members(channelId: string): Promise<string[] | null>;
+  /** Whether the channel still exists on Discord. */
+  exists(channelId: string): Promise<boolean>;
   /** Creates a category and the voice channel inside it that members join. Leaves nothing behind on failure. */
   createCategoryWithJoinChannel(
     guildId: string,
@@ -65,8 +71,8 @@ export interface PartyChannels {
 export interface PartyModuleDeps {
   repository: PartyRepository;
   channels: PartyChannels;
-  /** Only the lock operations are used. */
-  lock: Pick<KeyValueStore, "setIfAbsent" | "del">;
+  /** The join lock and the creation cooldown. */
+  lock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
   logger: Logger;
 }
 
@@ -75,7 +81,12 @@ const MANAGE_CHANNELS = 1n << 4n;
 /** Discord's limit for channel and category names. */
 const MAX_NAME_LENGTH = 100;
 /** Long enough to create a channel and move the member, short enough that a crash frees the lock fast. */
-const LOCK_TTL_MS = 10_000;
+const LOCK_TTL_MS = 30_000;
+/** A member may cause this many new channels per window; more joins are ignored (channel create/delete spam). */
+const MAX_CREATIONS = 3;
+const CREATION_WINDOW_MS = 60_000;
+/** Reconciliation leaves younger channels alone: their owner may still be mid-join. */
+const RECONCILE_GRACE_MS = 15_000;
 
 export function createPartyModule({
   repository,
@@ -95,6 +106,18 @@ export function createPartyModule({
     } catch (error) {
       logger.warn("Could not delete channel", { channelId, error });
     }
+  }
+
+  /**
+   * Drops the area's rows, then its Discord channels: party channels, join channel and category. Channels
+   * that are already gone are fine. Returns how many party channels the area had.
+   */
+  async function dismantleArea(area: PartyArea): Promise<number> {
+    const owned = (await repository.deleteArea(area.joinChannelId)) ?? [];
+    for (const { channelId } of owned) await deleteQuietly(channelId);
+    await deleteQuietly(area.joinChannelId);
+    await deleteQuietly(area.categoryId);
+    return owned.length;
   }
 
   const party = defineCommand({
@@ -126,7 +149,7 @@ export function createPartyModule({
           } catch (error) {
             logger.warn("Party area not created on Discord", { guildId, error });
             throw new UserError(
-              "Nie mogę utworzyć kanałów. Sprawdź, czy bot ma uprawnienie do zarządzania kanałami.",
+              "Nie mogę utworzyć kanałów. Sprawdź, czy bot ma uprawnienia „Zarządzanie kanałami” i „Przenoszenie członków”.",
             );
           }
           try {
@@ -152,13 +175,9 @@ export function createPartyModule({
         },
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
-          const area = await pickArea(guildId, ctx.args.channel);
-          const owned = await repository.listChannelsOfArea(area.joinChannelId);
           await ctx.defer();
-          await repository.deleteArea(area.joinChannelId);
-          for (const { channelId } of owned) await deleteQuietly(channelId);
-          await deleteQuietly(area.joinChannelId);
-          await deleteQuietly(area.categoryId);
+          const area = await pickArea(guildId, ctx.args.channel);
+          await dismantleArea(area);
           await ctx.reply({ content: "Strefa imprezowa usunięta.", ephemeral: true });
         },
       }),
@@ -183,12 +202,26 @@ export function createPartyModule({
     return only;
   }
 
-  async function ownedOrNew(area: PartyArea, userId: string, displayName: string): Promise<string> {
+  /** The member's channel, reusing a live one; `created` is true only for a channel made by this call. Null when the cooldown applies. */
+  async function ownedOrNew(
+    area: PartyArea,
+    userId: string,
+    displayName: string,
+  ): Promise<{ channelId: string; created: boolean } | null> {
     const existing = await repository.findChannelByOwner(area.guildId, userId);
     if (existing) {
-      // A null count means the channel vanished without a channelDelete reaching us.
-      if ((await channels.memberCount(existing.channelId)) !== null) return existing.channelId;
+      // Null members means the channel vanished without a channelDelete reaching us.
+      if ((await channels.members(existing.channelId)) !== null) {
+        return { channelId: existing.channelId, created: false };
+      }
       await repository.deleteChannel(existing.channelId);
+    }
+    if (await overCreationLimit(area.guildId, userId)) {
+      logger.debug("Channel creation skipped, member is over the limit", {
+        guildId: area.guildId,
+        userId,
+      });
+      return null;
     }
     const name = `Kanał ${displayName}`.slice(0, MAX_NAME_LENGTH);
     const channelId = await channels.createVoiceChannel(
@@ -208,7 +241,21 @@ export function createPartyModule({
       await deleteQuietly(channelId);
       throw error;
     }
-    return channelId;
+    return { channelId, created: true };
+  }
+
+  /** Counts a creation; fails open when Redis is down. */
+  async function overCreationLimit(guildId: string, userId: string): Promise<boolean> {
+    try {
+      const { count } = await lock.increment(
+        `party-cooldown:${guildId}:${userId}`,
+        CREATION_WINDOW_MS,
+      );
+      return count > MAX_CREATIONS;
+    } catch (error) {
+      logger.warn("Party cooldown unavailable", { guildId, userId, error });
+      return false;
+    }
   }
 
   async function handleJoin(
@@ -221,9 +268,11 @@ export function createPartyModule({
     if (!area) return;
 
     const key = `party:${guildId}:${userId}`;
+    // A random token, so a holder whose lock expired cannot release the next holder's lock.
+    const token = crypto.randomUUID();
     let held = false;
     try {
-      held = await lock.setIfAbsent(key, "1", LOCK_TTL_MS);
+      held = await lock.setIfAbsent(key, token, LOCK_TTL_MS);
       if (!held) {
         logger.debug("Join ignored, another one is in progress", { guildId, userId });
         return;
@@ -234,57 +283,108 @@ export function createPartyModule({
     }
 
     try {
-      const channelId = await ownedOrNew(area, userId, displayName);
+      const target = await ownedOrNew(area, userId, displayName);
+      if (!target) return;
+      // The member may have left the join channel while the channel was being made.
+      const inJoinChannel = (await channels.members(joinedChannelId))?.includes(userId) ?? false;
+      if (!inJoinChannel) {
+        if (target.created) await removeChannel(target.channelId);
+        return;
+      }
       try {
-        await channels.moveMember(guildId, userId, channelId);
+        await channels.moveMember(guildId, userId, target.channelId);
       } catch (error) {
-        // The member left voice or the bot cannot move them: do not leave an empty channel behind.
-        await removeChannel(channelId);
+        // Only a channel made just now is ours to discard; an existing one may hold other people.
+        if (target.created) await removeChannel(target.channelId);
         throw error;
       }
     } finally {
-      if (held) await lock.del(key).catch(() => {});
+      if (held) await lock.delIfEquals(key, token).catch(() => {});
     }
   }
 
+  /** Deletes the Discord channel, then the row. If Discord refuses the row stays so a later leave or reconcile retries. */
   async function removeChannel(channelId: string): Promise<void> {
-    await deleteQuietly(channelId);
+    try {
+      await channels.deleteChannel(channelId);
+    } catch (error) {
+      logger.warn("Could not delete channel, keeping its row to retry later", {
+        channelId,
+        error,
+      });
+      return;
+    }
     await repository.deleteChannel(channelId);
   }
 
   async function handleLeave(leftChannelId: string): Promise<void> {
     const owned = await repository.findChannel(leftChannelId);
     if (!owned) return;
-    const count = await channels.memberCount(leftChannelId);
-    if (count === null || count === 0) await removeChannel(leftChannelId);
+    const members = await channels.members(leftChannelId);
+    if (members === null || members.length === 0) {
+      await removeChannel(leftChannelId);
+      return;
+    }
+    if (members.includes(owned.ownerId)) return;
+    // The owner left but others stay: the first one who is free to own a channel takes over.
+    for (const candidate of members) {
+      if (await repository.transferOwner(leftChannelId, candidate)) {
+        logger.info("Party channel ownership transferred", {
+          channelId: leftChannelId,
+          from: owned.ownerId,
+          to: candidate,
+        });
+        return;
+      }
+    }
   }
 
-  const voice = defineEvent({
-    name: "party-voice",
+  /** The human whose voice channel changed, or null for bots and for mute/deafen updates. */
+  function channelChange(oldState: VoiceState, newState: VoiceState) {
+    if (oldState.channelId === newState.channelId) return null;
+    const member = newState.member ?? oldState.member;
+    return !member || member.user.bot ? null : member;
+  }
+
+  /** Leaves in progress by `guild:user`, so a join by the same member waits for the cleanup of the channel they just left. */
+  const leaving = new Map<string, Promise<void>>();
+
+  const leave = defineEvent({
+    name: "party-leave",
     event: "voiceStateUpdate",
-    run: (oldState: VoiceState, newState: VoiceState) => onVoiceStateUpdate(oldState, newState),
+    // Cleanup must happen even if the module was switched off while channels exist.
+    alwaysRun: true,
+    run: (oldState: VoiceState, newState: VoiceState) => {
+      const member = channelChange(oldState, newState);
+      if (!member || !oldState.channelId) return;
+      const key = `${newState.guild.id}:${member.id}`;
+      // Registered before the first await: the join handler is invoked right after this one returns.
+      const done = onLeave(newState.guild.id, oldState.channelId);
+      leaving.set(key, done);
+      return done.finally(() => {
+        if (leaving.get(key) === done) leaving.delete(key);
+      });
+    },
   });
 
   /** Never throws: Discord and the database fail now and then, and a voice event must not crash the bot. */
-  async function onVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): Promise<void> {
-    if (oldState.channelId === newState.channelId) return;
-    const member = newState.member ?? oldState.member;
-    if (!member || member.user.bot) return;
-    const guildId = newState.guild.id;
-
-    // Leaving first: moving from your own channel into the join channel frees it before a new one is made.
-    if (oldState.channelId) {
-      try {
-        await handleLeave(oldState.channelId);
-      } catch (error) {
-        logger.warn("Party channel cleanup failed", {
-          guildId,
-          channelId: oldState.channelId,
-          error,
-        });
-      }
+  async function onLeave(guildId: string, channelId: string): Promise<void> {
+    try {
+      await handleLeave(channelId);
+    } catch (error) {
+      logger.warn("Party channel cleanup failed", { guildId, channelId, error });
     }
-    if (newState.channelId) {
+  }
+
+  const join = defineEvent({
+    name: "party-join",
+    event: "voiceStateUpdate",
+    run: async (oldState: VoiceState, newState: VoiceState) => {
+      const member = channelChange(oldState, newState);
+      if (!member || !newState.channelId) return;
+      const guildId = newState.guild.id;
+      // Moving from your own channel into the join channel frees (or hands over) it before a new one is made.
+      await leaving.get(`${guildId}:${member.id}`);
       try {
         await handleJoin(guildId, member.id, member.displayName, newState.channelId);
       } catch (error) {
@@ -295,12 +395,13 @@ export function createPartyModule({
           error,
         });
       }
-    }
-  }
+    },
+  });
 
   const removed = defineEvent({
     name: "party-channel-delete",
     event: "channelDelete",
+    alwaysRun: true,
     run: (channel: Channel) => onChannelDelete(channel),
   });
 
@@ -311,11 +412,10 @@ export function createPartyModule({
         (await repository.findAreaByJoinChannel(channel.id)) ??
         (await repository.findAreaByCategory(channel.id));
       if (area) {
-        // Party channels outside their category would be orphaned and never cleaned up, so remove them too.
-        const owned = await repository.listChannelsOfArea(area.joinChannelId);
-        await repository.deleteArea(area.joinChannelId);
-        for (const { channelId } of owned) await deleteQuietly(channelId);
-        logger.info("Party area removed", { channelId: channel.id, areaChannels: owned.length });
+        // Party channels outside their category would be orphaned, and an area without one of its two
+        // channels is useless, so the rest goes too.
+        const areaChannels = await dismantleArea(area);
+        logger.info("Party area removed", { channelId: channel.id, areaChannels });
         return;
       }
       await repository.deleteChannel(channel.id);
@@ -328,29 +428,55 @@ export function createPartyModule({
     name: "party-reconcile",
     event: "clientReady",
     once: true,
+    alwaysRun: true,
     run: (_client: Client<true>) => reconcileChannels(),
   });
 
-  /** Channels that emptied while the bot was offline; never throws. */
+  /** Catches up with what happened while the bot was offline; never throws. */
   async function reconcileChannels(): Promise<void> {
     try {
+      const droppedAreas = await reconcileAreas();
       const stored = await repository.listChannels();
       let removedCount = 0;
-      for (const { channelId } of stored) {
+      for (const { channelId, createdAt } of stored) {
+        if (Date.now() - createdAt.getTime() < RECONCILE_GRACE_MS) continue;
         try {
-          const count = await channels.memberCount(channelId);
-          if (count !== null && count > 0) continue;
+          const members = await channels.members(channelId);
+          if (members !== null && members.length > 0) continue;
           await removeChannel(channelId);
           removedCount++;
         } catch (error) {
           logger.warn("Could not check party channel", { channelId, error });
         }
       }
-      logger.info("Party channels reconciled", { checked: stored.length, removed: removedCount });
+      logger.info("Party channels reconciled", {
+        checked: stored.length,
+        removed: removedCount,
+        droppedAreas,
+      });
     } catch (error) {
       logger.error("Party reconciliation failed", { error });
     }
   }
 
-  return { name: "party", commands: [party], events: [voice, removed, reconcile] };
+  /** Drops areas whose join channel or category was deleted while the bot was offline. */
+  async function reconcileAreas(): Promise<number> {
+    let dropped = 0;
+    for (const area of await repository.listAllAreas()) {
+      try {
+        const [joinExists, categoryExists] = await Promise.all([
+          channels.exists(area.joinChannelId),
+          channels.exists(area.categoryId),
+        ]);
+        if (joinExists && categoryExists) continue;
+        await dismantleArea(area);
+        dropped++;
+      } catch (error) {
+        logger.warn("Could not check party area", { joinChannelId: area.joinChannelId, error });
+      }
+    }
+    return dropped;
+  }
+
+  return { name: "party", commands: [party], events: [leave, join, removed, reconcile] };
 }

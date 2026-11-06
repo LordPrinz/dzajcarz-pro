@@ -28,6 +28,7 @@ const registry = createRegistry(
     partyAreas: {
       addArea: unused,
       listAreas: unused,
+      listAllAreas: unused,
       findAreaByJoinChannel: unused,
       findAreaByCategory: unused,
       deleteArea: unused,
@@ -37,15 +38,17 @@ const registry = createRegistry(
       listChannelsOfArea: unused,
       listChannels: unused,
       deleteChannel: unused,
+      transferOwner: unused,
     },
     partyChannels: {
       createVoiceChannel: unused,
       moveMember: unused,
       deleteChannel: unused,
-      memberCount: unused,
+      members: unused,
+      exists: unused,
       createCategoryWithJoinChannel: unused,
     },
-    partyLock: { setIfAbsent: unused, del: unused },
+    partyLock: { setIfAbsent: unused, delIfEquals: unused, increment: unused },
     logger: silentLogger,
   }),
 );

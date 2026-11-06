@@ -21,7 +21,25 @@ const MANAGE_CHANNELS = 1n << 4n;
 const guildId = "100000000000000001";
 const area: PartyArea = { guildId, categoryId: "300", joinChannelId: "400" };
 
-function setup({ moveFails = false, memberGone = false } = {}) {
+interface SetupOptions {
+  moveFails?: boolean;
+  memberGone?: boolean;
+  deleteFails?: boolean;
+  lock?: ReturnType<typeof createMemoryStore>;
+}
+
+const longAgo = new Date(Date.now() - 3_600_000);
+
+function row(channelId: string, ownerId: string, joinChannelId = "400"): PartyChannel {
+  return { channelId, guildId, ownerId, joinChannelId, createdAt: longAgo };
+}
+
+function setup({
+  moveFails = false,
+  memberGone = false,
+  deleteFails = false,
+  lock,
+}: SetupOptions = {}) {
   const areas = new Map<string, PartyArea>();
   const owned = new Map<string, PartyChannel>();
   const repository: PartyRepository = {
@@ -29,15 +47,17 @@ function setup({ moveFails = false, memberGone = false } = {}) {
     listAreas: async (g) => [...areas.values()].filter((a) => a.guildId === g),
     findAreaByJoinChannel: async (id) => areas.get(id) ?? null,
     findAreaByCategory: async (id) => [...areas.values()].find((a) => a.categoryId === id) ?? null,
+    listAllAreas: async () => [...areas.values()],
     deleteArea: async (id) => {
-      for (const [channelId, c] of owned) if (c.joinChannelId === id) owned.delete(channelId);
-      return areas.delete(id);
+      const removed = [...owned.values()].filter((c) => c.joinChannelId === id);
+      for (const c of removed) owned.delete(c.channelId);
+      return areas.delete(id) ? removed : null;
     },
     addChannel: async (c) => {
       if ([...owned.values()].some((o) => o.guildId === c.guildId && o.ownerId === c.ownerId)) {
         throw new Error("duplicate owner");
       }
-      owned.set(c.channelId, c);
+      owned.set(c.channelId, { ...c, createdAt: longAgo });
     },
     findChannel: async (id) => owned.get(id) ?? null,
     findChannelByOwner: async (g, u) =>
@@ -45,6 +65,16 @@ function setup({ moveFails = false, memberGone = false } = {}) {
     listChannelsOfArea: async (id) => [...owned.values()].filter((c) => c.joinChannelId === id),
     listChannels: async () => [...owned.values()],
     deleteChannel: async (id) => owned.delete(id),
+    transferOwner: async (channelId, newOwnerId) => {
+      const channel = owned.get(channelId);
+      if (!channel) return false;
+      const taken = [...owned.values()].some(
+        (c) => c.guildId === channel.guildId && c.ownerId === newOwnerId,
+      );
+      if (taken) return false;
+      owned.set(channelId, { ...channel, ownerId: newOwnerId });
+      return true;
+    },
   };
 
   /** channel id -> member ids; absent = deleted on Discord. */
@@ -62,14 +92,20 @@ function setup({ moveFails = false, memberGone = false } = {}) {
     async moveMember(_guild, userId, channelId) {
       if (moveFails) throw new Error("Target user is not connected to voice");
       moves.push({ userId, channelId });
+      for (const members of discord.values()) members.delete(userId);
       discord.get(channelId)?.add(userId);
     },
     async deleteChannel(channelId) {
+      if (deleteFails) throw new Error("Missing Permissions");
       discord.delete(channelId);
     },
-    async memberCount(channelId) {
+    async members(channelId) {
       if (memberGone) return null;
-      return discord.get(channelId)?.size ?? null;
+      const members = discord.get(channelId);
+      return members ? [...members] : null;
+    },
+    async exists(channelId) {
+      return discord.has(channelId);
     },
     async createCategoryWithJoinChannel() {
       const categoryId = String(nextId++);
@@ -86,13 +122,13 @@ function setup({ moveFails = false, memberGone = false } = {}) {
     warn: (message, fields) => void warnings.push({ message, fields }),
     child: () => logger,
   };
-  const lock = createMemoryStore();
-  const module = createPartyModule({ repository, channels, lock, logger });
+  const store = lock ?? createMemoryStore();
+  const module = createPartyModule({ repository, channels, lock: store, logger });
   const registry = createRegistry([module]);
   const command = registry.find("party");
   if (!command) throw new Error("party command missing");
   const eventFor = (name: string) => {
-    const handler = module.events?.find((e) => e.event === name);
+    const handler = module.events?.find((e) => e.name === name || e.event === name);
     if (!handler) throw new Error(`${name} handler missing`);
     return handler;
   };
@@ -106,11 +142,20 @@ function setup({ moveFails = false, memberGone = false } = {}) {
     await executeCommand(command, ctx, silentLogger);
     return ctx.replies.map((r) => replyText(r));
   };
-  const voice = (oldChannel: string | null, newChannel: string | null, userId = "u1") =>
-    eventFor("voiceStateUpdate").run(
-      voiceState(oldChannel, userId),
-      voiceState(newChannel, userId),
-    );
+  /** Discord changes its state first, then calls every listener in registration order without waiting. */
+  const voice = async (oldChannel: string | null, newChannel: string | null, userId = "u1") => {
+    if (oldChannel) discord.get(oldChannel)?.delete(userId);
+    if (newChannel) {
+      if (!discord.has(newChannel)) discord.set(newChannel, new Set());
+      discord.get(newChannel)?.add(userId);
+    }
+    const before = voiceState(oldChannel, userId);
+    const after = voiceState(newChannel, userId);
+    await Promise.all([
+      eventFor("party-leave").run(before, after),
+      eventFor("party-join").run(before, after),
+    ]);
+  };
   return {
     run,
     voice,
@@ -121,9 +166,10 @@ function setup({ moveFails = false, memberGone = false } = {}) {
     moves,
     created,
     warnings,
-    lock,
+    lock: store,
     module,
     leave: (channelId: string, userId = "u1") => discord.get(channelId)?.delete(userId),
+    addMember: (channelId: string, userId: string) => discord.get(channelId)?.add(userId),
   };
 }
 
@@ -165,7 +211,8 @@ describe("/party create", () => {
       channels: {
         createVoiceChannel: async () => "1",
         moveMember: async () => {},
-        memberCount: async () => 0,
+        members: async () => [],
+        exists: async () => true,
         deleteChannel: async (id) => void deleted.push(id),
         createCategoryWithJoinChannel: async () => ({ categoryId: "c", joinChannelId: "j" }),
       },
@@ -191,15 +238,17 @@ async function failingRepo(): Promise<PartyRepository> {
   return {
     addArea: nope,
     listAreas: async () => [],
+    listAllAreas: async () => [],
     findAreaByJoinChannel: async () => null,
     findAreaByCategory: async () => null,
-    deleteArea: async () => false,
+    deleteArea: async () => null,
     addChannel: nope,
     findChannel: async () => null,
     findChannelByOwner: async () => null,
     listChannelsOfArea: async () => [],
     listChannels: async () => [],
     deleteChannel: async () => false,
+    transferOwner: async () => false,
   };
 }
 
@@ -256,7 +305,7 @@ describe("joining the party area", () => {
     t.areas.set("400", area);
     await t.voice(null, "400");
     expect(t.created).toEqual([{ name: "Kanał Ola-u1", categoryId: "300", ownerId: "u1" }]);
-    expect(t.owned.get("1000")).toEqual({
+    expect(t.owned.get("1000")).toMatchObject({
       channelId: "1000",
       guildId,
       ownerId: "u1",
@@ -272,21 +321,94 @@ describe("joining the party area", () => {
     expect(t.created).toEqual([]);
   });
 
-  test("a member who owns a channel is moved back to it", async () => {
+  test("a member who still owns an occupied channel is moved back to it", async () => {
     const t = setup();
     t.areas.set("400", area);
     await t.voice(null, "400");
-    t.leave("1000");
-    t.discord.get("1000")?.add("friend");
+    // The friend owns a channel of their own, so ownership cannot pass to them when u1 leaves.
+    t.owned.set("2000", row("2000", "friend"));
+    t.discord.set("2000", new Set());
+    t.addMember("1000", "friend");
     await t.voice("1000", "400");
     expect(t.created).toHaveLength(1);
     expect(t.moves.at(-1)).toEqual({ userId: "u1", channelId: "1000" });
   });
 
+  test("a move failure keeps an existing occupied channel", async () => {
+    const failing = setup({ moveFails: true });
+    failing.areas.set("400", area);
+    failing.owned.set("1000", row("1000", "u1"));
+    failing.discord.set("1000", new Set(["friend"]));
+    await failing.voice(null, "400");
+    expect(failing.owned.has("1000")).toBe(true);
+    expect(failing.discord.has("1000")).toBe(true);
+    expect(failing.created).toEqual([]);
+    expect(failing.warnings.map((w) => w.message)).toContain("Party channel not created");
+  });
+
+  test("a member who left the join channel meanwhile gets no channel", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    await t.eventFor("party-join").run(voiceState(null, "u1"), voiceState("400", "u1"));
+    // u1 never shows up in the join channel (Discord already moved them on).
+    expect(t.created).toHaveLength(1);
+    expect(t.owned.size).toBe(0);
+    expect(t.discord.has("1000")).toBe(false);
+    expect(t.moves).toEqual([]);
+  });
+
+  test("an existing channel is left alone when the member left the join channel", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.owned.set("1000", row("1000", "u1"));
+    t.discord.set("1000", new Set(["friend"]));
+    await t.eventFor("party-join").run(voiceState(null, "u1"), voiceState("400", "u1"));
+    expect(t.owned.has("1000")).toBe(true);
+    expect(t.discord.has("1000")).toBe(true);
+  });
+
+  test("with Redis down the join goes ahead", async () => {
+    const down = createMemoryStore();
+    down.setIfAbsent = async () => {
+      throw new Error("redis down");
+    };
+    const t = setup({ lock: down });
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    expect(t.created).toHaveLength(1);
+    expect(t.moves).toEqual([{ userId: "u1", channelId: "1000" }]);
+  });
+
+  test("an expired lock is not released over its new holder", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    const key = `party:${guildId}:u1`;
+    const original = t.lock.setIfAbsent.bind(t.lock);
+    t.lock.setIfAbsent = async (k, v, ttl) => {
+      const got = await original(k, v, ttl);
+      // Simulates the TTL ending and another process taking the lock mid-join.
+      await t.lock.del(k);
+      await original(k, "other-holder", ttl);
+      return got;
+    };
+    await t.voice(null, "400");
+    expect(await t.lock.get(key)).toBe("other-holder");
+  });
+
+  test("at most three channels per minute are created for one member", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    for (let i = 0; i < 5; i++) {
+      await t.voice(null, "400");
+      await t.voice(t.moves.at(-1)?.channelId ?? null, null);
+    }
+    expect(t.created).toHaveLength(3);
+  });
+
   test("a stale row whose channel vanished is replaced", async () => {
     const t = setup();
     t.areas.set("400", area);
-    t.owned.set("777", { channelId: "777", guildId, ownerId: "u1", joinChannelId: "400" });
+    t.owned.set("777", row("777", "u1"));
     await t.voice(null, "400");
     expect(t.owned.has("777")).toBe(false);
     expect(t.created).toHaveLength(1);
@@ -320,9 +442,7 @@ describe("joining the party area", () => {
   test("bots do not get channels", async () => {
     const t = setup();
     t.areas.set("400", area);
-    await t
-      .eventFor("voiceStateUpdate")
-      .run(voiceState(null, "b1", true), voiceState("400", "b1", true));
+    await t.eventFor("party-join").run(voiceState(null, "b1", true), voiceState("400", "b1", true));
     expect(t.created).toEqual([]);
   });
 
@@ -369,6 +489,55 @@ describe("leaving a party channel", () => {
     expect(t.discord.has("1000")).toBe(true);
   });
 
+  test("when the owner leaves and others stay, ownership passes to one of them", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    t.discord.get("1000")?.add("friend");
+    await t.voice("1000", null);
+    expect(t.owned.get("1000")?.ownerId).toBe("friend");
+    expect(t.discord.has("1000")).toBe(true);
+  });
+
+  test("ownership skips a member who owns another channel and stays if nobody can take it", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    t.owned.set("2000", row("2000", "busy"));
+    t.discord.get("1000")?.add("busy");
+    t.discord.get("1000")?.add("free");
+    await t.voice("1000", null);
+    expect(t.owned.get("1000")?.ownerId).toBe("free");
+
+    const stuck = setup();
+    stuck.areas.set("400", area);
+    await stuck.voice(null, "400");
+    stuck.owned.set("2000", row("2000", "busy"));
+    stuck.discord.get("1000")?.add("busy");
+    await stuck.voice("1000", null);
+    expect(stuck.owned.get("1000")?.ownerId).toBe("u1");
+  });
+
+  test("a non-owner leaving keeps the owner", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    await t.voice(null, "1000", "friend");
+    await t.voice("1000", null, "friend");
+    expect(t.owned.get("1000")?.ownerId).toBe("u1");
+  });
+
+  test("a failed Discord delete keeps the row so a later leave retries", async () => {
+    const t = setup({ deleteFails: true });
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    await t.voice("1000", null);
+    expect(t.owned.has("1000")).toBe(true);
+    expect(t.warnings.map((w) => w.message)).toContain(
+      "Could not delete channel, keeping its row to retry later",
+    );
+  });
+
   test("leaving an ordinary channel does nothing", async () => {
     const t = setup();
     t.discord.set("555", new Set());
@@ -386,6 +555,13 @@ describe("leaving a party channel", () => {
     expect(t.owned.has("1000")).toBe(false);
     expect(t.owned.has("1001")).toBe(true);
   });
+
+  test("cleanup handlers run even when the module is switched off", () => {
+    const { module } = setup();
+    const always = module.events?.filter((e) => e.alwaysRun).map((e) => e.name);
+    expect(always?.sort()).toEqual(["party-channel-delete", "party-leave", "party-reconcile"]);
+    expect(module.events?.find((e) => e.name === "party-join")?.alwaysRun).toBeUndefined();
+  });
 });
 
 describe("channelDelete", () => {
@@ -401,11 +577,21 @@ describe("channelDelete", () => {
     expect(t.discord.has("1000")).toBe(false);
   });
 
-  test("deleting the category removes the area", async () => {
+  test("deleting the category removes the area and the join channel", async () => {
     const t = setup();
     t.areas.set("400", area);
+    t.discord.set("400", new Set());
     await t.eventFor("channelDelete").run(deleted("300"));
     expect(t.areas.size).toBe(0);
+    expect(t.discord.has("400")).toBe(false);
+  });
+
+  test("deleting the join channel removes the category too", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.discord.set("300", new Set());
+    await t.eventFor("channelDelete").run(deleted("400"));
+    expect(t.discord.has("300")).toBe(false);
   });
 
   test("deleting a party channel removes only its row", async () => {
@@ -431,11 +617,15 @@ describe("startup reconciliation", () => {
   test("removes empty and vanished channels, keeps occupied ones", async () => {
     const t = setup();
     t.areas.set("400", area);
-    const row = (id: string, owner: string) =>
-      t.owned.set(id, { channelId: id, guildId, ownerId: owner, joinChannelId: "400" });
-    row("1", "a");
-    row("2", "b");
-    row("3", "c");
+    t.discord.set("400", new Set());
+    t.discord.set("300", new Set());
+    for (const [id, owner] of [
+      ["1", "a"],
+      ["2", "b"],
+      ["3", "c"],
+    ] as const) {
+      t.owned.set(id, row(id, owner));
+    }
     t.discord.set("1", new Set()); // empty
     t.discord.set("2", new Set(["b"])); // occupied
     // "3" no longer exists on Discord
@@ -448,9 +638,38 @@ describe("startup reconciliation", () => {
   test("is a once-handler and tolerates a failing channel check", async () => {
     const t = setup({ memberGone: true });
     t.areas.set("400", area);
-    t.owned.set("1", { channelId: "1", guildId, ownerId: "a", joinChannelId: "400" });
+    t.discord.set("400", new Set());
+    t.discord.set("300", new Set());
+    t.owned.set("1", row("1", "a"));
     expect(t.eventFor("clientReady").once).toBe(true);
     await t.eventFor("clientReady").run(ready);
     expect(t.owned.size).toBe(0);
+  });
+
+  test("skips channels younger than 15 seconds", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.discord.set("400", new Set());
+    t.discord.set("300", new Set());
+    t.owned.set("1", { ...row("1", "a"), createdAt: new Date() });
+    t.discord.set("1", new Set());
+    await t.eventFor("clientReady").run(ready);
+    expect(t.owned.has("1")).toBe(true);
+  });
+
+  test("drops an area whose join channel or category is gone", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.discord.set("300", new Set()); // the join channel 400 was deleted while offline
+    t.areas.set("401", { guildId, categoryId: "301", joinChannelId: "401" });
+    t.discord.set("401", new Set());
+    t.discord.set("301", new Set()); // this one is intact
+    t.owned.set("1", row("1", "a"));
+    t.discord.set("1", new Set(["a"]));
+    await t.eventFor("clientReady").run(ready);
+    expect([...t.areas.keys()]).toEqual(["401"]);
+    expect(t.owned.size).toBe(0);
+    expect(t.discord.has("300")).toBe(false);
+    expect(t.discord.has("1")).toBe(false);
   });
 });

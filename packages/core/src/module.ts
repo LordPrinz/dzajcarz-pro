@@ -6,6 +6,11 @@ export interface EventHandler<E extends keyof ClientEvents = keyof ClientEvents>
   name: string;
   event: E;
   once?: boolean;
+  /**
+   * Run even when the owning module is switched off for the guild or channel. For cleanup that must
+   * not leave state behind (e.g. deleting empty channels the module created).
+   */
+  alwaysRun?: boolean;
   run(...args: ClientEvents[E]): Promise<void> | void;
 }
 

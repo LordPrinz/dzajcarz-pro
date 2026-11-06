@@ -31,6 +31,7 @@ describe.skipIf(!sql)("party repository", () => {
     expect(await repo().findAreaByJoinChannel("999")).toBeNull();
     expect(await repo().listAreas(guildId)).toEqual([area]);
     expect(await repo().listAreas("5555555555555555555")).toEqual([]);
+    expect(await repo().listAllAreas()).toEqual([area]);
   });
 
   test("a category holds only one area", async () => {
@@ -41,12 +42,13 @@ describe.skipIf(!sql)("party repository", () => {
   test("a channel is found by id and by owner", async () => {
     await repo().addArea(area);
     await repo().addChannel(channel);
-    expect(await repo().findChannel("501")).toEqual(channel);
-    expect(await repo().findChannelByOwner(guildId, "601")).toEqual(channel);
+    expect(await repo().findChannel("501")).toMatchObject(channel);
+    expect(await repo().findChannel("501")).toHaveProperty("createdAt");
+    expect(await repo().findChannelByOwner(guildId, "601")).toMatchObject(channel);
     expect(await repo().findChannelByOwner(guildId, "602")).toBeNull();
     expect(await repo().findChannelByOwner("5555555555555555555", "601")).toBeNull();
-    expect(await repo().listChannelsOfArea("401")).toEqual([channel]);
-    expect(await repo().listChannels()).toEqual([channel]);
+    expect(await repo().listChannelsOfArea("401")).toMatchObject([channel]);
+    expect(await repo().listChannels()).toMatchObject([channel]);
   });
 
   test("a member owns one channel per guild, but may own one in another guild", async () => {
@@ -66,15 +68,32 @@ describe.skipIf(!sql)("party repository", () => {
     await expect(repo().addChannel(channel)).rejects.toThrow();
   });
 
+  test("a channel's guild must match its area's guild", async () => {
+    await repo().addArea(area);
+    await expect(repo().addChannel({ ...channel, guildId: "7" })).rejects.toThrow();
+  });
+
   test("deleting an area removes its channels and leaves other areas alone", async () => {
     await repo().addArea(area);
     await repo().addArea({ guildId, categoryId: "302", joinChannelId: "402" });
     await repo().addChannel(channel);
     await repo().addChannel({ ...channel, channelId: "502", ownerId: "602", joinChannelId: "402" });
-    expect(await repo().deleteArea("401")).toBe(true);
+    const removed = await repo().deleteArea("401");
+    expect(removed).toMatchObject([channel]);
     expect(await repo().findChannel("501")).toBeNull();
     expect(await repo().findChannel("502")).not.toBeNull();
-    expect(await repo().deleteArea("401")).toBe(false);
+    expect(await repo().deleteArea("401")).toBeNull();
+  });
+
+  test("transferOwner hands the channel over unless the candidate owns another one", async () => {
+    await repo().addArea(area);
+    await repo().addChannel(channel);
+    await repo().addChannel({ ...channel, channelId: "502", ownerId: "602" });
+    expect(await repo().transferOwner("501", "602")).toBe(false);
+    expect((await repo().findChannel("501"))?.ownerId).toBe("601");
+    expect(await repo().transferOwner("501", "603")).toBe(true);
+    expect((await repo().findChannel("501"))?.ownerId).toBe("603");
+    expect(await repo().transferOwner("999", "604")).toBe(false);
   });
 
   test("deleteChannel reports whether there was a row", async () => {

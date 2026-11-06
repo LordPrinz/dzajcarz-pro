@@ -51,10 +51,19 @@ export function createPartyChannels(client: Client): PartyChannels {
       }
     },
 
-    async memberCount(channelId) {
+    async members(channelId) {
       const channel = await fetchVoice(channelId);
       if (!channel) return null;
-      return channel.members.filter((member) => !member.user.bot).size;
+      return channel.members.filter((member) => !member.user.bot).map((member) => member.id);
+    },
+
+    async exists(channelId) {
+      try {
+        return (await client.channels.fetch(channelId)) !== null;
+      } catch (error) {
+        if (isUnknownChannel(error)) return false;
+        throw error;
+      }
     },
 
     async createCategoryWithJoinChannel(guildId, categoryName) {

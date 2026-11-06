@@ -32,6 +32,7 @@ function brokenStore(): KeyValueStore {
     set: fail,
     setIfAbsent: fail,
     del: fail,
+    delIfEquals: fail,
     increment: fail,
     ping: async () => false,
   };

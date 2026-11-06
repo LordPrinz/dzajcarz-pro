@@ -35,6 +35,11 @@ export function createMemoryStore(now: () => number = Date.now): KeyValueStore {
     async del(key) {
       entries.delete(key);
     },
+    async delIfEquals(key, value) {
+      if (live(key)?.value !== value) return false;
+      entries.delete(key);
+      return true;
+    },
     async increment(key, ttlMs): Promise<Counter> {
       assertTtl(ttlMs);
       const entry = live(key);

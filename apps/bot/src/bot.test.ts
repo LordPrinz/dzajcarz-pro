@@ -45,7 +45,15 @@ describe("module toggles in routing", () => {
         ran.push("event");
       },
     });
-    const registry = createRegistry([{ name: "fun", commands: [ping], events: [event] }]);
+    const cleanup = defineEvent({
+      name: "cleanup",
+      event: "messageCreate",
+      alwaysRun: true,
+      run: () => {
+        ran.push("cleanup");
+      },
+    });
+    const registry = createRegistry([{ name: "fun", commands: [ping], events: [event, cleanup] }]);
     const gate: ModuleGate = {
       isEnabled: async (_guild, _channel, module) => !disabled.includes(module),
       forget: async () => {},
@@ -97,6 +105,14 @@ describe("module toggles in routing", () => {
     if (!entry) throw new Error("event missing");
     await createEventListener(entry, gate, silentLogger)(message);
     expect(ran).toEqual([]);
+  });
+
+  test("an alwaysRun handler runs even when its module is off", async () => {
+    const { ran, registry, gate, message } = setup(["fun"]);
+    for (const entry of registry.events()) {
+      await createEventListener(entry, gate, silentLogger)(message);
+    }
+    expect(ran).toEqual(["cleanup"]);
   });
 
   test("an event outside any guild is never gated", async () => {

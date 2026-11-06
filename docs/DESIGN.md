@@ -91,21 +91,43 @@ warning. It needs the privileged `GuildMembers` intent. The welcome sender is th
 
 `/party create <name>` makes a category and a join voice channel and stores them in `party_area`
 (`join_channel_id` is the key, `category_id` is unique). Joining the join channel creates a voice channel
-named "Kanał {name}" in that category, stores it in `party_channel` and moves the member into it. The
-row has `UNIQUE (guild_id, owner_id)`, so a member owns one channel per guild; joining again moves them back
-to it. Deleting an area cascades to its channel rows. Both commands need Manage Channels, and `/party` is a
-command with subcommands so more actions can be added next to `create` and `delete`.
+named "Kanał {name}" in that category, stores it in `party_channel` and moves the member into it. The bot
+needs Manage Channels (create and delete channels) and Move Members (put the member into their channel);
+`/party create` says so when Discord refuses. A member owns **one party channel per server**, across all
+areas (`UNIQUE (guild_id, owner_id)`): joining again moves them back to it. A composite foreign key keeps
+a channel's `guild_id` equal to its area's. Both commands need Manage Channels for the caller, and `/party`
+is a command with subcommands so more actions can be added next to `create` and `delete`.
 
-Two joins by the same member race on a Redis lock (`party:{guild}:{user}`, `KeyValueStore.setIfAbsent`,
-10 s TTL); the loser is ignored. If Redis is down the join goes ahead without the lock and the unique row
-stops a duplicate, in which case the new Discord channel is deleted again. A failed move also deletes the
-channel it just made.
+`/party delete` defers first (it makes several Discord calls). `deleteArea` removes the area and its channel
+rows in one transaction and returns them; the module then deletes those Discord channels, the join channel
+and the category.
 
-A party channel is deleted when its last person (bots do not count) leaves. `channelDelete` cleans up after
-manual deletes: the join channel or the category removes the area, its stored party channels and their
-Discord channels; a party channel removes its row. On `clientReady` every stored channel that is empty or
-gone from Discord is removed, which covers channels that emptied while the bot was offline. All handlers log
-and never throw. It needs the `GuildVoiceStates` intent, which the client already has.
+Joins are serialised per member by a Redis lock (`party:{guild}:{user}`, `setIfAbsent` with a random token,
+30 s TTL, released with `delIfEquals` so an expired lock never frees its new holder); the loser is ignored.
+If Redis is down the join goes ahead without the lock and the unique row stops a duplicate. Creating
+channels is limited to 3 per member per 60 s (`KeyValueStore.increment`); beyond that the join is ignored
+and logged at debug level. Before moving the member the bot checks they are still in the join channel; if
+not, a channel made by this attempt is deleted. A failed move deletes the channel only when this attempt
+created it, never an existing one that may have people in it.
+
+When the owner leaves a channel that still has people, ownership passes to the first remaining member who
+owns no other channel in the server (`transferOwner`); if nobody qualifies the owner stays. Controls built
+on the owner (#7) therefore follow whoever is in charge now.
+
+A party channel is deleted when its last person (bots do not count) leaves. The row is dropped only after
+Discord confirms the delete (a channel that is already gone counts as deleted); if Discord refuses, the row
+stays and the next leave or the next startup retries. `channelDelete` cleans up after manual deletes:
+deleting the join channel or the category removes the whole area (its party channels, the join channel and
+the category); deleting a party channel removes its row. On `clientReady` the bot drops areas whose join
+channel or category no longer exists and removes stored channels that are empty or gone, skipping channels
+younger than 15 s so a fresh join is not raced. All handlers log and never throw. It needs the
+`GuildVoiceStates` intent, which the client already has.
+
+Cleanup ignores module toggles. Handlers declare `alwaysRun: true` (`EventHandler` in `@dzajcarz/core`) and
+`bot.ts` skips the gate for them; party's leave, `channelDelete` and reconcile handlers use it, so
+switching the module off never strands empty channels. Only the join handler is gated. The leave handler
+runs before the join handler for the same member, which waits for it, so moving from your own channel into
+the join channel hands over or frees the old channel first.
 
 ### Mentions
 

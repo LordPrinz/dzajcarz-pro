@@ -13,23 +13,28 @@ export interface PartyChannel {
   ownerId: string;
   /** The join channel of the area this channel was created for. */
   joinChannelId: string;
+  createdAt: Date;
 }
 
 export interface PartyRepository {
   addArea(area: PartyArea): Promise<void>;
   listAreas(guildId: string): Promise<PartyArea[]>;
+  /** Every guild's areas, for startup reconciliation. */
+  listAllAreas(): Promise<PartyArea[]>;
   findAreaByJoinChannel(joinChannelId: string): Promise<PartyArea | null>;
   findAreaByCategory(categoryId: string): Promise<PartyArea | null>;
-  /** Also removes the area's party channel rows. False when the area was unknown. */
-  deleteArea(joinChannelId: string): Promise<boolean>;
+  /** Removes the area and its party channel rows in one transaction and returns those rows; null when the area was unknown. */
+  deleteArea(joinChannelId: string): Promise<PartyChannel[] | null>;
   /** Rejects when the member already owns a channel in the guild. */
-  addChannel(channel: PartyChannel): Promise<void>;
+  addChannel(channel: Omit<PartyChannel, "createdAt">): Promise<void>;
   findChannel(channelId: string): Promise<PartyChannel | null>;
   findChannelByOwner(guildId: string, ownerId: string): Promise<PartyChannel | null>;
   listChannelsOfArea(joinChannelId: string): Promise<PartyChannel[]>;
   listChannels(): Promise<PartyChannel[]>;
   /** False when the row was already gone. */
   deleteChannel(channelId: string): Promise<boolean>;
+  /** Makes `newOwnerId` the owner. False when the channel is gone or the member already owns another channel in the guild. */
+  transferOwner(channelId: string, newOwnerId: string): Promise<boolean>;
 }
 
 const toArea = (row: PartyAreaRow): PartyArea => ({
@@ -43,6 +48,7 @@ const toChannel = (row: PartyChannelRow): PartyChannel => ({
   guildId: row.guild_id,
   ownerId: row.owner_id,
   joinChannelId: row.area_join_channel_id,
+  createdAt: row.created_at,
 });
 
 export function createPartyRepository(sql: SQL): PartyRepository {
@@ -61,6 +67,11 @@ export function createPartyRepository(sql: SQL): PartyRepository {
       return rows.map(toArea);
     },
 
+    async listAllAreas() {
+      const rows = await sql<PartyAreaRow[]>`SELECT * FROM party_area ORDER BY created_at`;
+      return rows.map(toArea);
+    },
+
     async findAreaByJoinChannel(joinChannelId) {
       const [row] = await sql<PartyAreaRow[]>`
         SELECT * FROM party_area WHERE join_channel_id = ${joinChannelId}
@@ -76,10 +87,15 @@ export function createPartyRepository(sql: SQL): PartyRepository {
     },
 
     async deleteArea(joinChannelId) {
-      const deleted = await sql<PartyAreaRow[]>`
-        DELETE FROM party_area WHERE join_channel_id = ${joinChannelId} RETURNING *
-      `;
-      return deleted.length > 0;
+      return sql.begin(async (tx) => {
+        const channels = await tx<PartyChannelRow[]>`
+          DELETE FROM party_channel WHERE area_join_channel_id = ${joinChannelId} RETURNING *
+        `;
+        const areas = await tx<PartyAreaRow[]>`
+          DELETE FROM party_area WHERE join_channel_id = ${joinChannelId} RETURNING *
+        `;
+        return areas.length > 0 ? channels.map(toChannel) : null;
+      });
     },
 
     async addChannel({ channelId, guildId, ownerId, joinChannelId }) {
@@ -120,6 +136,19 @@ export function createPartyRepository(sql: SQL): PartyRepository {
         DELETE FROM party_channel WHERE channel_id = ${channelId} RETURNING *
       `;
       return deleted.length > 0;
+    },
+
+    async transferOwner(channelId, newOwnerId) {
+      const updated = await sql<PartyChannelRow[]>`
+        UPDATE party_channel SET owner_id = ${newOwnerId}
+        WHERE channel_id = ${channelId}
+          AND NOT EXISTS (
+            SELECT 1 FROM party_channel other
+            WHERE other.guild_id = party_channel.guild_id AND other.owner_id = ${newOwnerId}
+          )
+        RETURNING *
+      `;
+      return updated.length > 0;
     },
   };
 }
