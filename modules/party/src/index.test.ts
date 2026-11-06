@@ -16,7 +16,6 @@ import {
   type PartyChannels,
   type PartyPermissions,
   type PartyRepository,
-  RenameRateLimited,
 } from "./index.ts";
 
 const MANAGE_CHANNELS = 1n << 4n;
@@ -28,8 +27,10 @@ interface SetupOptions {
   memberGone?: boolean;
   deleteFails?: boolean;
   lock?: ReturnType<typeof createMemoryStore>;
-  renameLimited?: boolean;
   allowFails?: boolean;
+  allowSelfFails?: boolean;
+  /** What the channel's category says about @everyone. */
+  inherited?: { connect: boolean | null; view: boolean | null };
 }
 
 const longAgo = new Date(Date.now() - 3_600_000);
@@ -43,8 +44,9 @@ function setup({
   memberGone = false,
   deleteFails = false,
   lock,
-  renameLimited = false,
   allowFails = false,
+  allowSelfFails = false,
+  inherited = { connect: null, view: null },
 }: SetupOptions = {}) {
   const areas = new Map<string, PartyArea>();
   const owned = new Map<string, PartyChannel>();
@@ -71,9 +73,9 @@ function setup({
     listChannelsOfArea: async (id) => [...owned.values()].filter((c) => c.joinChannelId === id),
     listChannels: async () => [...owned.values()],
     deleteChannel: async (id) => owned.delete(id),
-    transferOwner: async (channelId, newOwnerId) => {
+    transferOwner: async (channelId, expectedOwnerId, newOwnerId) => {
       const channel = owned.get(channelId);
-      if (!channel) return false;
+      if (!channel || channel.ownerId !== expectedOwnerId) return false;
       const taken = [...owned.values()].some(
         (c) => c.guildId === channel.guildId && c.ownerId === newOwnerId,
       );
@@ -128,10 +130,21 @@ function setup({
 
   /** Everything the fake Discord was asked to change on channels, in order. */
   const calls: string[] = [];
-  const guildMembers = new Set(["u1", "u2", "friend", "bot-self"]);
+  const guildMembers = new Set(["u1", "u2", "friend", "bot-self", "mod"]);
+  /** Members with guild-wide Administrator, Manage Channels or Move Members. */
+  const moderators = new Set(["mod"]);
+  /** Members with Manage Channels on the party channel itself. */
+  const managers = new Set<string>();
   const permissions: PartyPermissions = {
-    async setEveryone(channelId, access) {
-      calls.push(`everyone ${channelId} ${JSON.stringify(access)}`);
+    async setEveryone(channelId, access, reason) {
+      calls.push(`everyone ${channelId} ${JSON.stringify(access)} (${reason})`);
+    },
+    async inheritedEveryone() {
+      return inherited;
+    },
+    async allowSelf(channelId) {
+      if (allowSelfFails) throw new Error("Missing Permissions");
+      calls.push(`self ${channelId}`);
     },
     async allowMember(channelId, userId) {
       if (allowFails) throw new Error("Missing Permissions");
@@ -147,22 +160,28 @@ function setup({
       calls.push(`limit ${channelId} ${limit}`);
     },
     async rename(channelId, name) {
-      if (renameLimited) throw new RenameRateLimited();
       calls.push(`rename ${channelId} ${name}`);
     },
-    async disconnect(_guild, userId) {
-      calls.push(`disconnect ${userId}`);
-      for (const members of discord.values()) members.delete(userId);
+    async disconnect(_guild, userId, channelId) {
+      calls.push(`disconnect ${userId} ${channelId}`);
+      discord.get(channelId)?.delete(userId);
     },
     async lookupMember(_guild, userId) {
-      return guildMembers.has(userId) ? { self: userId === "bot-self" } : null;
+      return guildMembers.has(userId)
+        ? { self: userId === "bot-self", moderator: moderators.has(userId) }
+        : null;
+    },
+    async canManage(_guild, userId) {
+      return managers.has(userId);
     },
   };
 
   const warnings: { message: string; fields?: LogFields }[] = [];
+  const infos: { message: string; fields?: LogFields }[] = [];
   const logger: Logger = {
     ...silentLogger,
     warn: (message, fields) => void warnings.push({ message, fields }),
+    info: (message, fields) => void infos.push({ message, fields }),
     child: () => logger,
   };
   const store = lock ?? createMemoryStore();
@@ -184,7 +203,10 @@ function setup({
   ) => {
     const ctx = createFakeContext({ args, subcommand, memberPermissions, userId });
     await executeCommand(command, ctx, silentLogger);
-    return ctx.replies.map((r) => replyText(r));
+    return Object.assign(
+      ctx.replies.map((r) => replyText(r)),
+      { deferOptions: ctx.deferOptions },
+    );
   };
   /** Discord changes its state first, then calls every listener in registration order without waiting. */
   const voice = async (oldChannel: string | null, newChannel: string | null, userId = "u1") => {
@@ -210,7 +232,9 @@ function setup({
     moves,
     created,
     calls,
+    managers,
     warnings,
+    infos,
     lock: store,
     module,
     leave: (channelId: string, userId = "u1") => discord.get(channelId)?.delete(userId),
@@ -307,8 +331,9 @@ describe("/party delete", () => {
     t.discord.set("300", new Set());
     await t.voice(null, "400");
     expect(t.owned.size).toBe(1);
-    const [reply] = await t.run("delete");
-    expect(reply).toContain("usunięta");
+    const replies = await t.run("delete");
+    expect(replies[0]).toContain("usunięta");
+    expect(replies.deferOptions).toEqual({ ephemeral: true });
     expect(t.areas.size).toBe(0);
     expect(t.owned.size).toBe(0);
     expect([...t.discord.keys()]).toEqual([]);
@@ -746,14 +771,33 @@ describe("owner controls", () => {
     const t = await withChannel();
     expect((await t.run("lock", {}, none, "u1"))[0]).toContain("zamknięty");
     await t.run("unlock", {}, none, "u1");
-    expect(t.calls).toEqual(['everyone 1000 {"connect":false}', 'everyone 1000 {"connect":null}']);
+    expect(t.calls).toEqual([
+      'everyone 1000 {"connect":false} (Party: lock by u1)',
+      'everyone 1000 {"connect":null} (Party: unlock by u1)',
+    ]);
+  });
+
+  test("unlock and show restore the category's @everyone value instead of clearing it", async () => {
+    const t = setup({ inherited: { connect: false, view: false } });
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    t.calls.length = 0;
+    await t.run("unlock", {}, none, "u1");
+    await t.run("show", {}, none, "u1");
+    expect(t.calls).toEqual([
+      'everyone 1000 {"connect":false} (Party: unlock by u1)',
+      'everyone 1000 {"view":false} (Party: show by u1)',
+    ]);
   });
 
   test("hide and show change only ViewChannel", async () => {
     const t = await withChannel();
     await t.run("hide", {}, none, "u1");
     await t.run("show", {}, none, "u1");
-    expect(t.calls).toEqual(['everyone 1000 {"view":false}', 'everyone 1000 {"view":null}']);
+    expect(t.calls).toEqual([
+      'everyone 1000 {"view":false} (Party: hide by u1)',
+      'everyone 1000 {"view":null} (Party: show by u1)',
+    ]);
   });
 
   test("limit sets the number and 0 removes it", async () => {
@@ -774,10 +818,57 @@ describe("owner controls", () => {
     expect(t.calls).toHaveLength(2);
   });
 
-  test("a spent rename limit becomes a Polish answer", async () => {
-    const t = await withChannel({ renameLimited: true });
-    const [reply] = await t.run("rename", { name: "Nowa" }, none, "u1");
+  test("a channel can be renamed twice per window, then Discord is not called", async () => {
+    const t = await withChannel();
+    await t.run("rename", { name: "Jeden" }, none, "u1");
+    await t.run("rename", { name: "Dwa" }, none, "u1");
+    const [reply] = await t.run("rename", { name: "Trzy" }, none, "u1");
     expect(reply).toBe("Discord pozwala zmienić nazwę 2 razy na 10 minut.");
+    expect(t.calls).toEqual(["rename 1000 Jeden", "rename 1000 Dwa"]);
+  });
+
+  test("with Redis down a rename goes through", async () => {
+    const store = createMemoryStore();
+    store.increment = async () => {
+      throw new Error("redis down");
+    };
+    const t = setup({ lock: store });
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    t.calls.length = 0;
+    for (const name of ["a", "b", "c"]) await t.run("rename", { name }, none, "u1");
+    expect(t.calls).toEqual(["rename 1000 a", "rename 1000 b", "rename 1000 c"]);
+  });
+
+  test("an eleventh control command within a minute gets a Polish answer", async () => {
+    const t = await withChannel();
+    for (let i = 0; i < 10; i++) await t.run("limit", { count: 5 }, none, "u1");
+    const [reply] = await t.run("limit", { count: 5 }, none, "u1");
+    expect(reply).toContain("Za dużo zmian");
+    expect(t.calls).toHaveLength(10);
+  });
+
+  test("with Redis down control commands are not limited", async () => {
+    const store = createMemoryStore();
+    store.increment = async () => {
+      throw new Error("redis down");
+    };
+    const t = setup({ lock: store });
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    t.calls.length = 0;
+    for (let i = 0; i < 12; i++) await t.run("limit", { count: 5 }, none, "u1");
+    expect(t.calls).toHaveLength(12);
+  });
+
+  test("every Discord edit carries an audit reason and a successful action is logged", async () => {
+    const t = await withChannel();
+    await t.run("lock", {}, none, "u1");
+    expect(t.calls).toEqual(['everyone 1000 {"connect":false} (Party: lock by u1)']);
+    expect(t.infos).toContainEqual({
+      message: "Party control used",
+      fields: { guildId, channelId: "1000", actor: "u1", action: "lock" },
+    });
   });
 
   test("invite allows the member and refuses the caller, the bot and strangers", async () => {
@@ -794,8 +885,15 @@ describe("owner controls", () => {
     const t = await withChannel();
     t.addMember("1000", "friend");
     await t.run("block", { user: "friend" }, none, "u1");
-    expect(t.calls).toEqual(["deny 1000 friend", "disconnect friend"]);
+    expect(t.calls).toEqual(["deny 1000 friend", "disconnect friend 1000"]);
     expect(t.discord.get("1000")?.has("friend")).toBe(false);
+  });
+
+  test("block refuses someone who can moderate", async () => {
+    const t = await withChannel();
+    const [reply] = await t.run("block", { user: "mod" }, none, "u1");
+    expect(reply).toBe("Nie możesz zablokować moderatora.");
+    expect(t.calls).toEqual([]);
   });
 
   test("block of someone outside only sets the overwrite", async () => {
@@ -807,6 +905,7 @@ describe("owner controls", () => {
   test("block refuses the owner, the caller, the bot and strangers", async () => {
     const t = await withChannel();
     t.addMember("1000", "friend");
+    t.managers.add("friend");
     // friend holds Manage Channels and tries to block the owner.
     expect((await t.run("block", { user: "u1" }, MANAGE_CHANNELS, "friend"))[0]).toContain(
       "właściciela",
@@ -827,8 +926,18 @@ describe("owner controls", () => {
   test("a member with Manage Channels controls a channel they do not own", async () => {
     const t = await withChannel();
     t.addMember("1000", "friend");
-    await t.run("lock", {}, MANAGE_CHANNELS, "friend");
-    expect(t.calls).toEqual(['everyone 1000 {"connect":false}']);
+    t.managers.add("friend");
+    await t.run("lock", {}, none, "friend");
+    expect(t.calls).toEqual(['everyone 1000 {"connect":false} (Party: lock by friend)']);
+  });
+
+  test("Manage Channels is judged on the party channel, not on the command's channel", async () => {
+    const t = await withChannel();
+    t.addMember("1000", "friend");
+    // The caller's permissions where the command was typed do not matter.
+    const [reply] = await t.run("lock", {}, MANAGE_CHANNELS, "friend");
+    expect(reply).toContain("właściciel");
+    expect(t.calls).toEqual([]);
   });
 
   test("outside a party channel the answer says so and nothing changes", async () => {
@@ -863,16 +972,26 @@ describe("owner controls", () => {
     const t = setup();
     t.areas.set("400", area);
     await t.voice(null, "400");
-    expect(t.calls).toEqual(["allow 1000 u1"]);
+    expect(t.calls).toEqual(["self 1000", "allow 1000 u1"]);
   });
 
-  test("a channel whose owner overwrite fails is deleted and not stored", async () => {
-    const t = setup({ allowFails: true });
+  test("the bot gets its own overwrite so lock and hide never lock it out", async () => {
+    const t = setup();
     t.areas.set("400", area);
     await t.voice(null, "400");
-    expect(t.owned.size).toBe(0);
-    expect(t.discord.has("1000")).toBe(false);
-    expect(t.warnings.length).toBeGreaterThan(0);
+    expect(t.calls[0]).toBe("self 1000");
+  });
+
+  test("a failing owner or bot overwrite is logged and the channel is kept", async () => {
+    for (const options of [{ allowFails: true }, { allowSelfFails: true }]) {
+      const t = setup(options);
+      t.areas.set("400", area);
+      await t.voice(null, "400");
+      expect(t.owned.size).toBe(1);
+      expect(t.discord.has("1000")).toBe(true);
+      expect(t.moves).toEqual([{ userId: "u1", channelId: "1000" }]);
+      expect(t.warnings.length).toBeGreaterThan(0);
+    }
   });
 
   test("ownership transfer gives the new owner access and clears the old one", async () => {
