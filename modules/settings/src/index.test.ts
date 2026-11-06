@@ -144,7 +144,7 @@ describe("settings module: /modules", () => {
   function setupModules({ threads = [] as string[] } = {}) {
     const disabled: DisabledModule[] = [];
     const modules: ModuleToggles = {
-      moduleNames: () => ["general", "settings", "music", "welcome"],
+      moduleNames: () => ["general", "settings", "status", "music", "welcome"],
       list: async () => disabled,
       disable: async (_guild, module, channelId) => {
         disabled.push({ module, channelId });
@@ -216,7 +216,7 @@ describe("settings module: /modules", () => {
     expect(disabled).toEqual([{ module: "music", channelId: null }]);
   });
 
-  test.each(["general", "settings"])("%s cannot be disabled", async (module) => {
+  test.each(["general", "settings", "status"])("%s cannot be disabled", async (module) => {
     const { run, disabled } = setupModules();
     const [reply] = await run("disable", { module });
     expect(reply).toContain("nie można wyłączyć");
@@ -289,6 +289,7 @@ describe("settings module: /modules", () => {
       [
         "`general`: włączony",
         "`settings`: włączony",
+        "`status`: włączony",
         "`music`: wyłączony na serwerze",
         `\`welcome\`: wyłączony na kanałach <#${CHANNEL}>`,
       ].join("\n"),

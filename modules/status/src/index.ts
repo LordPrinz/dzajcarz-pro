@@ -38,7 +38,7 @@ const SONG = [
   "Der Batzen",
   "ward zu Wein",
   "ja Wein",
-  "Der Helle",
+  "Der Heller",
   "ward zu Wasser",
   "Der Batzen",
   "ward zu Wein",

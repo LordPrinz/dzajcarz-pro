@@ -76,7 +76,7 @@ command runs (slash answers ephemerally, prefix stays silent) and wraps every ev
 outside a guild are never gated. A thread has no toggle of its own and follows its parent channel, both for
 events and for commands. The lookup is bounded to 1.5 s (Discord wants an answer to an interaction within
 3 s); a slower lookup counts as enabled. `/modules` only accepts channels the guild really has, checked
-through the `GuildChannels` port. `general` and `settings` cannot be disabled.
+through the `GuildChannels` port. `general`, `settings` and `status` cannot be disabled (the last has no per-server behaviour to switch).
 
 ### Welcome messages
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { silentLogger } from "@dzajcarz/core";
-import { type Activity, type Clock, createStatusModule } from "./index.ts";
+import { type Activity, type Clock, createStatusModule, DEFAULT_ACTIVITIES } from "./index.ts";
 
 const ACTIVITIES: Activity[] = [
   { type: "playing", text: "a" },
@@ -92,5 +92,13 @@ describe("status module", () => {
 
   test("rejects an empty activity list", () => {
     expect(() => setup({ activities: [] })).toThrow();
+  });
+});
+
+describe("default song", () => {
+  test("spells Heller the same way in both verses", () => {
+    const texts = DEFAULT_ACTIVITIES.map((a) => a.text);
+    expect(texts).not.toContain("Der Helle");
+    expect(texts.filter((t) => t === "Der Heller")).toHaveLength(2);
   });
 });
