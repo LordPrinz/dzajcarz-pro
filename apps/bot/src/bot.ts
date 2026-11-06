@@ -1,6 +1,6 @@
 import {
   type CommandRegistry,
-  checkAccess,
+  checkPrefixAccess,
   executeCommand,
   type Logger,
   matchPrefix,
@@ -75,7 +75,7 @@ async function handleMessage(
 
   // Checked before parsing so a member without access never learns the usage of a command they cannot run.
   const context = contextFromMessage(message, {});
-  const denied = checkAccess(command, context);
+  const denied = checkPrefixAccess(command, invocation.rest, context);
   if (denied) {
     await message.reply({ content: denied, allowedMentions: NO_MENTIONS });
     return;

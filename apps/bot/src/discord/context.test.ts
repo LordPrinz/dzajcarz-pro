@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { ApplicationCommandOptionType, type ChatInputCommandInteraction } from "discord.js";
+import {
+  ApplicationCommandOptionType,
+  type ChatInputCommandInteraction,
+  MessageFlags,
+} from "discord.js";
 import { contextFromInteraction, slashArgs } from "./context.ts";
 
-function fakeInteraction(data: unknown[], subcommand: string | null) {
+function fakeInteraction(data: unknown[], subcommand: string | null, deferReply = async () => {}) {
   return {
+    deferReply,
+    deferred: false,
+    replied: false,
     options: { data, getSubcommand: () => subcommand },
     user: { id: "1", displayName: "tester" },
     guildId: null,
@@ -43,5 +50,15 @@ describe("slash interactions", () => {
       "show",
     );
     expect(slashArgs(interaction)).toEqual({});
+  });
+
+  test("defer passes the ephemeral flag to Discord only when asked", async () => {
+    const calls: unknown[] = [];
+    const interaction = fakeInteraction([], null, async (options?: unknown) => {
+      calls.push(options);
+    });
+    await contextFromInteraction(interaction).defer({ ephemeral: true });
+    await contextFromInteraction(interaction).defer();
+    expect(calls).toEqual([{ flags: MessageFlags.Ephemeral }, { flags: undefined }]);
   });
 });
