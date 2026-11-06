@@ -32,6 +32,10 @@ export function createRedisStore(
       assertTtl(ttlMs);
       await client.set(k(key), value, "PX", ttlMs);
     },
+    async setIfAbsent(key, value, ttlMs) {
+      assertTtl(ttlMs);
+      return (await client.set(k(key), value, "NX", "PX", String(ttlMs))) === "OK";
+    },
     async del(key) {
       await client.del(k(key));
     },

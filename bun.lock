@@ -19,6 +19,7 @@
         "@dzajcarz/db": "workspace:*",
         "@dzajcarz/kv": "workspace:*",
         "@dzajcarz/module-general": "workspace:*",
+        "@dzajcarz/module-party": "workspace:*",
         "@dzajcarz/module-settings": "workspace:*",
         "@dzajcarz/module-welcome": "workspace:*",
         "discord.js": "14.27.0",
@@ -30,6 +31,17 @@
       "version": "0.0.0",
       "dependencies": {
         "@dzajcarz/core": "workspace:*",
+      },
+    },
+    "modules/party": {
+      "name": "@dzajcarz/module-party",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dzajcarz/core": "workspace:*",
+        "@dzajcarz/kv": "workspace:*",
+      },
+      "devDependencies": {
+        "discord.js": "14.27.0",
       },
     },
     "modules/settings": {
@@ -109,6 +121,8 @@
     "@dzajcarz/kv": ["@dzajcarz/kv@workspace:packages/kv"],
 
     "@dzajcarz/module-general": ["@dzajcarz/module-general@workspace:modules/general"],
+
+    "@dzajcarz/module-party": ["@dzajcarz/module-party@workspace:modules/party"],
 
     "@dzajcarz/module-settings": ["@dzajcarz/module-settings@workspace:modules/settings"],
 

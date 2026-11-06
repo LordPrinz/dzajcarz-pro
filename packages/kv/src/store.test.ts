@@ -39,6 +39,30 @@ describe.each(adapters)("KeyValueStore (%s)", (_name, make) => {
     expect(await store.get("short")).toBeNull();
   });
 
+  test("setIfAbsent takes a free key once and refuses it while held", async () => {
+    const store = make();
+    expect(await store.setIfAbsent("lock", "a", 10_000)).toBe(true);
+    expect(await store.setIfAbsent("lock", "b", 10_000)).toBe(false);
+    expect(await store.get("lock")).toBe("a");
+    await store.del("lock");
+    expect(await store.setIfAbsent("lock", "c", 10_000)).toBe(true);
+  });
+
+  test("setIfAbsent frees the key when its TTL ends", async () => {
+    const store = make();
+    expect(await store.setIfAbsent("lock", "a", 50)).toBe(true);
+    await Bun.sleep(120);
+    expect(await store.setIfAbsent("lock", "b", 50)).toBe(true);
+  });
+
+  test("setIfAbsent lets only one of many concurrent callers win", async () => {
+    const store = make();
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => store.setIfAbsent("race", "x", 10_000)),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+
   test("increment counts up and keeps the first window", async () => {
     const store = make();
     const first = await store.increment("hits", 10_000);
@@ -68,6 +92,7 @@ describe.each(adapters)("KeyValueStore (%s)", (_name, make) => {
     const store = make();
     await expect(store.set("k", "v", 0)).rejects.toThrow(RangeError);
     await expect(store.increment("k", -1)).rejects.toThrow(RangeError);
+    await expect(store.setIfAbsent("k", "v", 0)).rejects.toThrow(RangeError);
   });
 
   test("ping reports the store as up", async () => {

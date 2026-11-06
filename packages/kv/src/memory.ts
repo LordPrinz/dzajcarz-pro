@@ -26,6 +26,12 @@ export function createMemoryStore(now: () => number = Date.now): KeyValueStore {
       if (ttlMs !== undefined) assertTtl(ttlMs);
       entries.set(key, { value, expiresAt: ttlMs === undefined ? Infinity : now() + ttlMs });
     },
+    async setIfAbsent(key, value, ttlMs) {
+      assertTtl(ttlMs);
+      if (live(key)) return false;
+      entries.set(key, { value, expiresAt: now() + ttlMs });
+      return true;
+    },
     async del(key) {
       entries.delete(key);
     },

@@ -1,5 +1,11 @@
 import type { BotModule, CommandSummary, Logger } from "@dzajcarz/core";
+import type { KeyValueStore } from "@dzajcarz/kv";
 import { createGeneralModule } from "@dzajcarz/module-general";
+import {
+  createPartyModule,
+  type PartyChannels,
+  type PartyRepository,
+} from "@dzajcarz/module-party";
 import {
   createSettingsModule,
   type ModuleToggles,
@@ -23,6 +29,9 @@ export interface ModuleServices {
   welcomeConfigs: WelcomeConfigStore;
   welcomeSender: WelcomeSender;
   guildLookup: GuildLookup;
+  partyAreas: PartyRepository;
+  partyChannels: PartyChannels;
+  partyLock: Pick<KeyValueStore, "setIfAbsent" | "del">;
   logger: Logger;
 }
 
@@ -40,6 +49,12 @@ export function createModules(services: ModuleServices): BotModule[] {
       sender: services.welcomeSender,
       guilds: services.guildLookup,
       logger: services.logger.child({ module: "welcome" }),
+    }),
+    createPartyModule({
+      repository: services.partyAreas,
+      channels: services.partyChannels,
+      lock: services.partyLock,
+      logger: services.logger.child({ module: "party" }),
     }),
   ];
 }
