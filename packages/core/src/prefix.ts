@@ -9,7 +9,8 @@ export interface PrefixInvocation {
 
 /** `!play  never gonna` with prefix `!` → `{ name: "play", rest: "never gonna" }`; null if no command. */
 export function matchPrefix(content: string, prefix: string): PrefixInvocation | null {
-  if (!prefix || !content.startsWith(prefix)) return null;
+  if (!prefix || content.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase())
+    return null;
   // Word prefixes read naturally with a space ("dz ping"), so whitespace after any prefix is allowed.
   return splitInvocation(content.slice(prefix.length).trimStart());
 }

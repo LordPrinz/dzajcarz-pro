@@ -10,6 +10,13 @@ describe("matchPrefix", () => {
     expect(matchPrefix("dz ping", "dz")).toEqual({ name: "ping", rest: "" });
   });
 
+  test("matches the prefix regardless of case", () => {
+    expect(matchPrefix("Dz ping", "dz")).toEqual({ name: "ping", rest: "" });
+    expect(matchPrefix("DZPING", "dz")).toEqual({ name: "ping", rest: "" });
+    expect(matchPrefix("dz ping", "DZ")).toEqual({ name: "ping", rest: "" });
+    expect(matchPrefix("dx ping", "dz")).toBeNull();
+  });
+
   test("ignores messages without the prefix or without a command", () => {
     expect(matchPrefix("hello", "!")).toBeNull();
     expect(matchPrefix("!", "!")).toBeNull();
