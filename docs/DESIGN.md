@@ -37,6 +37,22 @@ Modules only see `CommandContext`: typed `args`, the caller, `reply`, `defer`. R
 before optional ones, and only the last string option may take "the rest of the line" (`rest: true`),
 which keeps both forms unambiguous. See ADR 5.
 
+### Subcommands
+
+A command groups actions with `subcommands` (`/prefix set`, `!prefix set ?`) instead of `options` and
+`run`; the registry rejects both or neither. There is one level, no groups. Each subcommand is built with
+`defineSubcommand` and has its own typed `options`. Slash commands map them to `SUB_COMMAND` options; for
+the prefix form the first word picks the subcommand and a missing or unknown one gets a Polish error that
+lists the valid names. The chosen name travels as `ctx.subcommand`. Command `permissions` also become
+Discord's `default_member_permissions`; a subcommand's `permissions` are checked only when it runs.
+
+### Module ownership and shutdown
+
+The registry remembers which module registered each command (`moduleOf`) and each event handler
+(`events()` returns `{ module, handler }`), so the bot can apply per-guild module toggles in one place
+instead of every module checking its own switch. A module may declare `dispose()`; `apps/bot` calls it
+for every module on shutdown, before the Discord client is destroyed.
+
 ### Errors
 
 `UserError` messages go to the caller as they are (Polish). Any other error is logged with the command,

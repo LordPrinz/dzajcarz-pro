@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { defineCommand } from "./command.ts";
+import { defineCommand, defineSubcommand } from "./command.ts";
 import { matchPrefix, parsePrefixArgs, tokenize, usage } from "./prefix.ts";
 
 const noop = async () => {};
@@ -172,5 +172,64 @@ describe("number parsing", () => {
     expect(parsePrefixArgs(volume, "Głośno")).toEqual({ ok: true, args: { level: 100 } });
     expect(parsePrefixArgs(volume, "20")).toEqual({ ok: true, args: { level: 20 } });
     expect(parsePrefixArgs(volume, "50").ok).toBe(false);
+  });
+});
+
+describe("parsePrefixArgs with subcommands", () => {
+  const prefix = defineCommand({
+    name: "prefix",
+    description: "Prefix",
+    subcommands: {
+      set: defineSubcommand({
+        description: "Set",
+        options: { value: { type: "string", description: "Value", required: true, rest: true } },
+        run: noop,
+      }),
+      reset: defineSubcommand({ description: "Reset", run: noop }),
+      show: defineSubcommand({ description: "Show", run: noop }),
+    },
+  });
+
+  test("the first word picks the subcommand, the rest is parsed against its options", () => {
+    expect(parsePrefixArgs(prefix, "set  ?? now")).toEqual({
+      ok: true,
+      subcommand: "set",
+      args: { value: "?? now" },
+    });
+    expect(parsePrefixArgs(prefix, "SHOW")).toEqual({ ok: true, subcommand: "show", args: {} });
+  });
+
+  test("a missing subcommand lists the valid ones", () => {
+    expect(parsePrefixArgs(prefix, "")).toEqual({
+      ok: false,
+      error: "Podaj podkomendę. Użycie: `prefix set|reset|show`",
+    });
+  });
+
+  test("an unknown subcommand lists the valid ones and cannot inject markdown", () => {
+    expect(parsePrefixArgs(prefix, "`wipe`")).toEqual({
+      ok: false,
+      error: "Nieznana podkomenda `wipe`. Użycie: `prefix set|reset|show`",
+    });
+    expect(parsePrefixArgs(prefix, "constructor")).toMatchObject({ ok: false });
+  });
+
+  test("an unknown subcommand is echoed at most 32 characters long", () => {
+    const result = parsePrefixArgs(prefix, "x".repeat(500));
+    expect(result).toEqual({
+      ok: false,
+      error: `Nieznana podkomenda \`${"x".repeat(32)}\`. Użycie: \`prefix set|reset|show\``,
+    });
+  });
+
+  test("argument errors name the subcommand in the usage line", () => {
+    expect(parsePrefixArgs(prefix, "set")).toEqual({
+      ok: false,
+      error: "Brakuje argumentu `value`. Użycie: `prefix set <value...>`",
+    });
+    expect(parsePrefixArgs(prefix, "show now")).toEqual({
+      ok: false,
+      error: "Za dużo argumentów. Użycie: `prefix show`",
+    });
   });
 });

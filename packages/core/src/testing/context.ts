@@ -4,11 +4,14 @@ export interface FakeContext<A> extends CommandContext<A> {
   /** Every reply, in order. */
   readonly replies: Reply[];
   deferred: boolean;
+  /** The options of the last defer() call. */
+  deferOptions?: { ephemeral?: boolean };
 }
 
 export interface FakeContextOptions<A> {
   args?: A;
   invocation?: Invocation;
+  subcommand?: string;
   guildId?: string | null;
   memberPermissions?: bigint | null;
   userId?: string;
@@ -18,6 +21,7 @@ export interface FakeContextOptions<A> {
 export function createFakeContext<A = Record<string, unknown>>({
   args = {} as A,
   invocation = "slash",
+  subcommand,
   guildId = "100000000000000001",
   memberPermissions = 0n,
   userId = "200000000000000002",
@@ -25,6 +29,7 @@ export function createFakeContext<A = Record<string, unknown>>({
   const ctx: FakeContext<A> = {
     args,
     invocation,
+    subcommand,
     guildId,
     channelId: "300000000000000003",
     memberPermissions: guildId === null ? null : memberPermissions,
@@ -34,8 +39,9 @@ export function createFakeContext<A = Record<string, unknown>>({
     async reply(reply) {
       ctx.replies.push(reply);
     },
-    async defer() {
+    async defer(options) {
       ctx.deferred = true;
+      ctx.deferOptions = options;
     },
   };
   return ctx;

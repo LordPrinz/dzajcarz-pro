@@ -1,5 +1,6 @@
 import {
   type CommandRegistry,
+  checkPrefixAccess,
   executeCommand,
   type Logger,
   matchPrefix,
@@ -20,7 +21,7 @@ export interface BotDeps {
 
 /** Routes Discord events to module handlers and commands. */
 export function attachHandlers(client: Client, { registry, prefixes, logger }: BotDeps): void {
-  for (const handler of registry.events()) {
+  for (const { handler } of registry.events()) {
     const listener = async (...args: unknown[]) => {
       try {
         await handler.run(...args);
@@ -72,12 +73,24 @@ async function handleMessage(
   const command = registry.find(invocation.name);
   if (!command) return;
 
+  // Checked before parsing so a member without access never learns the usage of a command they cannot run.
+  const context = contextFromMessage(message, {});
+  const denied = checkPrefixAccess(command, invocation.rest, context);
+  if (denied) {
+    await message.reply({ content: denied, allowedMentions: NO_MENTIONS });
+    return;
+  }
+
   const parsed = parsePrefixArgs(command, invocation.rest);
   if (!parsed.ok) {
     await message.reply({ content: parsed.error, allowedMentions: NO_MENTIONS });
     return;
   }
-  await executeCommand(command, contextFromMessage(message, parsed.args), logger);
+  await executeCommand(
+    command,
+    contextFromMessage(message, parsed.args, parsed.subcommand),
+    logger,
+  );
 }
 
 /** A text command starts with the guild prefix or with a mention of the bot (`@Dżajcarz ping`). */

@@ -1,4 +1,4 @@
-import type { AnyCommand, OptionDef } from "./command.ts";
+import type { AnyCommand, OptionDef, OptionsDef } from "./command.ts";
 
 export interface PrefixInvocation {
   /** Lowercased command name or alias. */
@@ -22,7 +22,7 @@ export function splitInvocation(body: string): PrefixInvocation | null {
 }
 
 export type ParseResult =
-  | { ok: true; args: Record<string, unknown> }
+  | { ok: true; args: Record<string, unknown>; subcommand?: string }
   /** `error` is shown to the caller (Polish). */
   | { ok: false; error: string };
 
@@ -52,18 +52,46 @@ const MENTION: Record<"user" | "channel" | "role", RegExp> = {
   role: new RegExp(`^(?:<@&${SNOWFLAKE}>|${SNOWFLAKE})$`),
 };
 
-/** Maps positional prefix arguments onto the command's options, in declaration order. */
+/**
+ * Maps positional prefix arguments onto the command's options, in declaration order. For a command with
+ * subcommands the first word picks the subcommand and the rest is parsed against its options.
+ */
 export function parsePrefixArgs(command: AnyCommand, input: string): ParseResult {
+  const { subcommands } = command;
+  if (!subcommands) return parseOptions(command, command.options ?? {}, input);
+
+  const picked = splitInvocation(input);
+  if (!picked) return { ok: false, error: `Podaj podkomendę. ${usage(command)}` };
+  const subcommand = Object.hasOwn(subcommands, picked.name) ? subcommands[picked.name] : undefined;
+  if (!subcommand) {
+    // Backticks would close the code span around the echoed word and let it inject markdown.
+    const word = picked.name.replaceAll("`", "").slice(0, 32);
+    return { ok: false, error: `Nieznana podkomenda \`${word}\`. ${usage(command)}` };
+  }
+  const parsed = parseOptions(command, subcommand.options ?? {}, picked.rest, picked.name);
+  return parsed.ok ? { ...parsed, subcommand: picked.name } : parsed;
+}
+
+function parseOptions(
+  command: AnyCommand,
+  optionDefs: OptionsDef,
+  input: string,
+  subcommand?: string,
+): ParseResult {
   const tokens = tokenize(input);
-  const options = Object.entries(command.options ?? {});
+  const options = Object.entries(optionDefs);
   const args: Record<string, unknown> = {};
 
   let index = 0;
   for (const [name, option] of options) {
     const token = tokens[index];
     if (!token) {
-      if (option.required)
-        return { ok: false, error: `Brakuje argumentu \`${name}\`. ${usage(command)}` };
+      if (option.required) {
+        return {
+          ok: false,
+          error: `Brakuje argumentu \`${name}\`. ${usage(command, subcommand)}`,
+        };
+      }
       continue;
     }
     if (option.rest) {
@@ -78,7 +106,7 @@ export function parsePrefixArgs(command: AnyCommand, input: string): ParseResult
   }
 
   if (index < tokens.length) {
-    return { ok: false, error: `Za dużo argumentów. ${usage(command)}` };
+    return { ok: false, error: `Za dużo argumentów. ${usage(command, subcommand)}` };
   }
   return { ok: true, args };
 }
@@ -142,11 +170,19 @@ function withChoices(option: OptionDef, value: string | number): Converted {
   return { ok: true, value: choice.value };
 }
 
-/** `Użycie: play <query...> [volume]` */
-export function usage(command: AnyCommand): string {
-  const parts = Object.entries(command.options ?? {}).map(([name, option]) => {
+/** `play <query...> [volume]`, `prefix set <value>` or `prefix set|reset|show`. */
+export function usageLine(command: AnyCommand, subcommand?: string): string {
+  const { subcommands } = command;
+  if (subcommands && !subcommand) return `${command.name} ${Object.keys(subcommands).join("|")}`;
+  const options = subcommand ? subcommands?.[subcommand]?.options : command.options;
+  const parts = Object.entries(options ?? {}).map(([name, option]) => {
     const label = option.rest ? `${name}...` : name;
     return option.required ? `<${label}>` : `[${label}]`;
   });
-  return `Użycie: \`${[command.name, ...parts].join(" ")}\``;
+  return [command.name, subcommand, ...parts].filter(Boolean).join(" ");
+}
+
+/** `Użycie: \`play <query...> [volume]\`` */
+export function usage(command: AnyCommand, subcommand?: string): string {
+  return `Użycie: \`${usageLine(command, subcommand)}\``;
 }
