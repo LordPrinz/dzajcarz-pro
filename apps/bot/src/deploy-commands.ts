@@ -19,6 +19,7 @@ const registry = createRegistry(
     gatewayPing: unused,
     prefixFor: unused,
     prefixSettings: { get: unused, set: unused, reset: unused },
+    moduleToggles: { moduleNames: unused, list: unused, disable: unused, enable: unused },
     defaultPrefix: "",
   }),
 );

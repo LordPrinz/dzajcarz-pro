@@ -1,12 +1,18 @@
 // Composition root: creates the real adapters once and hands them to the modules.
 import { createJsonLogger, createRegistry } from "@dzajcarz/core";
-import { createDb, createGuildSettingsRepository } from "@dzajcarz/db";
+import {
+  createDb,
+  createGuildSettingsRepository,
+  createModuleToggleRepository,
+} from "@dzajcarz/db";
 import { createRedisStore, keepConnected } from "@dzajcarz/kv";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { loadEnv } from "./env.ts";
+import { createModuleGate } from "./module-gate.ts";
+import { createModuleToggles } from "./module-toggles.ts";
 import { createModules } from "./modules.ts";
 import { createPrefixResolver } from "./prefix-resolver.ts";
 import { createPrefixSettings } from "./prefix-settings.ts";
@@ -24,6 +30,13 @@ const prefixes = createPrefixResolver({
   cache: createRedisStore(redis),
   defaultPrefix: env.BOT_PREFIX,
   logger: logger.child({ component: "prefix" }),
+});
+
+const moduleToggleRepository = createModuleToggleRepository(sql);
+const gate = createModuleGate({
+  toggles: moduleToggleRepository,
+  cache: createRedisStore(redis),
+  logger: logger.child({ component: "module-gate" }),
 });
 
 const client = new Client({
@@ -45,10 +58,13 @@ const modules = createModules({
   gatewayPing: () => client.ws.ping,
   prefixFor: (guildId) => prefixes.resolve(guildId),
   prefixSettings: createPrefixSettings(guildSettings, prefixes),
+  moduleToggles: createModuleToggles(moduleToggleRepository, gate, () =>
+    modules.map((module) => module.name),
+  ),
   defaultPrefix: env.BOT_PREFIX,
 });
 const registry = createRegistry(modules);
-attachHandlers(client, { registry, prefixes, logger });
+attachHandlers(client, { registry, prefixes, gate, logger });
 
 client.once(Events.ClientReady, (ready) => {
   logger.info("Logged in", {

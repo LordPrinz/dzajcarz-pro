@@ -65,6 +65,16 @@ The prefix is stored in `guild_settings.prefix` (null means the default from `BO
 Redis for 10 minutes, because every message in every guild needs it. If Redis is down the bot reads
 Postgres; if Postgres is down too it uses the default. Mentioning the bot always works as a prefix.
 
+### Module toggles
+
+A server can switch a module off entirely or in chosen channels (`/modules disable <module> [channel]`).
+Rows live in `module_disabled` (`channel_id = ''` means the whole guild) and a guild's set is cached in
+Redis as JSON for 10 minutes, with the same fallbacks as the prefix, except that when Postgres is down too
+every module counts as enabled. The check is central, not in the modules: `bot.ts` asks the gate before a
+command runs (slash answers ephemerally, prefix stays silent) and wraps every event handler, using
+`eventScope` to find the guild and channel of the event. Events that are not in `eventScope` and events
+outside a guild are never gated. `general` and `settings` cannot be disabled.
+
 ### Mentions
 
 The client and every reply set `allowedMentions: { parse: [] }`. Commands echo user input (song titles,
