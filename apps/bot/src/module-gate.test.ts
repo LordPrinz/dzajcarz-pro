@@ -115,6 +115,25 @@ describe("module gate", () => {
     expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(false);
   });
 
+  test("fails open when the lookup is slower than the timeout", async () => {
+    const gate = createModuleGate({
+      toggles: { listDisabled: () => new Promise(() => {}) },
+      cache: createMemoryStore(),
+      logger: silentLogger,
+      timeoutMs: 20,
+    });
+    expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(true);
+  });
+
+  test("forget does not throw when Redis is down", async () => {
+    const gate = createModuleGate({
+      toggles: { listDisabled: async () => [] },
+      cache: brokenStore(),
+      logger: silentLogger,
+    });
+    await expect(gate.forget(GUILD)).resolves.toBeUndefined();
+  });
+
   test("fails open when both Redis and Postgres are down", async () => {
     const gate = createModuleGate({
       toggles: {

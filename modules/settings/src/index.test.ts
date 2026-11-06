@@ -10,6 +10,7 @@ import { createFakeContext, replyText } from "@dzajcarz/core/testing";
 import {
   createSettingsModule,
   type DisabledModule,
+  type GuildChannels,
   type ModuleToggles,
   type PrefixSettings,
 } from "./index.ts";
@@ -23,6 +24,15 @@ const noModules: ModuleToggles = {
   enable: async () => false,
 };
 
+const GUILD_ID = "100000000000000001";
+
+/** Knows the channels of one guild only. */
+function channelsOf(ids: readonly string[]): GuildChannels {
+  return {
+    belongsTo: async (guildId, channelId) => guildId === GUILD_ID && ids.includes(channelId),
+  };
+}
+
 function setup() {
   const store = new Map<string, string>();
   const prefixes: PrefixSettings = {
@@ -31,7 +41,12 @@ function setup() {
     reset: async (guildId) => void store.delete(guildId),
   };
   const registry = createRegistry([
-    createSettingsModule({ prefixes, defaultPrefix: "!", modules: noModules }),
+    createSettingsModule({
+      prefixes,
+      defaultPrefix: "!",
+      modules: noModules,
+      channels: channelsOf([]),
+    }),
   ]);
   const command = registry.find("prefix");
   if (!command) throw new Error("prefix command missing");
@@ -87,12 +102,20 @@ describe("settings module: /prefix", () => {
     ["toolong", "od 1 do 5"],
     ["a b", "spacji"],
     ["a\tb", "spacji"],
+    ["a\u200bb", "niewidocznych"],
     ["`", "znaku `"],
   ])("rejects the prefix %j", async (prefix, message) => {
     const { run, store } = setup();
     const [reply] = await run("set", { prefix });
     expect(reply).toContain(message);
     expect(store.size).toBe(0);
+  });
+
+  test("counts characters by code point, so five emoji fit", async () => {
+    const { run } = setup();
+    expect(await run("set", { prefix: "😀😀😀😀😀" })).toEqual(["Prefiks to teraz `😀😀😀😀😀`."]);
+    const [reply] = await run("set", { prefix: "😀😀😀😀😀😀" });
+    expect(reply).toContain("od 1 do 5");
   });
 
   test("accepts 5 characters and multi-character prefixes", async () => {
@@ -135,7 +158,12 @@ describe("settings module: /modules", () => {
       reset: async () => {},
     };
     const registry = createRegistry([
-      createSettingsModule({ prefixes, defaultPrefix: "!", modules }),
+      createSettingsModule({
+        prefixes,
+        defaultPrefix: "!",
+        modules,
+        channels: channelsOf([CHANNEL]),
+      }),
     ]);
     const command = registry.find("modules");
     if (!command) throw new Error("modules command missing");
@@ -144,11 +172,11 @@ describe("settings module: /modules", () => {
       args: Record<string, unknown> = {},
       memberPermissions: bigint = MANAGE_GUILD,
     ) => {
-      const ctx = createFakeContext({ args, subcommand, memberPermissions });
+      const ctx = createFakeContext({ args, subcommand, memberPermissions, guildId: GUILD_ID });
       await executeCommand(command, ctx, silentLogger);
       return ctx.replies.map((r) => replyText(r) ?? "");
     };
-    return { run, disabled, command };
+    return { run, disabled, command, modules };
   }
 
   test("requires Manage Server", async () => {
@@ -199,6 +227,41 @@ describe("settings module: /modules", () => {
     expect(reply).toContain("`music`, `welcome`");
     expect(reply).not.toContain("`general`");
     expect(disabled).toEqual([]);
+  });
+
+  test("a channel outside the guild is refused by disable and enable", async () => {
+    const { run, disabled } = setupModules();
+    const foreign = "900000000000000009";
+    expect((await run("disable", { module: "music", channel: foreign }))[0]).toContain(
+      "Nie znalazłem takiego kanału",
+    );
+    expect((await run("enable", { module: "music", channel: foreign }))[0]).toContain(
+      "Nie znalazłem takiego kanału",
+    );
+    expect(disabled).toEqual([]);
+  });
+
+  test("an unknown module name is echoed without backticks and cut to 32 characters", async () => {
+    const { run } = setupModules();
+    const [reply] = await run("disable", { module: `\`${"x".repeat(100)}` });
+    expect(reply).toContain(`Nie ma modułu \`${"x".repeat(32)}\`.`);
+  });
+
+  test("list stays under 2000 characters and counts what it left out", async () => {
+    const { run, modules } = setupModules();
+    const names = Array.from({ length: 200 }, (_, i) => `module${i}`);
+    modules.moduleNames = () => names;
+    const reply = (await run("list"))[0] ?? "";
+    expect(reply.length).toBeLessThan(2000);
+    expect(reply).toMatch(/\n…i jeszcze \d+$/);
+  });
+
+  test("list shortens a very long channel list", async () => {
+    const { run, modules } = setupModules();
+    modules.list = async () =>
+      Array.from({ length: 30 }, (_, i) => ({ module: "music", channelId: `${1000 + i}` }));
+    const [reply] = await run("list");
+    expect(reply).toContain("i jeszcze 20");
   });
 
   test("list shows every module and where it is off", async () => {

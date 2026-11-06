@@ -56,7 +56,10 @@ export function createPrefixResolver({
     },
 
     async forget(guildId) {
-      await cache.del(key(guildId));
+      // The new prefix is already in Postgres; a stale cache entry expires on its own.
+      await cache.del(key(guildId)).catch((error: unknown) => {
+        logger.warn("Prefix cache invalidation failed", { guildId, error });
+      });
     },
   };
 }

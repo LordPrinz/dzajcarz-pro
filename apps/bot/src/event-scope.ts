@@ -1,5 +1,22 @@
 import type { ClientEvents } from "discord.js";
 
+/** The channel part of a message or interaction that toggles are looked up by. */
+interface MaybeThread {
+  isThread?(): boolean;
+  parentId?: string | null;
+}
+
+/**
+ * Toggles are set on channels, and a thread has no toggle of its own: it follows its parent channel.
+ * `channel` may be null for uncached channels, in which case the plain channel id is used.
+ */
+export function toggleChannelId(
+  channel: MaybeThread | null | undefined,
+  channelId: string,
+): string {
+  return channel?.isThread?.() && channel.parentId ? channel.parentId : channelId;
+}
+
 export interface EventScope {
   guildId: string;
   /** null when the event is about the guild as a whole (a member joined). */
@@ -14,7 +31,7 @@ export function eventScope(event: keyof ClientEvents, args: unknown[]): EventSco
   switch (event) {
     case "messageCreate": {
       const [message] = args as ClientEvents["messageCreate"];
-      return scope(message.guildId, message.channelId);
+      return scope(message.guildId, toggleChannelId(message.channel, message.channelId));
     }
     case "guildMemberAdd": {
       const [member] = args as ClientEvents["guildMemberAdd"];
@@ -30,7 +47,10 @@ export function eventScope(event: keyof ClientEvents, args: unknown[]): EventSco
     }
     case "interactionCreate": {
       const [interaction] = args as ClientEvents["interactionCreate"];
-      return scope(interaction.guildId, interaction.channelId);
+      return scope(
+        interaction.guildId,
+        interaction.channelId && toggleChannelId(interaction.channel, interaction.channelId),
+      );
     }
     default:
       return null;

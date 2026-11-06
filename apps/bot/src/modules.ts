@@ -2,6 +2,7 @@ import type { BotModule, CommandSummary, Logger } from "@dzajcarz/core";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
   createSettingsModule,
+  type GuildChannels,
   type ModuleToggles,
   type PrefixSettings,
 } from "@dzajcarz/module-settings";
@@ -19,6 +20,7 @@ export interface ModuleServices {
   prefixFor: (guildId: string | null) => Promise<string>;
   prefixSettings: PrefixSettings;
   moduleToggles: ModuleToggles;
+  channels: GuildChannels;
   defaultPrefix: string;
   welcomeConfigs: WelcomeConfigStore;
   welcomeSender: WelcomeSender;
@@ -34,6 +36,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       prefixes: services.prefixSettings,
       defaultPrefix: services.defaultPrefix,
       modules: services.moduleToggles,
+      channels: services.channels,
     }),
     createWelcomeModule({
       store: services.welcomeConfigs,
