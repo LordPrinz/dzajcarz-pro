@@ -131,7 +131,7 @@ the join channel hands over or frees the old channel first.
 
 ### Rotating status
 
-`modules/status` cycles the bot's activity through a list (defaults in `DEFAULT_ACTIVITIES`, every 60 s;
+`modules/status` cycles the bot's activity through a list (defaults in `DEFAULT_ACTIVITIES`: the old bot's song, one phrase every 15 s;
 both are arguments of `createStatusModule`). The first `clientReady` sets the first activity and starts the
 interval; a repeated `clientReady` (reconnect) does not start another, and `dispose()` clears it. It talks to
 two ports, `Presence` and `Clock`, so the rotation is tested with a fake clock. A failing `setActivity` is

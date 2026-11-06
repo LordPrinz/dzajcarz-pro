@@ -25,15 +25,50 @@ export interface StatusModuleDeps {
   intervalMs?: number;
 }
 
-export const DEFAULT_ACTIVITIES: readonly Activity[] = [
-  { type: "playing", text: "Ein Heller und ein Batzen" },
-  { type: "listening", text: "HEILI HEILO HEILA" },
-  { type: "watching", text: "jak Heller ward zu Wasser" },
-  { type: "competing", text: "w piciu piwa" },
-  { type: "custom", text: "Batzen ward zu Wein" },
+/** The old bot's status: "Ein Heller und ein Batzen" (German folk song), one phrase at a time. */
+const SONG = [
+  "Ein Heller",
+  "und",
+  "ein Batzen",
+  "Die waren",
+  "beide mein",
+  "ja mein",
+  "Der Heller",
+  "ward zu Wasser",
+  "Der Batzen",
+  "ward zu Wein",
+  "ja Wein",
+  "Der Helle",
+  "ward zu Wasser",
+  "Der Batzen",
+  "ward zu Wein",
+  "HEILI",
+  "HEILO",
+  "HEILA",
+  "HEILI",
+  "HEILO",
+  "HEILA",
+  "HEILI",
+  "HEILO",
+  "HEILA",
+  "HA HA HA HA HA HA HA",
+  "HEILI",
+  "HEILO",
+  "HEILA",
+  "HEILI",
+  "HEILO",
+  "HEILA",
+  "HEILI",
+  "HEILO",
+  "HEILA",
 ];
 
-export const DEFAULT_INTERVAL_MS = 60_000;
+export const DEFAULT_ACTIVITIES: readonly Activity[] = SONG.map((text) => ({
+  type: "playing",
+  text,
+}));
+
+export const DEFAULT_INTERVAL_MS = 15_000;
 
 export function createStatusModule({
   presence,
