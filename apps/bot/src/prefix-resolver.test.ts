@@ -65,6 +65,15 @@ describe("prefix resolver", () => {
     expect(await resolver.resolve(GUILD)).toBe("?");
   });
 
+  test("forget does not throw when Redis is down", async () => {
+    const broken: KeyValueStore = {
+      ...createMemoryStore(),
+      del: () => Promise.reject(new Error("ECONNREFUSED")),
+    };
+    const { resolver } = setup("?", broken);
+    await expect(resolver.forget(GUILD)).resolves.toBeUndefined();
+  });
+
   test("falls back to the default when Postgres is down", async () => {
     const resolver = createPrefixResolver({
       settings: { find: () => Promise.reject(new Error("connection refused")) },

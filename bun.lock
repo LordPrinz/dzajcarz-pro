@@ -19,12 +19,20 @@
         "@dzajcarz/db": "workspace:*",
         "@dzajcarz/kv": "workspace:*",
         "@dzajcarz/module-general": "workspace:*",
+        "@dzajcarz/module-settings": "workspace:*",
         "discord.js": "14.27.0",
         "zod": "4.6.7",
       },
     },
     "modules/general": {
       "name": "@dzajcarz/module-general",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dzajcarz/core": "workspace:*",
+      },
+    },
+    "modules/settings": {
+      "name": "@dzajcarz/module-settings",
       "version": "0.0.0",
       "dependencies": {
         "@dzajcarz/core": "workspace:*",
@@ -90,6 +98,8 @@
     "@dzajcarz/kv": ["@dzajcarz/kv@workspace:packages/kv"],
 
     "@dzajcarz/module-general": ["@dzajcarz/module-general@workspace:modules/general"],
+
+    "@dzajcarz/module-settings": ["@dzajcarz/module-settings@workspace:modules/settings"],
 
     "@sapphire/async-queue": ["@sapphire/async-queue@1.5.5", "", {}, "sha512-cvGzxbba6sav2zZkH8GPf2oGk9yYoD5qrNWdu9fRehifgnFZJMV+nuy2nON2roRO4yQQ+v7MK/Pktl/HgfsUXg=="],
 

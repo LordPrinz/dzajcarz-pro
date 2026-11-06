@@ -9,6 +9,7 @@ import { NO_MENTIONS } from "./discord/reply.ts";
 import { loadEnv } from "./env.ts";
 import { createModules } from "./modules.ts";
 import { createPrefixResolver } from "./prefix-resolver.ts";
+import { createPrefixSettings } from "./prefix-settings.ts";
 
 const env = loadEnv();
 const logger = createJsonLogger({ level: env.LOG_LEVEL });
@@ -17,8 +18,9 @@ const sql = createDb(env.DATABASE_URL);
 const redis = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
 keepConnected(redis);
 
+const guildSettings = createGuildSettingsRepository(sql);
 const prefixes = createPrefixResolver({
-  settings: createGuildSettingsRepository(sql),
+  settings: guildSettings,
   cache: createRedisStore(redis),
   defaultPrefix: env.BOT_PREFIX,
   logger: logger.child({ component: "prefix" }),
@@ -42,6 +44,8 @@ const modules = createModules({
   commands: () => registry.summaries(),
   gatewayPing: () => client.ws.ping,
   prefixFor: (guildId) => prefixes.resolve(guildId),
+  prefixSettings: createPrefixSettings(guildSettings, prefixes),
+  defaultPrefix: env.BOT_PREFIX,
 });
 const registry = createRegistry(modules);
 attachHandlers(client, { registry, prefixes, logger });
