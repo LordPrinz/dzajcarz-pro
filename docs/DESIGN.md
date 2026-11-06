@@ -129,6 +129,14 @@ switching the module off never strands empty channels. Only the join handler is 
 runs before the join handler for the same member, which waits for it, so moving from your own channel into
 the join channel hands over or frees the old channel first.
 
+### Rotating status
+
+`modules/status` cycles the bot's activity through a list (defaults in `DEFAULT_ACTIVITIES`, every 60 s;
+both are arguments of `createStatusModule`). The first `clientReady` sets the first activity and starts the
+interval; a repeated `clientReady` (reconnect) does not start another, and `dispose()` clears it. It talks to
+two ports, `Presence` and `Clock`, so the rotation is tested with a fake clock. A failing `setActivity` is
+logged and the next tick tries again. The handler is `alwaysRun`: the status belongs to the bot, not a guild.
+
 ### Mentions
 
 The client and every reply set `allowedMentions: { parse: [] }`. Commands echo user input (song titles,

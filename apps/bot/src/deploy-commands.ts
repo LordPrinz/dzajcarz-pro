@@ -49,6 +49,8 @@ const registry = createRegistry(
       createCategoryWithJoinChannel: unused,
     },
     partyLock: { setIfAbsent: unused, delIfEquals: unused, increment: unused },
+    presence: { setActivity: unused },
+    clock: { setInterval: unused, clearInterval: unused },
     logger: silentLogger,
   }),
 );
