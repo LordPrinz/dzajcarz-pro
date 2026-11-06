@@ -25,10 +25,8 @@ export async function executeCommand(
   });
 
   try {
-    if ((command.guildOnly || command.permissions !== undefined) && ctx.guildId === null) {
-      throw new UserError("Ta komenda działa tylko na serwerze.");
-    }
-    requirePermissions(command.permissions, ctx);
+    const denied = checkAccess(command, ctx);
+    if (denied) throw new UserError(denied);
     if (command.subcommands) {
       const { subcommand } = ctx;
       const target =
@@ -36,10 +34,8 @@ export async function executeCommand(
           ? command.subcommands[subcommand]
           : undefined;
       if (!target) throw new UserError(`Nieznana podkomenda. ${usage(command)}`);
-      if (target.permissions !== undefined && ctx.guildId === null) {
-        throw new UserError("Ta komenda działa tylko na serwerze.");
-      }
-      requirePermissions(target.permissions, ctx);
+      const deniedAction = checkAccess(target, ctx);
+      if (deniedAction) throw new UserError(deniedAction);
       await target.run(ctx);
     } else {
       await command.run?.(ctx);
@@ -56,11 +52,21 @@ export async function executeCommand(
   }
 }
 
-function requirePermissions(required: bigint | undefined, ctx: CommandContext): void {
-  if (required === undefined) return;
-  const granted = ctx.memberPermissions ?? 0n;
-  const isAdmin = (granted & ADMINISTRATOR) === ADMINISTRATOR;
-  if (!isAdmin && (granted & required) !== required) {
-    throw new UserError("Nie masz uprawnień do tej komendy.");
+/**
+ * Guild-only and member-permission gate shared by slash and prefix invocations. Returns the Polish message
+ * to show the caller, or null when access is fine.
+ */
+export function checkAccess(
+  target: { guildOnly?: boolean; permissions?: bigint },
+  { guildId, memberPermissions }: Pick<CommandContext, "guildId" | "memberPermissions">,
+): string | null {
+  if ((target.guildOnly || target.permissions !== undefined) && guildId === null) {
+    return "Ta komenda działa tylko na serwerze.";
   }
+  const required = target.permissions;
+  if (required === undefined) return null;
+  const granted = memberPermissions ?? 0n;
+  const isAdmin = (granted & ADMINISTRATOR) === ADMINISTRATOR;
+  if (!isAdmin && (granted & required) !== required) return "Nie masz uprawnień do tej komendy.";
+  return null;
 }

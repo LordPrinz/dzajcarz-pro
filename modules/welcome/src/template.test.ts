@@ -28,6 +28,20 @@ describe("renderWelcome", () => {
     expect(renderWelcome("{username} @ {server}", tricky)).toBe("{server} @ {memberCount}");
   });
 
+  test("escapes markdown in the member and server names, not in the template", () => {
+    const loud = { ...values, username: "**Ola**_[x](y)", serverName: "~~Dżajsy~~ @everyone" };
+    expect(renderWelcome("**{username}** @ {server}", loud)).toBe(
+      "**\\*\\*Ola\\*\\*\\_\\[x\\]\\(y\\)** @ \\~\\~Dżajsy\\~\\~ \\@everyone",
+    );
+  });
+
+  test("cuts by code points, never in the middle of an emoji", () => {
+    const out = renderWelcome("😀".repeat(MAX_MESSAGE_LENGTH + 5), values);
+    expect([...out]).toHaveLength(MAX_MESSAGE_LENGTH);
+    expect(out.endsWith("😀")).toBe(true);
+    expect(out.isWellFormed()).toBe(true);
+  });
+
   test("caps the output at 2000 characters", () => {
     const out = renderWelcome(`{username}${"x".repeat(MAX_MESSAGE_LENGTH)}`, values);
     expect(out).toHaveLength(MAX_MESSAGE_LENGTH);

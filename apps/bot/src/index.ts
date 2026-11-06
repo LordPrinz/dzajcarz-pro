@@ -11,9 +11,10 @@ import { createRedisStore, keepConnected } from "@dzajcarz/kv";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
+import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createPartyChannels } from "./discord/party.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
-import { createGuildLookup, createWelcomeSender } from "./discord/welcome.ts";
+import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
@@ -68,10 +69,11 @@ const modules = createModules({
   moduleToggles: createModuleToggles(moduleToggleRepository, gate, () =>
     modules.map((module) => module.name),
   ),
+  channels: { ...createGuildChannels(client), ...createTextChannels(client) },
   defaultPrefix: env.BOT_PREFIX,
   welcomeConfigs: createWelcomeRepository(sql),
   welcomeSender: createWelcomeSender(client),
-  guildLookup: createGuildLookup(client),
+  guildLookup: createGuildLookup(client, logger.child({ component: "guild-lookup" })),
   partyAreas: createPartyRepository(sql),
   partyChannels: createPartyChannels(client),
   partyLock: createRedisStore(redis),
@@ -87,6 +89,10 @@ client.once(Events.ClientReady, (ready) => {
     commands: registry.commands().length,
   });
 });
+// A rejected promise nobody awaited (a failed Discord call in a listener) is logged, not fatal.
+process.on("unhandledRejection", (reason) =>
+  logger.error("Unhandled rejection", { error: reason }),
+);
 client.on(Events.Error, (error) => logger.error("Discord client error", { error }));
 
 let stopping = false;

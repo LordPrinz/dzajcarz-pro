@@ -8,12 +8,14 @@ import {
 } from "@dzajcarz/module-party";
 import {
   createSettingsModule,
+  type GuildChannels,
   type ModuleToggles,
   type PrefixSettings,
 } from "@dzajcarz/module-settings";
 import {
   createWelcomeModule,
   type GuildLookup,
+  type TextChannels,
   type WelcomeConfigStore,
   type WelcomeSender,
 } from "@dzajcarz/module-welcome";
@@ -25,6 +27,7 @@ export interface ModuleServices {
   prefixFor: (guildId: string | null) => Promise<string>;
   prefixSettings: PrefixSettings;
   moduleToggles: ModuleToggles;
+  channels: GuildChannels & TextChannels;
   defaultPrefix: string;
   welcomeConfigs: WelcomeConfigStore;
   welcomeSender: WelcomeSender;
@@ -43,11 +46,13 @@ export function createModules(services: ModuleServices): BotModule[] {
       prefixes: services.prefixSettings,
       defaultPrefix: services.defaultPrefix,
       modules: services.moduleToggles,
+      channels: services.channels,
     }),
     createWelcomeModule({
       store: services.welcomeConfigs,
       sender: services.welcomeSender,
       guilds: services.guildLookup,
+      channels: services.channels,
       logger: services.logger.child({ module: "welcome" }),
     }),
     createPartyModule({

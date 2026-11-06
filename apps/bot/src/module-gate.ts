@@ -18,6 +18,8 @@ export interface ModuleGateDeps {
   cache: KeyValueStore;
   logger: Logger;
   ttlMs?: number;
+  /** How long a lookup may take before the module counts as enabled. */
+  timeoutMs?: number;
 }
 
 interface Entry {
@@ -53,6 +55,7 @@ export function createModuleGate({
   cache,
   logger,
   ttlMs = 10 * 60_000,
+  timeoutMs = 1500,
 }: ModuleGateDeps): ModuleGate {
   async function load(guildId: string): Promise<Entry[] | null> {
     const cached = await cache.get(key(guildId)).catch((error: unknown) => {
@@ -78,10 +81,29 @@ export function createModuleGate({
     return entries;
   }
 
+  /** A slow Redis plus a slow Postgres must not eat the 3 s Discord gives an interaction to respond. */
+  async function loadWithin(guildId: string): Promise<Entry[] | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        logger.warn("Module toggle lookup timed out; treating modules as enabled", {
+          guildId,
+          timeoutMs,
+        });
+        resolve(null);
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([load(guildId), timedOut]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   return {
     async isEnabled(guildId, channelId, module) {
       if (guildId === null || PROTECTED_MODULES.has(module)) return true;
-      const entries = await load(guildId);
+      const entries = await loadWithin(guildId);
       if (!entries) return true;
       return !entries.some(
         (entry) =>
@@ -90,7 +112,10 @@ export function createModuleGate({
     },
 
     async forget(guildId) {
-      await cache.del(key(guildId));
+      // Postgres already has the change; a stale cache entry expires on its own.
+      await cache.del(key(guildId)).catch((error: unknown) => {
+        logger.warn("Module toggle cache invalidation failed", { guildId, error });
+      });
     },
   };
 }

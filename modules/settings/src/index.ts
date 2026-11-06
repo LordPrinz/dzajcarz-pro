@@ -26,10 +26,17 @@ export interface ModuleToggles {
   enable(guildId: string, module: string, channelId: string | null): Promise<boolean>;
 }
 
+/** Asks Discord about channels, so a channel id typed by a member is never trusted on its own. */
+export interface GuildChannels {
+  /** Whether the channel exists and belongs to this guild. */
+  belongsTo(guildId: string, channelId: string): Promise<boolean>;
+}
+
 export interface SettingsModuleDeps {
   prefixes: PrefixSettings;
   defaultPrefix: string;
   modules: ModuleToggles;
+  channels: GuildChannels;
 }
 
 /** Modules that stay on: without them nobody could turn anything back on or ask for help. */
@@ -39,21 +46,43 @@ export const PROTECTED_MODULES: ReadonlySet<string> = new Set(["general", "setti
 const MANAGE_GUILD = 1n << 5n;
 
 const MAX_PREFIX_LENGTH = 5;
+const MAX_ECHOED_NAME = 32;
+/** Discord rejects messages over 2000 characters; the rest is left for the "and N more" line. */
+const MAX_LIST_LENGTH = 1900;
+const MAX_CHANNELS_PER_LINE = 10;
 
 /** Throws a UserError (Polish) unless the prefix is 1-5 characters of non-whitespace, non-backtick text. */
-export function validatePrefix(prefix: string): void {
-  if (prefix.length < 1 || prefix.length > MAX_PREFIX_LENGTH) {
+function validatePrefix(prefix: string): void {
+  const length = [...prefix].length;
+  if (length < 1 || length > MAX_PREFIX_LENGTH) {
     throw new UserError(`Prefiks musi mieć od 1 do ${MAX_PREFIX_LENGTH} znaków.`);
   }
-  if (/\s/u.test(prefix)) throw new UserError("Prefiks nie może zawierać spacji.");
+  // \p{Cf} covers invisible characters such as zero-width spaces, which would look like an empty prefix.
+  if (/[\s\p{Cf}]/u.test(prefix)) {
+    throw new UserError("Prefiks nie może zawierać spacji ani niewidocznych znaków.");
+  }
   // The prefix is echoed inside code spans, where a backtick would close the span.
   if (prefix.includes("`")) throw new UserError("Prefiks nie może zawierać znaku `.");
+}
+
+/** Joins lines while they fit in one message; the lines that do not fit become "...i jeszcze N". */
+function fitToMessage(lines: readonly string[]): string {
+  const kept: string[] = [];
+  let length = 0;
+  for (const line of lines) {
+    if (length + line.length + 1 > MAX_LIST_LENGTH) break;
+    kept.push(line);
+    length += line.length + 1;
+  }
+  const hidden = lines.length - kept.length;
+  return hidden > 0 ? [...kept, `…i jeszcze ${hidden}`].join("\n") : kept.join("\n");
 }
 
 export function createSettingsModule({
   prefixes,
   defaultPrefix,
   modules,
+  channels,
 }: SettingsModuleDeps): BotModule {
   // Guild-only is implied by `permissions`, so guildId is set when these run.
   const guildOf = (guildId: string | null): string => {
@@ -106,14 +135,23 @@ export function createSettingsModule({
     const known = modules.moduleNames();
     if (!known.includes(module)) {
       const valid = known.filter((n) => !PROTECTED_MODULES.has(n));
+      // The name is echoed inside a code span: a backtick would close it, and length is capped for Discord's limit.
+      const shown = name.replaceAll("`", "").slice(0, MAX_ECHOED_NAME);
       throw new UserError(
-        `Nie ma modułu \`${name}\`. Dostępne moduły: ${valid.map((n) => `\`${n}\``).join(", ") || "brak"}.`,
+        `Nie ma modułu \`${shown}\`. Dostępne moduły: ${valid.map((n) => `\`${n}\``).join(", ") || "brak"}.`,
       );
     }
     if (PROTECTED_MODULES.has(module)) {
       throw new UserError(`Modułu \`${module}\` nie można wyłączyć.`);
     }
     return module;
+  };
+
+  /** The channel option is only an id, so check that it is a channel of this guild before storing it. */
+  const requireGuildChannel = async (guildId: string, channelId: string | null) => {
+    if (channelId !== null && !(await channels.belongsTo(guildId, channelId))) {
+      throw new UserError("Nie znalazłem takiego kanału na tym serwerze.");
+    }
   };
 
   const where = (channelId: string | null) =>
@@ -133,10 +171,12 @@ export function createSettingsModule({
             if (entries.length === 0) return `\`${name}\`: włączony`;
             if (entries.some((d) => d.channelId === null))
               return `\`${name}\`: wyłączony na serwerze`;
-            const channels = entries.map((d) => `<#${d.channelId}>`).join(", ");
-            return `\`${name}\`: wyłączony na kanałach ${channels}`;
+            const shown = entries.slice(0, MAX_CHANNELS_PER_LINE).map((d) => `<#${d.channelId}>`);
+            const hidden = entries.length - shown.length;
+            const more = hidden > 0 ? ` i jeszcze ${hidden}` : "";
+            return `\`${name}\`: wyłączony na kanałach ${shown.join(", ")}${more}`;
           });
-          await ctx.reply({ content: lines.join("\n"), ephemeral: true });
+          await ctx.reply({ content: fitToMessage(lines), ephemeral: true });
         },
       }),
       disable: defineSubcommand({
@@ -148,7 +188,9 @@ export function createSettingsModule({
         run: async (ctx) => {
           const module = toggleable(ctx.args.module);
           const channelId = ctx.args.channel ?? null;
-          await modules.disable(guildOf(ctx.guildId), module, channelId);
+          const guildId = guildOf(ctx.guildId);
+          await requireGuildChannel(guildId, channelId);
+          await modules.disable(guildId, module, channelId);
           await ctx.reply({
             content: `Moduł \`${module}\` jest wyłączony ${where(channelId)}.`,
             ephemeral: true,
@@ -164,7 +206,9 @@ export function createSettingsModule({
         run: async (ctx) => {
           const module = toggleable(ctx.args.module);
           const channelId = ctx.args.channel ?? null;
-          const changed = await modules.enable(guildOf(ctx.guildId), module, channelId);
+          const guildId = guildOf(ctx.guildId);
+          await requireGuildChannel(guildId, channelId);
+          const changed = await modules.enable(guildId, module, channelId);
           await ctx.reply({
             content: changed
               ? `Moduł \`${module}\` jest znów włączony ${where(channelId)}.`
