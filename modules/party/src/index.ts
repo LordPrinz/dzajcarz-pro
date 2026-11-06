@@ -42,8 +42,11 @@ export interface PartyRepository {
   listChannels(): Promise<PartyChannel[]>;
   /** False when the row was already gone. */
   deleteChannel(channelId: string): Promise<boolean>;
-  /** False when the channel is gone or the member already owns another channel in the guild. */
-  transferOwner(channelId: string, newOwnerId: string): Promise<boolean>;
+  /**
+   * Compare-and-swap: makes `newOwnerId` the owner only while `expectedOwnerId` still is. False when the
+   * owner changed, the channel is gone or the member already owns another channel in the guild.
+   */
+  transferOwner(channelId: string, expectedOwnerId: string, newOwnerId: string): Promise<boolean>;
 }
 
 /** What the bot does on Discord. Every method rejects when Discord refuses. */
@@ -81,34 +84,36 @@ export interface EveryoneAccess {
 export interface GuildMemberInfo {
   /** The bot itself. */
   self: boolean;
+  /** Has Administrator, Manage Channels or Move Members in the guild: someone the owner may not lock out. */
+  moderator: boolean;
 }
 
-/** Permission overwrites and settings of a party channel. Every method rejects when Discord refuses. */
+/**
+ * Permission overwrites and settings of a party channel. Every method rejects when Discord refuses.
+ * `reason` is what the server's audit log shows.
+ */
 export interface PartyPermissions {
   /** Changes the @everyone overwrite of the channel. */
-  setEveryone(channelId: string, access: EveryoneAccess): Promise<void>;
+  setEveryone(channelId: string, access: EveryoneAccess, reason: string): Promise<void>;
+  /** What the channel's category says about @everyone (deny → false, allow → true, none → null). */
+  inheritedEveryone(channelId: string): Promise<{ connect: boolean | null; view: boolean | null }>;
+  /** Lets the bot itself see, join and manage the channel, so locking or hiding never shuts it out. */
+  allowSelf(channelId: string, reason: string): Promise<void>;
   /** Lets the member see and join the channel whatever @everyone may do. */
-  allowMember(channelId: string, userId: string): Promise<void>;
+  allowMember(channelId: string, userId: string, reason: string): Promise<void>;
   /** Stops the member from seeing and joining the channel. */
-  denyMember(channelId: string, userId: string): Promise<void>;
+  denyMember(channelId: string, userId: string, reason: string): Promise<void>;
   /** Removes the member's own overwrite. */
-  clearMember(channelId: string, userId: string): Promise<void>;
+  clearMember(channelId: string, userId: string, reason: string): Promise<void>;
   /** 0 means no limit. */
-  setLimit(channelId: string, limit: number): Promise<void>;
-  /** Rejects with `RenameRateLimited` when Discord's rename limit is used up. */
-  rename(channelId: string, name: string): Promise<void>;
-  /** Kicks the member out of voice; a member who is not connected is fine. */
-  disconnect(guildId: string, userId: string): Promise<void>;
+  setLimit(channelId: string, limit: number, reason: string): Promise<void>;
+  rename(channelId: string, name: string, reason: string): Promise<void>;
+  /** Kicks the member out of voice, but only while they are in `channelId`. */
+  disconnect(guildId: string, userId: string, channelId: string, reason: string): Promise<void>;
   /** Null when the user is not a member of the guild. */
   lookupMember(guildId: string, userId: string): Promise<GuildMemberInfo | null>;
-}
-
-/** Thrown by `PartyPermissions.rename` when Discord allows no more renames for now. */
-export class RenameRateLimited extends Error {
-  constructor() {
-    super("Channel rename rate limit reached");
-    this.name = "RenameRateLimited";
-  }
+  /** Whether the member has Manage Channels on that very channel (overwrites included). */
+  canManage(guildId: string, userId: string, channelId: string): Promise<boolean>;
 }
 
 export interface PartyModuleDeps {
@@ -122,6 +127,12 @@ export interface PartyModuleDeps {
 
 /** PermissionFlagsBits.ManageChannels; modules do not import discord.js at runtime. */
 const MANAGE_CHANNELS = 1n << 4n;
+/** Discord allows two renames per channel per ten minutes; counting here avoids a rate-limit stall. */
+const MAX_RENAMES = 2;
+const RENAME_WINDOW_MS = 600_000;
+/** Owner controls per member: every one is a Discord call, so a flood is cut off here. */
+const MAX_CONTROLS = 10;
+const CONTROL_WINDOW_MS = 60_000;
 /** Discord's limit for channel and category names. */
 const MAX_NAME_LENGTH = 100;
 /** Discord's user limit for a voice channel is 99; 0 removes it. */
@@ -170,6 +181,7 @@ export function createPartyModule({
   const party = defineCommand({
     name: "party",
     description: "Strefa imprezowa: kanały głosowe tworzone na życzenie",
+    guildOnly: true,
     // No command-level permission: Discord would hide the owner controls from regular members.
     subcommands: {
       create: defineSubcommand({
@@ -197,7 +209,7 @@ export function createPartyModule({
           } catch (error) {
             logger.warn("Party area not created on Discord", { guildId, error });
             throw new UserError(
-              "Nie mogę utworzyć kanałów. Sprawdź, czy bot ma uprawnienia „Zarządzanie kanałami” i „Przenoszenie członków”.",
+              "Nie mogę utworzyć kanałów. Sprawdź, czy bot ma uprawnienia „Zarządzanie kanałami”, „Przenoszenie członków” i „Zarządzanie rolami” (nadpisania uprawnień).",
             );
           }
           try {
@@ -233,17 +245,19 @@ export function createPartyModule({
       lock: defineSubcommand({
         description: "Zamyka twój kanał dla nowych osób",
         run: async (ctx) => {
-          const channel = await controlledChannel(ctx);
-          await permissions.setEveryone(channel.channelId, { connect: false });
-          await ownerReply(ctx, "Kanał zamknięty. Wejdą tylko zaproszeni.");
+          const { channel, reason } = await controlledChannel(ctx, "lock");
+          await permissions.setEveryone(channel.channelId, { connect: false }, reason);
+          await ownerReply(ctx, channel, "lock", "Kanał zamknięty. Wejdą tylko zaproszeni.");
         },
       }),
       unlock: defineSubcommand({
         description: "Otwiera twój kanał z powrotem",
         run: async (ctx) => {
-          const channel = await controlledChannel(ctx);
-          await permissions.setEveryone(channel.channelId, { connect: null });
-          await ownerReply(ctx, "Kanał otwarty.");
+          const { channel, reason } = await controlledChannel(ctx, "unlock");
+          // Back to what the category says, so a private area stays private.
+          const { connect } = await permissions.inheritedEveryone(channel.channelId);
+          await permissions.setEveryone(channel.channelId, { connect }, reason);
+          await ownerReply(ctx, channel, "unlock", "Kanał otwarty.");
         },
       }),
       limit: defineSubcommand({
@@ -258,10 +272,12 @@ export function createPartyModule({
           },
         },
         run: async (ctx) => {
-          const channel = await controlledChannel(ctx);
-          await permissions.setLimit(channel.channelId, ctx.args.count);
+          const { channel, reason } = await controlledChannel(ctx, "limit");
+          await permissions.setLimit(channel.channelId, ctx.args.count, reason);
           await ownerReply(
             ctx,
+            channel,
+            "limit",
             ctx.args.count === 0
               ? "Limit osób usunięty."
               : `Limit osób ustawiony na ${ctx.args.count}.`,
@@ -279,16 +295,12 @@ export function createPartyModule({
           if ([...name].length > MAX_NAME_LENGTH) {
             throw new UserError(`Nazwa może mieć najwyżej ${MAX_NAME_LENGTH} znaków.`);
           }
-          const channel = await controlledChannel(ctx);
-          try {
-            await permissions.rename(channel.channelId, name);
-          } catch (error) {
-            if (error instanceof RenameRateLimited) {
-              throw new UserError("Discord pozwala zmienić nazwę 2 razy na 10 minut.");
-            }
-            throw error;
+          const { channel, reason } = await controlledChannel(ctx, "rename");
+          if (await overRenameLimit(channel.channelId)) {
+            throw new UserError("Discord pozwala zmienić nazwę 2 razy na 10 minut.");
           }
-          await ownerReply(ctx, `Nazwa kanału zmieniona na „${name}”.`);
+          await permissions.rename(channel.channelId, name, reason);
+          await ownerReply(ctx, channel, "rename", `Nazwa kanału zmieniona na „${name}”.`);
         },
       }),
       invite: defineSubcommand({
@@ -297,10 +309,10 @@ export function createPartyModule({
           user: { type: "user", description: "Kogo zaprosić", required: true },
         },
         run: async (ctx) => {
-          const channel = await controlledChannel(ctx);
+          const { channel, reason } = await controlledChannel(ctx, "invite");
           await pickMember(ctx, ctx.args.user);
-          await permissions.allowMember(channel.channelId, ctx.args.user);
-          await ownerReply(ctx, `<@${ctx.args.user}> może wejść na kanał.`);
+          await permissions.allowMember(channel.channelId, ctx.args.user, reason);
+          await ownerReply(ctx, channel, "invite", `<@${ctx.args.user}> może wejść na kanał.`);
         },
       }),
       block: defineSubcommand({
@@ -309,63 +321,113 @@ export function createPartyModule({
           user: { type: "user", description: "Kogo zablokować", required: true },
         },
         run: async (ctx) => {
-          const channel = await controlledChannel(ctx);
+          const { channel, reason } = await controlledChannel(ctx, "block");
           const userId = ctx.args.user;
           if (userId === channel.ownerId) {
             throw new UserError("Nie można zablokować właściciela kanału.");
           }
-          await pickMember(ctx, userId);
-          await permissions.denyMember(channel.channelId, userId);
+          const member = await pickMember(ctx, userId);
+          if (member.moderator) throw new UserError("Nie możesz zablokować moderatora.");
+          await permissions.denyMember(channel.channelId, userId, reason);
           if ((await channels.members(channel.channelId))?.includes(userId)) {
-            await permissions.disconnect(guildOf(ctx.guildId), userId);
+            await permissions.disconnect(guildOf(ctx.guildId), userId, channel.channelId, reason);
           }
-          await ownerReply(ctx, `<@${userId}> jest zablokowany na kanale.`);
+          await ownerReply(ctx, channel, "block", `<@${userId}> jest zablokowany na kanale.`);
         },
       }),
       hide: defineSubcommand({
         description: "Ukrywa twój kanał na liście",
         run: async (ctx) => {
-          const channel = await controlledChannel(ctx);
-          await permissions.setEveryone(channel.channelId, { view: false });
-          await ownerReply(ctx, "Kanał ukryty.");
+          const { channel, reason } = await controlledChannel(ctx, "hide");
+          await permissions.setEveryone(channel.channelId, { view: false }, reason);
+          await ownerReply(ctx, channel, "hide", "Kanał ukryty.");
         },
       }),
       show: defineSubcommand({
         description: "Pokazuje twój kanał na liście",
         run: async (ctx) => {
-          const channel = await controlledChannel(ctx);
-          await permissions.setEveryone(channel.channelId, { view: null });
-          await ownerReply(ctx, "Kanał znów widoczny.");
+          const { channel, reason } = await controlledChannel(ctx, "show");
+          const { view } = await permissions.inheritedEveryone(channel.channelId);
+          await permissions.setEveryone(channel.channelId, { view }, reason);
+          await ownerReply(ctx, channel, "show", "Kanał znów widoczny.");
         },
       }),
     },
   });
 
-  /** The party channel the caller is in, provided they own it or have Manage Channels. */
-  async function controlledChannel(ctx: CommandContext): Promise<PartyChannel> {
+  /**
+   * The party channel the caller is in, provided they own it or have Manage Channels on it, plus the
+   * audit-log reason for the edit. Counts against the member's control cooldown.
+   */
+  async function controlledChannel(
+    ctx: CommandContext,
+    action: string,
+  ): Promise<{ channel: PartyChannel; reason: string }> {
     const guildId = guildOf(ctx.guildId);
+    await enforceControlCooldown(guildId, ctx.user.id);
     const here = await channels.voiceChannelOf(guildId, ctx.user.id);
     const channel = here ? await repository.findChannel(here) : null;
     if (!channel || channel.guildId !== guildId) {
       throw new UserError("Musisz być na swoim kanale party.");
     }
-    const mayManage = ((ctx.memberPermissions ?? 0n) & MANAGE_CHANNELS) !== 0n;
-    if (channel.ownerId !== ctx.user.id && !mayManage) {
+    if (
+      channel.ownerId !== ctx.user.id &&
+      !(await permissions.canManage(guildId, ctx.user.id, channel.channelId))
+    ) {
       throw new UserError("Tylko właściciel kanału może to zrobić.");
     }
-    return channel;
+    return { channel, reason: `Party: ${action} by ${ctx.user.id}` };
+  }
+
+  /** Counts a control command; fails open when Redis is down. */
+  async function enforceControlCooldown(guildId: string, userId: string): Promise<void> {
+    let count: number;
+    try {
+      ({ count } = await lock.increment(`party-ctl:${guildId}:${userId}`, CONTROL_WINDOW_MS));
+    } catch (error) {
+      logger.warn("Party control cooldown unavailable", { guildId, userId, error });
+      return;
+    }
+    if (count > MAX_CONTROLS) {
+      throw new UserError("Za dużo zmian naraz. Spróbuj ponownie za chwilę.");
+    }
+  }
+
+  /** Counts a rename of the channel; fails open when Redis is down. */
+  async function overRenameLimit(channelId: string): Promise<boolean> {
+    try {
+      const { count } = await lock.increment(`party-rename:${channelId}`, RENAME_WINDOW_MS);
+      return count > MAX_RENAMES;
+    } catch (error) {
+      logger.warn("Party rename counter unavailable", { channelId, error });
+      return false;
+    }
   }
 
   /** Refuses the caller, the bot and people who are not on the server. */
-  async function pickMember(ctx: CommandContext, userId: string): Promise<void> {
+  async function pickMember(ctx: CommandContext, userId: string): Promise<GuildMemberInfo> {
     if (userId === ctx.user.id) throw new UserError("Nie możesz zrobić tego sam sobie.");
     const member = await permissions.lookupMember(guildOf(ctx.guildId), userId);
     if (!member) throw new UserError("Nie ma takiej osoby na tym serwerze.");
     if (member.self) throw new UserError("Tego nie zrobię botowi.");
+    return member;
   }
 
-  const ownerReply = (ctx: CommandContext, content: string) =>
-    ctx.reply({ content, ephemeral: true });
+  /** Logs the finished control action, then tells the caller. */
+  async function ownerReply(
+    ctx: CommandContext,
+    channel: PartyChannel,
+    action: string,
+    content: string,
+  ): Promise<void> {
+    logger.info("Party control used", {
+      guildId: channel.guildId,
+      channelId: channel.channelId,
+      actor: ctx.user.id,
+      action,
+    });
+    await ctx.reply({ content, ephemeral: true });
+  }
 
   async function pickArea(guildId: string, joinChannelId: string | undefined): Promise<PartyArea> {
     if (joinChannelId !== undefined) {
@@ -413,9 +475,27 @@ export function createPartyModule({
       name,
       userId,
     );
+    // Best effort: without Manage Roles the channel works, it only cannot be locked safely.
+    const reason = `Party: create for ${userId}`;
+    try {
+      await permissions.allowSelf(channelId, reason);
+    } catch (error) {
+      logger.warn("Could not give the bot its own overwrite on the party channel", {
+        channelId,
+        error,
+      });
+    }
     try {
       // A locked or hidden channel must stay usable for its owner.
-      await permissions.allowMember(channelId, userId);
+      await permissions.allowMember(channelId, userId, reason);
+    } catch (error) {
+      logger.warn("Could not give the owner an overwrite on the party channel", {
+        channelId,
+        userId,
+        error,
+      });
+    }
+    try {
       await repository.addChannel({
         channelId,
         guildId: area.guildId,
@@ -513,7 +593,7 @@ export function createPartyModule({
     if (members.includes(owned.ownerId)) return;
     // The owner left but others stay: the first one who is free to own a channel takes over.
     for (const candidate of members) {
-      if (await repository.transferOwner(leftChannelId, candidate)) {
+      if (await repository.transferOwner(leftChannelId, owned.ownerId, candidate)) {
         logger.info("Party channel ownership transferred", {
           channelId: leftChannelId,
           from: owned.ownerId,
@@ -528,8 +608,9 @@ export function createPartyModule({
   /** Best effort: the new owner keeps access to a locked channel, the old one loses the special pass. */
   async function moveOwnerAccess(channelId: string, from: string, to: string): Promise<void> {
     try {
-      await permissions.allowMember(channelId, to);
-      await permissions.clearMember(channelId, from);
+      const reason = `Party: ownership transfer to ${to}`;
+      await permissions.allowMember(channelId, to, reason);
+      await permissions.clearMember(channelId, from, reason);
     } catch (error) {
       logger.warn("Could not move owner overwrites", { channelId, from, to, error });
     }

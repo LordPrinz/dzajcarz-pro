@@ -89,11 +89,18 @@ describe.skipIf(!sql)("party repository", () => {
     await repo().addArea(area);
     await repo().addChannel(channel);
     await repo().addChannel({ ...channel, channelId: "502", ownerId: "602" });
-    expect(await repo().transferOwner("501", "602")).toBe(false);
+    expect(await repo().transferOwner("501", "601", "602")).toBe(false);
     expect((await repo().findChannel("501"))?.ownerId).toBe("601");
-    expect(await repo().transferOwner("501", "603")).toBe(true);
+    expect(await repo().transferOwner("501", "601", "603")).toBe(true);
     expect((await repo().findChannel("501"))?.ownerId).toBe("603");
-    expect(await repo().transferOwner("999", "604")).toBe(false);
+    expect(await repo().transferOwner("999", "601", "604")).toBe(false);
+  });
+
+  test("transferOwner does nothing when the expected owner is no longer the owner", async () => {
+    await repo().addArea(area);
+    await repo().addChannel(channel);
+    expect(await repo().transferOwner("501", "699", "603")).toBe(false);
+    expect((await repo().findChannel("501"))?.ownerId).toBe("601");
   });
 
   test("deleteChannel reports whether there was a row", async () => {

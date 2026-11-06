@@ -51,6 +51,8 @@ const registry = createRegistry(
     },
     partyPermissions: {
       setEveryone: unused,
+      inheritedEveryone: unused,
+      allowSelf: unused,
       allowMember: unused,
       denyMember: unused,
       clearMember: unused,
@@ -58,6 +60,7 @@ const registry = createRegistry(
       rename: unused,
       disconnect: unused,
       lookupMember: unused,
+      canManage: unused,
     },
     partyLock: { setIfAbsent: unused, delIfEquals: unused, increment: unused },
     logger: silentLogger,

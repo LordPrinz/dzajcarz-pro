@@ -60,6 +60,11 @@ bun run commands:deploy           # register slash commands (dev guild: instant)
 bun run dev                       # the bot, restarted on file changes
 ```
 
+The party module needs these permissions for the bot in the server: **Manage Channels** (create, rename and
+delete channels), **Move Members** (put a member into their channel, disconnect a blocked one) and
+**Manage Roles** (the bot edits permission overwrites on party channels; without it a party channel is still
+created, but its owner cannot lock or hide it safely).
+
 The music module needs Lavalink as well:
 `docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d` (port 2333).
 
