@@ -7,7 +7,12 @@ import {
   type OptionDef,
   type OptionsDef,
 } from "./command.ts";
-import { type AnyComponent, MAX_COMPONENT_PREFIX, parseCustomId } from "./component.ts";
+import {
+  type AnyComponent,
+  MAX_COMPONENT_PREFIX,
+  MAX_SELECT_OPTIONS,
+  parseCustomId,
+} from "./component.ts";
 import type { AnyEventHandler, BotModule } from "./module.ts";
 import { usageLine } from "./prefix.ts";
 
@@ -82,6 +87,13 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
   const summaries: CommandSummary[] = [];
   const moduleNames = new Set<string>();
   const componentsById = new Map<string, AnyComponent>();
+
+  // The help menu lists the modules in one select menu.
+  if (modules.length > MAX_SELECT_OPTIONS) {
+    throw new Error(
+      `At most ${MAX_SELECT_OPTIONS} modules are supported (the help menu lists them in one select menu), got ${modules.length}`,
+    );
+  }
 
   for (const module of modules) {
     if (moduleNames.has(module.name))

@@ -10,7 +10,8 @@ import {
   silentLogger,
 } from "@dzajcarz/core";
 import { type ClickOptions, clickComponent, createFakeContext } from "@dzajcarz/core/testing";
-import { createGeneralModule, type GeneralModuleDeps } from "./index.ts";
+import { commandCount } from "./help.ts";
+import { createGeneralModule, describeCommand, type GeneralModuleDeps } from "./index.ts";
 
 const BAN = 1n << 2n;
 const ADMIN = 1n << 3n;
@@ -137,12 +138,33 @@ describe("general module", () => {
   test("help lists the subcommands of a command with slash and prefix usage", async () => {
     const [reply] = await setup({ prefixFor: async () => "?" }).run("help", { command: "queue" });
     expect(embed(reply)?.fields).toEqual([
-      {
-        name: "Podkomendy",
-        value:
-          "`/queue add <song>` · `?queue add <song>` Dodaje utwór\n`/queue clear` · `?queue clear` Czyści kolejkę",
-      },
+      { name: "queue add", value: "`/queue add <song>` · `?queue add <song>`\nDodaje utwór" },
+      { name: "queue clear", value: "`/queue clear` · `?queue clear`\nCzyści kolejkę" },
     ]);
+  });
+
+  test("a command with many long subcommands stays within the embed field limits", () => {
+    const summary = (count: number): Parameters<typeof describeCommand>[0] => ({
+      name: "big",
+      description: "Duża",
+      aliases: ["b"],
+      module: "x",
+      usage: "big",
+      permissions: undefined,
+      contexts: { places: ["guild"], installs: ["guild"] },
+      subcommands: Array.from({ length: count }, (_, i) => ({
+        name: `sub${i}`,
+        description: "d".repeat(100),
+        usage: `big sub${i} <${"a".repeat(60)}>`,
+        permissions: undefined,
+      })),
+    });
+    const full = describeCommand(summary(25), "!");
+    // 25 subcommands plus the alias field would be 26: the embed keeps Discord's cap.
+    expect(full.fields).toHaveLength(25);
+    expect(full.fields?.at(-1)?.name).toBe("Aliasy");
+    for (const field of full.fields ?? []) expect(field.value.length).toBeLessThanOrEqual(1024);
+    expect(describeCommand(summary(3), "!").fields).toHaveLength(4);
   });
 
   test("help says when a command does not exist", async () => {
@@ -153,7 +175,9 @@ describe("general module", () => {
 
   test("the detail view hides subcommands the member may not run", async () => {
     const [reply] = await setup().run("help", { command: "mod" });
-    expect(embed(reply)?.fields?.[0]?.value).toBe("`/mod warn` · `!mod warn` Ostrzega");
+    expect(embed(reply)?.fields).toEqual([
+      { name: "mod warn", value: "`/mod warn` · `!mod warn`\nOstrzega" },
+    ]);
   });
 });
 
@@ -184,6 +208,19 @@ describe("interactive help", () => {
     const ctx = createFakeContext({ invocation: "prefix" });
     await executeCommand(help, ctx, silentLogger);
     expect(categories(ctx.replies[0])).toEqual(["general", "music"]);
+  });
+
+  test("the start page hints at the form the member typed", async () => {
+    const registry = registryWith({ prefixFor: async () => "?" }, MUSIC);
+    const help = registry.find("help");
+    if (!help) throw new Error("no help");
+    const hint = async (invocation: "slash" | "prefix") => {
+      const ctx = createFakeContext({ invocation });
+      await executeCommand(help, ctx, silentLogger);
+      return embed(ctx.replies[0])?.description;
+    };
+    expect(await hint("prefix")).toContain("`?help komenda`");
+    expect(await hint("slash")).toContain("`/help komenda`");
   });
 
   test("choosing a module shows its commands, each subcommand as its own entry", async () => {
@@ -409,17 +446,105 @@ describe("interactive help", () => {
     });
   });
 
-  test("a long module list still fits one select (the fake validates every reply)", async () => {
-    const modules = Array.from({ length: 12 }, (_, i) => ({
+  const modulesOf = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
       name: `module${i}`,
       commands: [defineCommand({ name: `cmd${i}`, description: "Opis", run: async () => {} })],
     }));
-    const registry = registryWith({}, ...modules);
+
+  test("25 categories fill the select and the embed exactly", async () => {
+    const registry = registryWith({}, ...modulesOf(24));
     const help = registry.find("help");
     if (!help) throw new Error("no help");
     const ctx = createFakeContext();
     await executeCommand(help, ctx, silentLogger);
-    expect(selectOf(ctx.replies[0]).options).toHaveLength(13);
+    expect(selectOf(ctx.replies[0]).options).toHaveLength(25);
+    expect(embed(ctx.replies[0])?.fields).toHaveLength(25);
+  });
+
+  test("30 modules are rejected when the registry is built", () => {
+    expect(() => registryWith({}, ...modulesOf(29))).toThrow("At most 25 modules");
+  });
+});
+
+describe("commandCount", () => {
+  test.each([
+    [0, "0 komend"],
+    [1, "1 komenda"],
+    [2, "2 komendy"],
+    [5, "5 komend"],
+    [12, "12 komend"],
+    [21, "21 komend"],
+    [22, "22 komendy"],
+    [112, "112 komend"],
+  ])("%d", (count, text) => {
+    expect(commandCount(count)).toBe(text);
+  });
+});
+
+describe("places", () => {
+  const botDmOnly = defineCommand({
+    name: "dmonly",
+    description: "Tylko DM",
+    contexts: { places: ["bot-dm"], installs: ["user"] },
+    run: async () => {},
+  });
+  const groupOnly = defineCommand({
+    name: "grouponly",
+    description: "Tylko grupa",
+    contexts: { places: ["private-channel"], installs: ["user"] },
+    run: async () => {},
+  });
+  const extra: BotModule = { name: "extra", commands: [botDmOnly, groupOnly] };
+
+  test("the DM with the bot and a group DM list different commands", async () => {
+    const registry = registryWith({}, extra);
+    const help = registry.find("help");
+    if (!help) throw new Error("no help");
+    const visible = async (place: "bot-dm" | "private-channel") => {
+      const ctx = createFakeContext({ guildId: null, place });
+      await executeCommand(help, ctx, silentLogger);
+      const click = await clickComponent({
+        registry,
+        customId: selectOf(ctx.replies[0]).customId,
+        values: ["extra"],
+        guildId: null,
+        place,
+      });
+      return embed(click.updates[0])?.description;
+    };
+    expect(await visible("bot-dm")).toContain("/dmonly");
+    expect(await visible("bot-dm")).not.toContain("/grouponly");
+    expect(await visible("private-channel")).toContain("/grouponly");
+    expect(await visible("private-channel")).not.toContain("/dmonly");
+  });
+
+  test("a group DM shows slash syntax only and never reads the guild prefix", async () => {
+    let prefixReads = 0;
+    const registry = registryWith(
+      {
+        prefixFor: async () => {
+          prefixReads++;
+          return "!";
+        },
+      },
+      extra,
+    );
+    const help = registry.find("help");
+    if (!help) throw new Error("no help");
+    const ctx = createFakeContext({ guildId: null, place: "private-channel" });
+    await executeCommand(help, ctx, silentLogger);
+    expect(embed(ctx.replies[0])?.description).toContain("`/nazwa`");
+    const click = await clickComponent({
+      registry,
+      customId: selectOf(ctx.replies[0]).customId,
+      values: ["general"],
+      guildId: null,
+      place: "private-channel",
+    });
+    expect(embed(click.updates[0])?.description).toContain("`/ping`\n");
+    expect(embed(click.updates[0])?.description).not.toContain("!ping");
+    expect(prefixReads).toBe(0);
   });
 });
 

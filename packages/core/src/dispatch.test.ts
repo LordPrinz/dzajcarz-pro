@@ -93,20 +93,54 @@ describe("executeCommand", () => {
     expect(
       checkPrefixAccess(make(["bot-dm"]), "", {
         guildId: "100000000000000001",
+        place: "guild",
         memberPermissions: 0n,
       }),
     ).toBe("Ta komenda działa tylko w prywatnej wiadomości do bota.");
-    expect(checkPrefixAccess(make(["guild"]), "", { guildId: null, memberPermissions: null })).toBe(
-      "Ta komenda działa tylko na serwerze.",
-    );
     expect(
-      checkPrefixAccess(make(["bot-dm"]), "", { guildId: null, memberPermissions: null }),
+      checkPrefixAccess(make(["guild"]), "", {
+        guildId: null,
+        place: "bot-dm",
+        memberPermissions: null,
+      }),
+    ).toBe("Ta komenda działa tylko na serwerze.");
+    expect(
+      checkPrefixAccess(make(["bot-dm"]), "", {
+        guildId: null,
+        place: "bot-dm",
+        memberPermissions: null,
+      }),
     ).toBeNull();
     const ctx = createFakeContext({ guildId: "100000000000000001" });
     await executeCommand(make(["bot-dm"]), ctx, silentLogger);
     expect(replyText(ctx.replies[0])).toBe(
       "Ta komenda działa tylko w prywatnej wiadomości do bota.",
     );
+  });
+
+  test("matches the place exactly: a group DM is not the DM with the bot", async () => {
+    const make = (places: ("guild" | "bot-dm" | "private-channel")[]) =>
+      defineCommand({
+        name: "x",
+        description: "X",
+        contexts: { places, installs: ["guild", "user"] },
+        run: async () => {},
+      });
+    const inGroupDm = { guildId: null, place: "private-channel", memberPermissions: null } as const;
+    expect(checkPrefixAccess(make(["guild", "bot-dm"]), "", inGroupDm)).toBe(
+      "Ta komenda działa tylko na serwerze.",
+    );
+    expect(checkPrefixAccess(make(["private-channel"]), "", inGroupDm)).toBeNull();
+    expect(checkPrefixAccess(make(["bot-dm"]), "", inGroupDm)).toBe(
+      "Ta komenda nie działa w tym miejscu.",
+    );
+    const inBotDm = { guildId: null, place: "bot-dm", memberPermissions: null } as const;
+    expect(checkPrefixAccess(make(["guild", "private-channel"]), "", inBotDm)).toBe(
+      "Ta komenda działa tylko na serwerze.",
+    );
+    const ctx = createFakeContext({ guildId: null, place: "private-channel" });
+    await executeCommand(make(["guild", "bot-dm"]), ctx, silentLogger);
+    expect(replyText(ctx.replies[0])).toBe("Ta komenda działa tylko na serwerze.");
   });
 
   test("checks member permissions, which matters for prefix commands", async () => {
@@ -256,18 +290,28 @@ describe("checkPrefixAccess", () => {
   const guildId = "100000000000000001";
 
   test("enforces the permissions of the subcommand named by the first word", () => {
-    expect(checkPrefixAccess(command, "create", { guildId, memberPermissions: 0n })).toBe(
-      "Nie masz uprawnień do tej komendy.",
-    );
     expect(
-      checkPrefixAccess(command, "CREATE x", { guildId, memberPermissions: MANAGE }),
+      checkPrefixAccess(command, "create", { guildId, place: "guild", memberPermissions: 0n }),
+    ).toBe("Nie masz uprawnień do tej komendy.");
+    expect(
+      checkPrefixAccess(command, "CREATE x", {
+        guildId,
+        place: "guild",
+        memberPermissions: MANAGE,
+      }),
     ).toBeNull();
   });
 
   test("leaves subcommands without permissions and unknown words to the parser", () => {
-    expect(checkPrefixAccess(command, "info", { guildId, memberPermissions: 0n })).toBeNull();
-    expect(checkPrefixAccess(command, "nope", { guildId, memberPermissions: 0n })).toBeNull();
-    expect(checkPrefixAccess(command, "", { guildId, memberPermissions: 0n })).toBeNull();
+    expect(
+      checkPrefixAccess(command, "info", { guildId, place: "guild", memberPermissions: 0n }),
+    ).toBeNull();
+    expect(
+      checkPrefixAccess(command, "nope", { guildId, place: "guild", memberPermissions: 0n }),
+    ).toBeNull();
+    expect(
+      checkPrefixAccess(command, "", { guildId, place: "guild", memberPermissions: 0n }),
+    ).toBeNull();
   });
 });
 

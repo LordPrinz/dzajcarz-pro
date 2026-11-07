@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApplicationIntegrationType, InteractionContextType } from "discord.js";
-import { buildDeployBody, deployRoute, deployTarget } from "./deploy.ts";
+import { buildDeployBody, deployRoute, deployTarget, unusedServices } from "./deploy.ts";
 import { loadDeployEnv } from "./env.ts";
 
 const GUILD = "100000000000000001";
@@ -89,5 +89,31 @@ describe("buildDeployBody", () => {
         ],
       });
     }
+  });
+});
+
+describe("unusedServices", () => {
+  interface Service {
+    send(text: string): Promise<void>;
+    nested: { read(): string };
+  }
+
+  test("throws when a function is called, at any depth", () => {
+    const service = unusedServices<Service>();
+    expect(() => service.send("x")).toThrow("not available while deploying");
+    expect(() => service.nested.read()).toThrow("not available while deploying");
+  });
+
+  test("throws when the value is used as a string or number", () => {
+    const service = unusedServices<Service>();
+    expect(() => `${service.nested}`).toThrow("not available while deploying");
+    expect(() => Number(service)).toThrow("not available while deploying");
+  });
+
+  test("passing the service around and awaiting it is harmless", async () => {
+    const service = unusedServices<Service>();
+    const held = { service, send: service.send };
+    expect(held.send).toBeDefined();
+    expect(await Promise.resolve(service)).toBe(service);
   });
 });

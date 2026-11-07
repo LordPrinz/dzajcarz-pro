@@ -272,6 +272,12 @@ describe("contexts", () => {
     expect(withSub(["guild"])).not.toThrow();
   });
 
+  test("rejects more modules than one select menu can list", () => {
+    const modules = (count: number) => Array.from({ length: count }, (_, i) => ({ name: `m${i}` }));
+    expect(() => createRegistry(modules(25))).not.toThrow();
+    expect(() => createRegistry(modules(26))).toThrow("At most 25 modules");
+  });
+
   test("rejects duplicate places and installs", () => {
     expect(build({ contexts: { places: ["guild", "guild"], installs: ["guild"] } })).toThrow(
       "duplicate place",

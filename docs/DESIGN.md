@@ -73,7 +73,8 @@ A command's `contexts` say where it runs (`guild`, `bot-dm`, `private-channel`) 
 servers. The deploy sends `integration_types` and `contexts` for global commands and leaves them out for
 the dev guild. Prefix commands in a DM use the default prefix; a guild-only command answers "Ta komenda
 działa tylko na serwerze.". With only the user install the bot cannot post in the channel, so replies go
-through the interaction. See ADR 7.
+through the interaction. Contexts carry the exact `place`, so a group DM is never mistaken for the DM
+with the bot. See ADR 7.
 
 ### Help
 
@@ -84,9 +85,12 @@ the slash and the prefix syntax; the select stays so the user can switch, and "S
 The state is the category name in the `custom_id` (plus the page), so nothing is stored. Every render
 recomputes what the caller may see: commands and subcommands behind permissions the member lacks are
 hidden (administrators see all), so are modules switched off in the channel (the module gate behind the
-`moduleEnabled` port; a thread follows its parent) and commands whose `contexts` do not allow the place. In
-a DM only DM-capable commands are listed. In a server where the bot is not a member (user install) the
-menu shows slash syntax only and reads neither the prefix nor the toggles. `/help <command>` shows one
+`moduleEnabled` port; a thread follows its parent) and commands whose `contexts` do not allow the place. Places
+match exactly: a DM with the bot lists the commands that allow `bot-dm`, a group DM those that allow
+`private-channel`. In a server where the bot is not a member (user install) and in a group DM the menu
+shows slash syntax only and reads neither the prefix nor the toggles; the gateway also skips the module gate
+for such servers. The start page hint names the form the member typed (`!help komenda` or `/help komenda`).
+The registry allows at most 25 modules, the size of one select menu. `/help <command>` shows one
 command with the same filters; an unknown or hidden name gets the same "not found" answer.
 
 ### Errors

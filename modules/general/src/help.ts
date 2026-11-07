@@ -7,6 +7,7 @@ import {
   defineButton,
   defineSelect,
   type Embed,
+  type Invocation,
   type Reply,
   type SelectOption,
   type Viewer,
@@ -35,8 +36,7 @@ export interface HelpDeps {
 }
 
 export const HELP_PAGE_SIZE = 6;
-const MAX_SELECT_OPTIONS = 25;
-const BRAND_COLOR = 0xf5a623;
+export const BRAND_COLOR = 0xf5a623;
 
 export const COMMAND_NOT_FOUND = (name: string) => `Nie znam komendy \`${name}\`.`;
 
@@ -55,7 +55,7 @@ interface Section {
 
 interface Visibility {
   sections: Section[];
-  /** null when the caller reached the bot through a user install (or there is no guild prefix to show). */
+  /** null when the bot has no prefix where the caller is: a user install, or a group DM. */
   prefix: string | null;
 }
 
@@ -70,9 +70,8 @@ export function commandCount(count: number): string {
 
 function allowedHere(command: CommandSummary, viewer: Viewer, userInstall: boolean): boolean {
   const { places, installs } = command.contexts;
-  if (viewer.guildId === null)
-    return places.includes("bot-dm") || places.includes("private-channel");
-  return places.includes("guild") && (!userInstall || installs.includes("user"));
+  if (!places.includes(viewer.place)) return false;
+  return viewer.place !== "guild" || !userInstall || installs.includes("user");
 }
 
 function visibleCommands(
@@ -114,6 +113,8 @@ export function createHelp(deps: HelpDeps) {
     const { guildId } = viewer;
     // In a server without the bot there is no prefix and no toggle row: Discord only brings slash commands.
     const userInstall = guildId !== null && !deps.botInGuild(guildId);
+    // The bot is not a member of a group DM either, so nobody can type a prefix there.
+    const noPrefix = userInstall || viewer.place === "private-channel";
     const byModule = Map.groupBy(deps.commands(), (command) => command.module);
     const sections = await Promise.all(
       [...byModule].map(async ([module, commands]): Promise<Section | null> => {
@@ -128,12 +129,13 @@ export function createHelp(deps: HelpDeps) {
     );
     return {
       sections: sections.filter((section) => section !== null),
-      prefix: userInstall ? null : await deps.prefixFor(guildId),
+      prefix: noPrefix ? null : await deps.prefixFor(guildId),
     };
   }
 
   function selectRow(sections: readonly Section[], owner: string, selected?: string): ComponentRow {
-    const options: SelectOption[] = sections.slice(0, MAX_SELECT_OPTIONS).map((section) => ({
+    // The registry caps the module count at one select menu (25).
+    const options: SelectOption[] = sections.map((section) => ({
       label: section.module,
       value: section.module,
       description: commandCount(section.entries.length),
@@ -149,16 +151,21 @@ export function createHelp(deps: HelpDeps) {
     ];
   }
 
-  async function startPage(viewer: Viewer): Promise<Exclude<Reply, string>> {
+  async function startPage(
+    viewer: Viewer,
+    invocation: Invocation = "slash",
+  ): Promise<Exclude<Reply, string>> {
     const { sections, prefix } = await visibility(viewer);
     const total = sections.reduce((sum, section) => sum + section.entries.length, 0);
     const how =
       prefix === null
         ? "Komendy działają jako `/nazwa`."
         : `Każda komenda działa jako \`/nazwa\` albo \`${prefix}nazwa\`.`;
+    // The hint names the form the viewer just typed.
+    const helpForm = invocation === "prefix" && prefix !== null ? prefix : "/";
     const embed: Embed = {
       title: "Komendy Dżajcarza",
-      description: `${how} Szczegóły jednej komendy: \`/help komenda\`.`,
+      description: `${how} Szczegóły jednej komendy: \`${helpForm}help komenda\`.`,
       color: BRAND_COLOR,
       fields: sections.map((section) => ({
         name: section.module,

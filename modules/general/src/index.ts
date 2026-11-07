@@ -5,14 +5,15 @@ import {
   defineCommand,
   type Embed,
 } from "@dzajcarz/core";
-import { COMMAND_NOT_FOUND, createHelp, type HelpDeps, syntax } from "./help.ts";
+import { BRAND_COLOR, COMMAND_NOT_FOUND, createHelp, type HelpDeps, syntax } from "./help.ts";
 
 export interface GeneralModuleDeps extends HelpDeps {
   /** Gateway heartbeat in ms; -1 before the first heartbeat. */
   gatewayPing: () => number;
 }
 
-const BRAND_COLOR = 0xf5a623;
+/** Discord: an embed holds at most 25 fields. */
+const MAX_EMBED_FIELDS = 25;
 
 /** Everywhere: servers, a DM with the bot and other private channels, for both install types. */
 const EVERYWHERE: CommandContexts = {
@@ -45,7 +46,7 @@ export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
       // Backticks would close the code span around the echoed name and let it inject markdown.
       const wanted = ctx.args.command?.toLowerCase().replaceAll("`", "");
       if (!wanted) {
-        await ctx.reply({ ...(await helpMenu.startPage(ctx)), ephemeral: true });
+        await ctx.reply({ ...(await helpMenu.startPage(ctx, ctx.invocation)), ephemeral: true });
         return;
       }
       const { command, prefix } = await helpMenu.find(ctx, wanted);
@@ -62,20 +63,19 @@ export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
 
 export function describeCommand(command: CommandSummary, prefix: string | null): Embed {
   const aliases = prefix === null ? "" : command.aliases.map((a) => `\`${prefix}${a}\``).join(", ");
+  const aliasFields = aliases ? [{ name: "Aliasy", value: aliases }] : [];
+  // One field per subcommand: a single field holds 1024 characters, which a long command overflows.
+  const body =
+    command.subcommands.length > 0
+      ? command.subcommands.slice(0, MAX_EMBED_FIELDS - aliasFields.length).map((s) => ({
+          name: `${command.name} ${s.name}`,
+          value: `${syntax(s.usage, prefix)}\n${s.description}`,
+        }))
+      : [{ name: "Użycie", value: syntax(command.usage, prefix) }];
   return {
     title: `/${command.name}`,
     description: command.description,
     color: BRAND_COLOR,
-    fields: [
-      command.subcommands.length > 0
-        ? {
-            name: "Podkomendy",
-            value: command.subcommands
-              .map((s) => `${syntax(s.usage, prefix)} ${s.description}`)
-              .join("\n"),
-          }
-        : { name: "Użycie", value: syntax(command.usage, prefix) },
-      ...(aliases ? [{ name: "Aliasy", value: aliases }] : []),
-    ],
+    fields: [...body, ...aliasFields],
   };
 }

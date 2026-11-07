@@ -81,6 +81,11 @@ export interface CommandContext<A = Record<string, unknown>> {
   readonly user: { readonly id: string; readonly displayName: string };
   /** null in direct messages. */
   readonly guildId: string | null;
+  /**
+   * Where the call came from. Exact: a DM with the bot and a group DM are different places, and both have
+   * a null guildId. A prefix message is `guild` or `bot-dm`.
+   */
+  readonly place: CommandPlace;
   readonly channelId: string;
   /** Permission bit field of the calling member; null in direct messages. */
   readonly memberPermissions: bigint | null;
