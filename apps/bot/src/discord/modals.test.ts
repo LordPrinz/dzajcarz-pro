@@ -124,6 +124,88 @@ const users = (...ids: string[]) => ({
   users: new Map(ids.map((id) => [id, { id }])),
 });
 
+const upload = (
+  ...files: { id: string; url: string; name: string; contentType: string | null; size: number }[]
+) => ({
+  type: ComponentType.FileUpload,
+  values: files.map((f) => f.id),
+  attachments: new Map(files.map((f) => [f.id, f])),
+});
+const FILE = {
+  id: "9",
+  url: "https://cdn.discordapp.com/a.png",
+  name: "a.png",
+  contentType: "image/png",
+  size: 12,
+};
+
+const attach = defineModal({
+  module: "fun",
+  name: "attach",
+  title: "Załącznik",
+  fields: {
+    team: { type: "user", label: "Zespół", required: false, minValues: 1, maxValues: 10 },
+    proof: { type: "file", label: "Plik", required: false },
+  },
+  async run() {},
+});
+
+describe("multi-user select and file upload", () => {
+  test("the payload asks Discord for the value range and a file upload", () => {
+    const payload = toModalPayload(attach.build("1"));
+    const inner = payload.components.map((c) => ("component" in c ? c.component : null));
+    expect(inner[0]).toMatchObject({
+      type: ComponentType.UserSelect,
+      min_values: 1,
+      max_values: 10,
+    });
+    expect(inner[1]).toMatchObject({
+      type: ComponentType.FileUpload,
+      custom_id: "proof",
+      required: false,
+      min_values: 0,
+      max_values: 1,
+    });
+  });
+
+  test("a required upload asks for one file", () => {
+    const required = defineModal({
+      module: "fun",
+      name: "req",
+      title: "t",
+      fields: { proof: { type: "file", label: "Plik" } },
+      async run() {},
+    });
+    const [label] = toModalPayload(required.build("1")).components;
+    expect(label && "component" in label ? label.component : null).toMatchObject({
+      required: true,
+      min_values: 1,
+      max_values: 1,
+    });
+  });
+
+  test("resolved attachments become files, an unresolved id or another component is rejected", () => {
+    const ok = submit({ proof: upload(FILE), team: users("7", "8") });
+    expect(readModalValues(attach, ok.interaction)).toEqual({
+      proof: [{ url: FILE.url, name: "a.png", contentType: "image/png", size: 12 }],
+      team: ["7", "8"],
+    });
+    const unresolved = submit({
+      proof: { type: ComponentType.FileUpload, values: ["9"], attachments: new Map() },
+    });
+    expect(readModalValues(attach, unresolved.interaction)).toEqual({
+      proof: REJECTED_MODAL_VALUE,
+    });
+    const wrongType = submit({ proof: text("x") });
+    expect(readModalValues(attach, wrongType.interaction)).toEqual({ proof: REJECTED_MODAL_VALUE });
+  });
+
+  test("an empty upload reads as no files", () => {
+    const { interaction } = submit({ proof: upload() });
+    expect(readModalValues(attach, interaction)).toEqual({ proof: [] });
+  });
+});
+
 describe("readModalValues", () => {
   test("reads text values and select ids that Discord resolved", () => {
     const { interaction } = submit({

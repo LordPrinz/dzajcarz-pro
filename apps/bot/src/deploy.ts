@@ -86,6 +86,7 @@ export const createDeployRegistry = () =>
       partyChannels: unusedServices(),
       partyPermissions: unusedServices(),
       partyChat: unusedServices(),
+      partyInvites: unusedServices(),
       scheduler: unusedServices(),
       partyLock: unusedServices(),
       presence: unusedServices(),

@@ -58,10 +58,14 @@ Forms use the same model and the same routing.
   1 to 5 entries: `short` and `paragraph` text inputs (`label`, `description`, `placeholder`, `required`,
   `minLength`, `maxLength`, `defaultValue`), a `select` (string select with 1 to 25 `options` of `{ label, value, description? }`, label and value
   1 to 100 characters, values unique, optional `defaultValue` naming an option), a `channel` select (`channelTypes` filter: `text`, `voice`,
-  `announcement`, `category`, `stage`, `forum`) and a `user` select. Selects take one value. The adapter
+  `announcement`, `category`, `stage`, `forum`), a `user` select and a `file` upload. Selects take one value,
+  except a `user` select with `minValues` / `maxValues` (0 to 25, default 1 and 1), whose value is a `string[]`
+  of distinct ids when `maxValues` is above 1 (the type follows a literal `maxValues`). A `file` field is a single
+  upload with optional `contentTypes` (exact types or a family such as `image/*`) and `maxBytes`; its value is
+  `{ url, name, contentType, size }` taken from the attachment Discord resolved. The adapter
   (`apps/bot/src/discord/modals.ts`) wraps each field in a Discord Label component, which the installed
-  discord.js 14.27 and discord-api-types support for text inputs, string, channel and user selects. Role
-  and mentionable selects, file uploads, checkboxes and radio groups are not modelled yet.
+  discord.js 14.27 and discord-api-types support for text inputs, string, channel and user selects and file uploads. Role
+  and mentionable selects, checkboxes and radio groups are not modelled yet.
 - Opening: `ctx.showModal(modal.build(owner, data?, defaults?))` on slash command contexts and on component
   contexts. `build` returns a plain `ModalSpec`; `defaults` replaces `defaultValue` for one opening, `data`
   comes back as `ctx.state`. A prefix message has no interaction to answer with a modal, so
@@ -74,12 +78,16 @@ Forms use the same model and the same routing.
   namespaces, so a button and a modal may share a name.
 - Values: the payload is untrusted, so validation lives in the modal layer. The adapter
   (`readModalValues`) passes a value on only when the submitted component has the type the field declares
-  (text input, channel select, user select). A channel id must be among the channels Discord resolved, of
+  (text input, channel select, user select, file upload). A channel id must be among the channels Discord resolved, of
   one of the field's `channelTypes`, and, in a guild, of that guild; a user id must be among the resolved
-  users. Anything else is replaced by `REJECTED_MODAL_VALUE`. Then `executeModal` validates against the
+  users; an upload only when every submitted id has a resolved attachment. Anything else is replaced by
+  `REJECTED_MODAL_VALUE`. Then `executeModal` validates against the
   definition: required fields, that a `select` value is one of its option values (a forged value gets the
   invalid-value reply; the handler's `ctx.values` is typed as the union of the option values), text length after trimming (every text value is trimmed once, so the limits
-  and the handler see the same text), and that select values are snowflakes. A problem is an ephemeral
+  and the handler see the same text), that select values are snowflakes, that a multi-user select has between `minValues` and `maxValues` distinct
+  ids, and that a file is an https attachment of an allowed type (parameters after `;` ignored, case ignored; a
+  missing type fails a type restriction) within `maxBytes`. Discord enforces neither in the client, so both are
+  checked on every submit. A problem is an ephemeral
   Polish reply ("Pole „Temat” jest wymagane.", "Pole „Kanał” ma nieprawidłową wartość.") and the handler
   does not run. Otherwise `ctx.values` has one entry per field: a string, or `undefined` for a field with
   `required: false` left empty. Channel and user fields hold the id. The handler gets an explicit context
@@ -101,7 +109,7 @@ Forms use the same model and the same routing.
 - Testing: `ctx.modals` on the fake command and component contexts captures what was opened (and runs the
   Discord limit checks); `submitModal({ registry, customId, values })` from `@dzajcarz/core/testing` plays
   a submit through lookup, owner, permissions, validation and the error policy. `values` is what the user
-  gave: text for inputs, an array of ids for selects.
+  gave: text for inputs, an array of ids for selects, an array with one `ModalFile` for an upload.
 
 ### Public components and user selects
 
@@ -117,7 +125,7 @@ the user id); the adapter rejects an interaction whose type does not match the c
 
 - Modules stay free of discord.js at runtime and component handlers are tested with fakes.
 - Message components are buttons, string selects and user selects; role, mentionable and channel selects in
-  messages and the components v2 layout are added to the model when a module needs them. Modals offer text inputs and string, user and channel selects (see above).
+  messages and the components v2 layout are added to the model when a module needs them. Modals offer text inputs, string, user and channel selects and file uploads (see above).
 - Components never expire on their own. A stale click either finds expired state (the message above) or
   a handler that was removed (an ephemeral "outdated" message and a warning in the log).
 - State in a `custom_id` is visible to anyone who can read the message's JSON: keep secrets out of it.

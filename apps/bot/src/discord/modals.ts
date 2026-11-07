@@ -1,8 +1,9 @@
-import type { AnyModal, ModalRawValues } from "@dzajcarz/core";
+import type { AnyModal, ModalRawValue, ModalRawValues } from "@dzajcarz/core";
 import {
   type ChannelFieldDef,
   type ModalChannelKind,
   type ModalFieldSpec,
+  type ModalFile,
   type ModalSpec,
   REJECTED_MODAL_VALUE,
   validateModal,
@@ -12,6 +13,7 @@ import {
   type APIModalInteractionResponseCallbackData,
   ChannelType,
   ComponentType,
+  type ModalData,
   type ModalSubmitInteraction,
   SelectMenuDefaultValueType,
   type SelectMenuModalData,
@@ -87,11 +89,19 @@ function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
       return {
         ...base,
         type: ComponentType.UserSelect,
-        min_values: field.required ? 1 : 0,
-        max_values: 1,
+        min_values: field.minValues ?? (field.required ? 1 : 0),
+        max_values: field.maxValues ?? 1,
         default_values: field.value
           ? [{ id: field.value, type: SelectMenuDefaultValueType.User }]
           : undefined,
+      };
+    case "file":
+      return {
+        type: ComponentType.FileUpload,
+        custom_id: field.customId,
+        required: field.required,
+        min_values: field.required ? 1 : 0,
+        max_values: 1,
       };
   }
 }
@@ -106,7 +116,7 @@ export function readModalValues(
   modal: AnyModal,
   interaction: ModalSubmitInteraction,
 ): ModalRawValues {
-  const raw: Record<string, string | readonly string[] | undefined> = {};
+  const raw: Record<string, ModalRawValue> = {};
   for (const [key, def] of Object.entries(modal.fields)) {
     const field = interaction.fields.fields.get(key);
     if (!field) continue;
@@ -119,6 +129,8 @@ export function readModalValues(
     } else if (def.type === "channel") {
       if (field.type !== ComponentType.ChannelSelect) raw[key] = REJECTED_MODAL_VALUE;
       else raw[key] = field.values.map((id) => acceptChannel(def, field, id, interaction));
+    } else if (def.type === "file") {
+      raw[key] = readUploads(field);
     } else if (field.type !== ComponentType.UserSelect) {
       raw[key] = REJECTED_MODAL_VALUE;
     } else {
@@ -126,6 +138,23 @@ export function readModalValues(
     }
   }
   return raw;
+}
+
+/** The attachments Discord resolved for an upload; an id without one, or another component type, is rejected. */
+function readUploads(field: ModalData): ModalRawValue {
+  if (field.type !== ComponentType.FileUpload) return REJECTED_MODAL_VALUE;
+  const files: ModalFile[] = [];
+  for (const id of field.values) {
+    const attachment = field.attachments.get(id);
+    if (!attachment) return REJECTED_MODAL_VALUE;
+    files.push({
+      url: attachment.url,
+      name: attachment.name,
+      contentType: attachment.contentType,
+      size: attachment.size,
+    });
+  }
+  return files;
 }
 
 function acceptChannel(

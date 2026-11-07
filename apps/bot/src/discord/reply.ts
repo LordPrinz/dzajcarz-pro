@@ -23,6 +23,7 @@ export function toReplyPayload(reply: Reply): ReplyPayload {
       color: embed.color,
       fields: embed.fields,
       footer: embed.footer ? { text: embed.footer } : undefined,
+      image: embed.image ? { url: embed.image } : undefined,
     })),
     components: toComponentRows(reply.components),
     ephemeral: reply.ephemeral ?? false,

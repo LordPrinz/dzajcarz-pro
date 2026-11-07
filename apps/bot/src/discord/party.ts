@@ -2,6 +2,7 @@ import type {
   EveryoneAccess,
   PartyChannels,
   PartyChat,
+  PartyInvites,
   PartyPermissions,
 } from "@dzajcarz/module-party";
 import {
@@ -214,6 +215,14 @@ export function createPartyPermissions(client: Client): PartyPermissions {
       await channel.permissionOverwrites.delete(userId, reason);
     },
 
+    async isBlocked(channelId, userId) {
+      const channel = await voiceChannel(channelId);
+      return (
+        channel.permissionOverwrites.cache.get(userId)?.deny.has(PermissionFlagsBits.Connect) ??
+        false
+      );
+    },
+
     async setLimit(channelId, limit, reason) {
       const channel = await voiceChannel(channelId);
       await channel.setUserLimit(limit, reason);
@@ -251,6 +260,7 @@ export function createPartyPermissions(client: Client): PartyPermissions {
           PermissionFlagsBits.ManageChannels,
           PermissionFlagsBits.MoveMembers,
         ]),
+        bot: member.user.bot,
       };
     },
 
@@ -258,6 +268,29 @@ export function createPartyPermissions(client: Client): PartyPermissions {
       const channel = await voiceChannel(channelId);
       const member = await memberOf(guildId, userId);
       return channel.permissionsFor(member).has(PermissionFlagsBits.ManageChannels);
+    },
+  };
+}
+
+export function createPartyInvites(client: Client): PartyInvites {
+  return {
+    async describe(channelId) {
+      const channel = await client.channels.fetch(channelId);
+      if (channel?.type !== ChannelType.GuildVoice)
+        throw new Error(`Not a voice channel: ${channelId}`);
+      return { channelName: channel.name, guildName: channel.guild.name };
+    },
+
+    async sendDirect(userId, message) {
+      const { content, embeds, components } = toReplyPayload(message);
+      try {
+        const user = await client.users.fetch(userId);
+        await user.send({ content, embeds, components, allowedMentions: NO_MENTIONS });
+        return true;
+      } catch (error) {
+        if (hasCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
+        throw error;
+      }
     },
   };
 }

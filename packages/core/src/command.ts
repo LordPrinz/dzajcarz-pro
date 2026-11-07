@@ -69,6 +69,8 @@ export interface Embed {
   color?: number;
   fields?: EmbedField[];
   footer?: string;
+  /** https URL of a picture shown under the text. */
+  image?: string;
 }
 
 export type Reply =

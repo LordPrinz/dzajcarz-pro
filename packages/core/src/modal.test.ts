@@ -406,6 +406,141 @@ describe("submitting a modal", () => {
   });
 });
 
+describe("multi-user select and file upload", () => {
+  const A = "300000000000000003";
+  const B = "300000000000000004";
+  const seen: unknown[] = [];
+  const invite = defineModal({
+    module: "fun",
+    name: "invite",
+    title: "Zaproszenie",
+    fields: {
+      people: { type: "user", label: "Kogo", minValues: 1, maxValues: 3 },
+      one: { type: "user", label: "Jedna osoba", required: false },
+      proof: {
+        type: "file",
+        label: "Plik",
+        required: false,
+        contentTypes: ["image/*", "application/pdf"],
+        maxBytes: 1_048_576,
+      },
+    },
+    async run(ctx) {
+      // Compiles only if a user select with maxValues above 1 is string[] and a file is a ModalFile.
+      const people: string[] = ctx.values.people;
+      const one: string | undefined = ctx.values.one;
+      seen.push({ people, one, proof: ctx.values.proof });
+    },
+  });
+  const registry = createRegistry([{ name: "fun", modals: [invite] }]);
+  const customId = invite.build(OWNER).customId;
+  const png = {
+    url: "https://cdn.discordapp.com/a.png",
+    name: "a.png",
+    contentType: "image/png",
+    size: 5000,
+  };
+  const refusal = (text: string) => [{ content: text, ephemeral: true }];
+
+  test("the spec carries the value range", () => {
+    const [people, one, proof] = invite.build(OWNER).fields;
+    expect(people).toMatchObject({ type: "user", minValues: 1, maxValues: 3, required: true });
+    expect(one).toMatchObject({ type: "user", maxValues: undefined });
+    expect(proof).toMatchObject({ type: "file", required: false });
+  });
+
+  test("a multi-value user select hands over the distinct ids", async () => {
+    seen.length = 0;
+    await submitModal({ registry, customId, values: { people: [A, B, A] } });
+    expect(seen).toEqual([{ people: [A, B], one: undefined, proof: undefined }]);
+  });
+
+  test("too many, too few and forged ids are refused", async () => {
+    seen.length = 0;
+    const many = await submitModal({
+      registry,
+      customId,
+      values: { people: [A, B, "500000000000000005", "500000000000000006"] },
+    });
+    expect(many.replies).toEqual(refusal("Pole „Kogo” ma nieprawidłową wartość."));
+    const none = await submitModal({ registry, customId, values: { people: [] } });
+    expect(none.replies).toEqual(refusal("Pole „Kogo” jest wymagane."));
+    const forged = await submitModal({ registry, customId, values: { people: [A, "rejected"] } });
+    expect(forged.replies).toEqual(refusal("Pole „Kogo” ma nieprawidłową wartość."));
+    expect(seen).toEqual([]);
+  });
+
+  test("a single-value user select keeps handing over one id", async () => {
+    seen.length = 0;
+    await submitModal({ registry, customId, values: { people: [A], one: [B] } });
+    expect(seen).toEqual([{ people: [A], one: B, proof: undefined }]);
+    const two = await submitModal({ registry, customId, values: { people: [A], one: [A, B] } });
+    expect(two.replies).toEqual(refusal("Pole „Jedna osoba” ma nieprawidłową wartość."));
+  });
+
+  test("a file is passed on with url, name, type and size", async () => {
+    seen.length = 0;
+    await submitModal({ registry, customId, values: { people: [A], proof: [png] } });
+    expect(seen).toEqual([{ people: [A], one: undefined, proof: png }]);
+  });
+
+  test("a type outside the allowed list, a missing type and a big file are refused", async () => {
+    const submit = (proof: unknown) =>
+      submitModal({ registry, customId, values: { people: [A], proof } as never });
+    expect((await submit([{ ...png, contentType: "text/html" }])).replies).toEqual(
+      refusal("Plik w polu „Plik” ma niedozwolony typ."),
+    );
+    expect((await submit([{ ...png, contentType: null }])).replies).toEqual(
+      refusal("Plik w polu „Plik” ma niedozwolony typ."),
+    );
+    expect((await submit([{ ...png, size: 2_000_000 }])).replies).toEqual(
+      refusal("Plik w polu „Plik” może mieć najwyżej 1 MB."),
+    );
+    seen.length = 0;
+    await submit([{ ...png, contentType: "application/PDF; charset=binary" }]);
+    expect(seen).toHaveLength(1);
+  });
+
+  test("a forged or unresolved file is an invalid value", async () => {
+    const invalid = refusal("Pole „Plik” ma nieprawidłową wartość.");
+    for (const forged of [
+      "rejected",
+      [png, png],
+      [{ url: "http://evil.example/a.png", name: "a", contentType: "image/png", size: 1 }],
+      [{ url: png.url, name: "a", contentType: "image/png", size: "big" }],
+      ["123"],
+    ]) {
+      const ctx = await submitModal({
+        registry,
+        customId,
+        values: { people: [A], proof: forged } as never,
+      });
+      expect(ctx.replies).toEqual(invalid);
+    }
+  });
+
+  test("a required file must be uploaded", () => {
+    const fields = { proof: { type: "file", label: "Plik" } } as const;
+    expect(() => parseModalValues(fields, {})).toThrow("jest wymagane");
+    expect(() => parseModalValues(fields, { proof: [] })).toThrow("jest wymagane");
+  });
+
+  test("value ranges are validated when the modal is built", () => {
+    const build = (extra: object) =>
+      defineModal({
+        module: "fun",
+        name: "range",
+        title: "t",
+        fields: { people: { type: "user", label: "Kogo", ...extra } },
+        async run() {},
+      }).build(OWNER);
+    expect(() => build({ maxValues: 26 })).toThrow("maxValues 1–25");
+    expect(() => build({ minValues: 3, maxValues: 2 })).toThrow("greater than maxValues");
+    expect(() => build({ minValues: 0 })).toThrow("at least 1");
+    expect(() => build({ minValues: 0, required: false, maxValues: 5 })).not.toThrow();
+  });
+});
+
 describe("registry validation of modals", () => {
   const base = {
     module: "fun",
