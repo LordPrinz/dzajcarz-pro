@@ -19,9 +19,35 @@ describe("createRegistry", () => {
         description: "play command",
         aliases: ["p"],
         module: "music",
+        usage: "play",
+        contexts: { places: ["guild"], installs: ["guild"] },
         subcommands: [],
       },
     ]);
+  });
+
+  test("summaries carry permissions and contexts for filtering", () => {
+    const secret = defineCommand({
+      name: "secret",
+      description: "Secret",
+      permissions: 8n,
+      subcommands: {
+        go: defineSubcommand({ description: "Go", permissions: 16n, run: async () => {} }),
+      },
+    });
+    const everywhere = command("ping", {
+      contexts: { places: ["guild", "bot-dm"], installs: ["guild", "user"] },
+    });
+    const summaries = createRegistry([{ name: "m", commands: [secret, everywhere] }]).summaries();
+    expect(summaries[0]).toMatchObject({
+      permissions: 8n,
+      usage: "secret go",
+      subcommands: [{ name: "go", permissions: 16n }],
+    });
+    expect(summaries[1]?.contexts).toEqual({
+      places: ["guild", "bot-dm"],
+      installs: ["guild", "user"],
+    });
   });
 
   test("collects event handlers from every module", () => {

@@ -75,6 +75,20 @@ the dev guild. Prefix commands in a DM use the default prefix; a guild-only comm
 działa tylko na serwerze.". With only the user install the bot cannot post in the channel, so replies go
 through the interaction. See ADR 7.
 
+### Help
+
+`/help` (or `!help`) opens an ephemeral menu: a start page with the categories (modules) and their command
+counts, a select to open one, and "Dodaj na serwer" / "Dodaj na konto" link buttons built from the client
+id. A category lists its commands six per page (`createPaginator`), each subcommand as its own entry with
+the slash and the prefix syntax; the select stays so the user can switch, and "Strona główna" goes back.
+The state is the category name in the `custom_id` (plus the page), so nothing is stored. Every render
+recomputes what the caller may see: commands and subcommands behind permissions the member lacks are
+hidden (administrators see all), so are modules switched off in the channel (the module gate behind the
+`moduleEnabled` port; a thread follows its parent) and commands whose `contexts` do not allow the place. In
+a DM only DM-capable commands are listed. In a server where the bot is not a member (user install) the
+menu shows slash syntax only and reads neither the prefix nor the toggles. `/help <command>` shows one
+command with the same filters; an unknown or hidden name gets the same "not found" answer.
+
 ### Errors
 
 `UserError` messages go to the caller as they are (Polish). Any other error is logged with the command,

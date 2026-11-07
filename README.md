@@ -34,7 +34,7 @@ packages/
   db/               SQL migrations, migration runner, repositories (Bun.SQL)
   kv/               KeyValueStore port with Redis and in-memory adapters
 modules/
-  general/          ping, help
+  general/          ping, help (interactive menu: categories, pages, install links)
   settings/         prefix (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set, off, test), greets new members
   party/            party (create, delete, lock, unlock, limit, rename, invite, block, hide, show), a voice channel per member who joins the party area

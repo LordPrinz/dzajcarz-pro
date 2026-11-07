@@ -1,4 +1,12 @@
-import type { AnyCommand, CommandPlace, InstallType, OptionDef, OptionsDef } from "./command.ts";
+import {
+  type AnyCommand,
+  type CommandContexts,
+  type CommandPlace,
+  DEFAULT_CONTEXTS,
+  type InstallType,
+  type OptionDef,
+  type OptionsDef,
+} from "./command.ts";
 import { type AnyComponent, MAX_COMPONENT_PREFIX, parseCustomId } from "./component.ts";
 import type { AnyEventHandler, BotModule } from "./module.ts";
 import { usageLine } from "./prefix.ts";
@@ -13,6 +21,8 @@ export interface SubcommandSummary {
   description: string;
   /** Prefix-form syntax without the prefix: `prefix set <value>`. */
   usage: string;
+  /** Extra permission bits on top of the command's own. */
+  permissions?: bigint;
 }
 
 export interface CommandSummary {
@@ -20,6 +30,11 @@ export interface CommandSummary {
   description: string;
   aliases: readonly string[];
   module: string;
+  /** Prefix-form syntax without the prefix: `play [query...]`; for a command with subcommands `queue add|clear`. */
+  usage: string;
+  /** Permission bits the member needs; undefined when any member may run it. */
+  permissions?: bigint;
+  contexts: CommandContexts;
   /** Empty for a plain command. */
   subcommands: readonly SubcommandSummary[];
 }
@@ -91,10 +106,14 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
         description: command.description,
         aliases: command.aliases ?? [],
         module: module.name,
+        usage: usageLine(command),
+        permissions: command.permissions,
+        contexts: command.contexts ?? DEFAULT_CONTEXTS,
         subcommands: Object.entries(command.subcommands ?? {}).map(([name, sub]) => ({
           name,
           description: sub.description,
           usage: usageLine(command, name),
+          permissions: sub.permissions,
         })),
       });
     }
