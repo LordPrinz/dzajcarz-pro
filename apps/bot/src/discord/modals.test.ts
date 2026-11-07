@@ -24,6 +24,16 @@ const modal = defineModal({
     note: { type: "paragraph", label: "Notatka", required: false, description: "opcjonalnie" },
     room: { type: "channel", label: "Kanał", channelTypes: ["text", "voice"], defaultValue: "42" },
     who: { type: "user", label: "Kto", required: false },
+    size: {
+      type: "select",
+      label: "Rozmiar",
+      required: false,
+      options: [
+        { label: "Mała", value: "s", description: "do 10" },
+        { label: "Duża", value: "l" },
+      ],
+      defaultValue: "l",
+    },
   },
   async run() {},
 });
@@ -38,6 +48,7 @@ describe("toModalPayload", () => {
       ComponentType.TextInput,
       ComponentType.ChannelSelect,
       ComponentType.UserSelect,
+      ComponentType.StringSelect,
     ]);
     expect(payload.components[0]).toMatchObject({
       type: ComponentType.Label,
@@ -64,6 +75,16 @@ describe("toModalPayload", () => {
       },
     });
     expect(payload.components[3]).toMatchObject({ component: { min_values: 0, max_values: 1 } });
+    expect(payload.components[4]).toMatchObject({
+      component: {
+        min_values: 0,
+        max_values: 1,
+        options: [
+          { label: "Mała", value: "s", description: "do 10", default: false },
+          { label: "Duża", value: "l", default: true },
+        ],
+      },
+    });
   });
 });
 
@@ -120,6 +141,13 @@ describe("readModalValues", () => {
   test("skips fields that were not submitted or are empty", () => {
     const { interaction } = submit({ who: { type: ComponentType.UserSelect, values: [] } });
     expect(readModalValues(modal, interaction)).toEqual({ who: [] });
+  });
+
+  test("a string select is read, a forged type for it is rejected", () => {
+    const ok = submit({ size: { type: ComponentType.StringSelect, values: ["s"] } });
+    expect(readModalValues(modal, ok.interaction)).toEqual({ size: ["s"] });
+    const forged = submit({ size: text("s") });
+    expect(readModalValues(modal, forged.interaction)).toEqual({ size: REJECTED_MODAL_VALUE });
   });
 
   test("a forged component type is rejected", () => {

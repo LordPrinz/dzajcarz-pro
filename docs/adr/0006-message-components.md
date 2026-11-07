@@ -56,11 +56,12 @@ Forms use the same model and the same routing.
 - `defineModal({ module, name, title, fields, permissions?, guildOnly?, run(ctx) })` declares one; the
   modal goes to `BotModule.modals`. `fields` is a record (key = field id, order = order on screen) of
   1 to 5 entries: `short` and `paragraph` text inputs (`label`, `description`, `placeholder`, `required`,
-  `minLength`, `maxLength`, `defaultValue`), a `channel` select (`channelTypes` filter: `text`, `voice`,
+  `minLength`, `maxLength`, `defaultValue`), a `select` (string select with 1 to 25 `options` of `{ label, value, description? }`, label and value
+  1 to 100 characters, values unique, optional `defaultValue` naming an option), a `channel` select (`channelTypes` filter: `text`, `voice`,
   `announcement`, `category`, `stage`, `forum`) and a `user` select. Selects take one value. The adapter
   (`apps/bot/src/discord/modals.ts`) wraps each field in a Discord Label component, which the installed
-  discord.js 14.27 and discord-api-types support for text inputs, channel selects and user selects. Role,
-  mentionable and string selects, file uploads, checkboxes and radio groups are not modelled yet.
+  discord.js 14.27 and discord-api-types support for text inputs, string, channel and user selects. Role
+  and mentionable selects, file uploads, checkboxes and radio groups are not modelled yet.
 - Opening: `ctx.showModal(modal.build(owner, data?, defaults?))` on slash command contexts and on component
   contexts. `build` returns a plain `ModalSpec`; `defaults` replaces `defaultValue` for one opening, `data`
   comes back as `ctx.state`. A prefix message has no interaction to answer with a modal, so
@@ -76,7 +77,8 @@ Forms use the same model and the same routing.
   (text input, channel select, user select). A channel id must be among the channels Discord resolved, of
   one of the field's `channelTypes`, and, in a guild, of that guild; a user id must be among the resolved
   users. Anything else is replaced by `REJECTED_MODAL_VALUE`. Then `executeModal` validates against the
-  definition: required fields, text length after trimming (every text value is trimmed once, so the limits
+  definition: required fields, that a `select` value is one of its option values (a forged value gets the
+  invalid-value reply; the handler's `ctx.values` is typed as the union of the option values), text length after trimming (every text value is trimmed once, so the limits
   and the handler see the same text), and that select values are snowflakes. A problem is an ephemeral
   Polish reply ("Pole „Temat” jest wymagane.", "Pole „Kanał” ma nieprawidłową wartość.") and the handler
   does not run. Otherwise `ctx.values` has one entry per field: a string, or `undefined` for a field with
@@ -105,8 +107,7 @@ Forms use the same model and the same routing.
 
 - Modules stay free of discord.js at runtime and component handlers are tested with fakes.
 - Message components are buttons and string selects; role, mentionable, user and channel selects in
-  messages and the components v2 layout are added to the model when a module needs them. Modals offer text
-  inputs and user/channel selects (see above).
+  messages and the components v2 layout are added to the model when a module needs them. Modals offer text inputs and string, user and channel selects (see above).
 - Components never expire on their own. A stale click either finds expired state (the message above) or
   a handler that was removed (an ephemeral "outdated" message and a warning in the log).
 - State in a `custom_id` is visible to anyone who can read the message's JSON: keep secrets out of it.

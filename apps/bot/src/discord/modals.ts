@@ -59,6 +59,19 @@ function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
         max_length: field.maxLength,
         value: field.value,
       };
+    case "select":
+      return {
+        ...base,
+        type: ComponentType.StringSelect,
+        min_values: field.required ? 1 : 0,
+        max_values: 1,
+        options: (field.options ?? []).map((option) => ({
+          label: option.label,
+          value: option.value,
+          description: option.description,
+          default: option.value === field.value,
+        })),
+      };
     case "channel":
       return {
         ...base,
@@ -100,6 +113,9 @@ export function readModalValues(
     if (def.type === "short" || def.type === "paragraph") {
       if (field.type !== ComponentType.TextInput) raw[key] = REJECTED_MODAL_VALUE;
       else if (typeof field.value === "string") raw[key] = field.value;
+    } else if (def.type === "select") {
+      if (field.type !== ComponentType.StringSelect) raw[key] = REJECTED_MODAL_VALUE;
+      else raw[key] = field.values;
     } else if (def.type === "channel") {
       if (field.type !== ComponentType.ChannelSelect) raw[key] = REJECTED_MODAL_VALUE;
       else raw[key] = field.values.map((id) => acceptChannel(def, field, id, interaction));

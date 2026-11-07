@@ -68,7 +68,7 @@ replies work alike. See ADR 6.
 
 ### Modals
 
-`defineModal` describes a form (up to 5 text, channel or user fields) as plain data; the module opens it
+`defineModal` describes a form (up to 5 text, select, channel or user fields) as plain data; the module opens it
 with `ctx.showModal(modal.build(ctx.user.id, data))` from a slash command or a button/select handler and
 gets typed `ctx.values` in `run`. The submit is routed like a click (`<module>:<modal>:<owner>:<data>`,
 owner, permissions and module toggle checks), invalid input is answered with an ephemeral Polish message.

@@ -273,6 +273,70 @@ describe("submitting a modal", () => {
     expect(() => validateModal(pick("user", CHANNEL))).not.toThrow();
   });
 
+  describe("select fields", () => {
+    const options = [
+      { label: "Mała", value: "s", description: "do 10 osób" },
+      { label: "Duża", value: "l" },
+    ] as const;
+    const picker = defineModal({
+      module: "fun",
+      name: "picker",
+      title: "t",
+      fields: {
+        size: { type: "select", label: "Rozmiar", options, defaultValue: "l" },
+        extra: { type: "select", label: "Dodatek", options, required: false },
+      },
+      async run(ctx) {
+        // The union of option values is the type: this compiles only if `size` is "s" | "l".
+        const size: "s" | "l" = ctx.values.size;
+        const extra: "s" | "l" | undefined = ctx.values.extra;
+        await ctx.reply(`${size}:${extra}`);
+      },
+    });
+    const registry = createRegistry([{ name: "fun", modals: [picker] }]);
+    const customId = picker.build(OWNER).customId;
+
+    test("builds a spec with options and the default", () => {
+      const [size] = picker.build(OWNER).fields;
+      expect(size).toMatchObject({ type: "select", value: "l", options });
+    });
+
+    test("passes the chosen value, optional left empty is undefined", async () => {
+      const ctx = await submitModal({ registry, customId, values: { size: ["s"] } });
+      expect(ctx.replies).toEqual(["s:undefined"]);
+    });
+
+    test("a value that is not an option is refused", async () => {
+      for (const forged of [["xl"], ["s", "l"], [" s"]]) {
+        const ctx = await submitModal({ registry, customId, values: { size: forged } });
+        expect(ctx.replies).toEqual([
+          { content: "Pole „Rozmiar” ma nieprawidłową wartość.", ephemeral: true },
+        ]);
+      }
+    });
+
+    test("limits are checked", () => {
+      const field = picker.build(OWNER).fields[0];
+      if (!field) throw new Error("fixture lost a field");
+      const check = (opts: { label: string; value: string }[], value?: string) =>
+        validateModal({
+          customId: "a:b:1:",
+          title: "t",
+          fields: [{ ...field, options: opts, value }],
+        });
+      const one = { label: "A", value: "a" };
+      expect(() => check([])).toThrow("1–25 options");
+      expect(() =>
+        check(Array.from({ length: 26 }, (_, i) => ({ label: "A", value: `v${i}` }))),
+      ).toThrow("1–25 options");
+      expect(() => check([{ label: "", value: "a" }])).toThrow("label");
+      expect(() => check([{ label: "A", value: "x".repeat(101) }])).toThrow("value");
+      expect(() => check([one, one])).toThrow("duplicate option");
+      expect(() => check([one], "b")).toThrow("not one of the options");
+      expect(() => check([one], "a")).not.toThrow();
+    });
+  });
+
   test("an optional text with a max length only says 'do N'", () => {
     const fields = { a: { type: "short", label: "A", maxLength: 5 } } as const;
     expect(() => parseModalValues(fields, { a: "toolong" })).toThrow("musi mieć do 5 znaków");

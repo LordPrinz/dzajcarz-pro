@@ -50,14 +50,42 @@ export interface UserFieldDef extends FieldBase {
   defaultValue?: string;
 }
 
-export type ModalFieldDef = TextFieldDef | ChannelFieldDef | UserFieldDef;
+/** One choice of a string select. */
+export interface ModalSelectOption {
+  /** Shown in the list, 1-100 characters. */
+  label: string;
+  /** What the handler receives, 1-100 characters, unique within the field. */
+  value: string;
+  description?: string;
+}
+
+/** A single-choice string select; the value is the chosen option's `value`. */
+export interface SelectFieldDef extends FieldBase {
+  type: "select";
+  /** 1-25 options. */
+  options: readonly ModalSelectOption[];
+  placeholder?: string;
+  /** `value` of the preselected option. */
+  defaultValue?: string;
+}
+
+export type ModalFieldDef = TextFieldDef | ChannelFieldDef | UserFieldDef | SelectFieldDef;
 
 /** Key = field id inside the modal and key of the typed `values`; order = order on screen. */
 export type ModalFieldsDef = Record<string, ModalFieldDef>;
 
-type FieldValue<F extends ModalFieldDef> = F extends { required: false }
-  ? string | undefined
+type FieldText<F extends ModalFieldDef> = F extends {
+  type: "select";
+  options: readonly (infer O)[];
+}
+  ? O extends { value: infer V extends string }
+    ? V
+    : string
   : string;
+
+type FieldValue<F extends ModalFieldDef> = F extends { required: false }
+  ? FieldText<F> | undefined
+  : FieldText<F>;
 
 /** What `run` receives: text, or an id for channel and user selects; `undefined` only for `required: false`. */
 export type ModalValues<F extends ModalFieldsDef> = { [K in keyof F]: FieldValue<F[K]> };
@@ -74,6 +102,7 @@ export interface ModalFieldSpec {
   /** Prefilled text, or the preselected channel / user id. */
   value?: string;
   channelTypes?: readonly ModalChannelKind[];
+  options?: readonly ModalSelectOption[];
 }
 
 /** What `ctx.showModal` takes. */
@@ -89,6 +118,8 @@ export const MODAL_MAX_LABEL = 45;
 export const MODAL_MAX_DESCRIPTION = 100;
 export const MODAL_MAX_PLACEHOLDER = 100;
 export const MODAL_MAX_TEXT = 4000;
+export const MODAL_MAX_OPTIONS = 25;
+export const MODAL_MAX_OPTION_TEXT = 100;
 const SNOWFLAKE = /^\d{1,20}$/;
 const CHANNEL_KINDS: readonly ModalChannelKind[] = [
   "text",
@@ -134,6 +165,8 @@ function validateField(field: ModalFieldSpec, at: string): void {
   }
   if (field.type === "short" || field.type === "paragraph") {
     validateTextField(field, at);
+  } else if (field.type === "select") {
+    validateSelectField(field, at);
   } else {
     if (field.value !== undefined && !SNOWFLAKE.test(field.value)) {
       throw new Error(`${at}: default value must be a channel or user id, got "${field.value}"`);
@@ -143,6 +176,34 @@ function validateField(field: ModalFieldSpec, at: string): void {
         if (!CHANNEL_KINDS.includes(kind)) throw new Error(`${at}: unknown channel type "${kind}"`);
       }
     }
+  }
+}
+
+function validateSelectField(field: ModalFieldSpec, at: string): void {
+  const options = field.options ?? [];
+  if (options.length < 1 || options.length > MODAL_MAX_OPTIONS) {
+    throw new Error(`${at}: a select needs 1–${MODAL_MAX_OPTIONS} options, got ${options.length}`);
+  }
+  const seen = new Set<string>();
+  for (const option of options) {
+    for (const [name, text] of [
+      ["label", option.label],
+      ["value", option.value],
+    ] as const) {
+      if (text.length < 1 || text.length > MODAL_MAX_OPTION_TEXT) {
+        throw new Error(`${at}: option ${name} must be 1–${MODAL_MAX_OPTION_TEXT} characters`);
+      }
+    }
+    if ((option.description?.length ?? 0) > MODAL_MAX_DESCRIPTION) {
+      throw new Error(
+        `${at}: option description is longer than ${MODAL_MAX_DESCRIPTION} characters`,
+      );
+    }
+    if (seen.has(option.value)) throw new Error(`${at}: duplicate option value "${option.value}"`);
+    seen.add(option.value);
+  }
+  if (field.value !== undefined && !seen.has(field.value)) {
+    throw new Error(`${at}: default value "${field.value}" is not one of the options`);
   }
 }
 
@@ -196,20 +257,31 @@ export function parseModalValues<F extends ModalFieldsDef>(
     const isText = def.type === "short" || def.type === "paragraph";
     const selected = isText ? given : first(given);
     // Trimmed once here, so the length limits and the handler see the same text.
-    const text = typeof selected === "string" ? selected.trim() : undefined;
-    if (text === undefined || text === "") {
+    const text = typeof selected === "string" && isText ? selected.trim() : selected;
+    if (typeof text !== "string" || text.trim() === "") {
       if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
       values[key] = undefined;
       continue;
     }
     if (isText) {
       checkTextLength(def, text);
-    } else if (!SNOWFLAKE.test(text) || (Array.isArray(given) && given.length > 1)) {
-      throw new UserError(`Pole „${def.label}” ma nieprawidłową wartość.`);
+    } else if (def.type === "select") {
+      if (!def.options.some((option) => option.value === text) || oneOf(given)) invalid(def);
+    } else if (!SNOWFLAKE.test(text) || oneOf(given)) {
+      invalid(def);
     }
     values[key] = text;
   }
   return values as ModalValues<F>;
+}
+
+/** More than one value submitted to a single-choice select. */
+function oneOf(given: string | readonly string[] | undefined): boolean {
+  return Array.isArray(given) && given.length > 1;
+}
+
+function invalid(def: ModalFieldDef): never {
+  throw new UserError(`Pole „${def.label}” ma nieprawidłową wartość.`);
 }
 
 function checkTextLength(def: TextFieldDef, text: string): void {
@@ -297,6 +369,7 @@ export function defineModal<const F extends ModalFieldsDef>(
           maxLength: def.type === "short" || def.type === "paragraph" ? def.maxLength : undefined,
           value: (defaults as Record<string, string | undefined>)[key] ?? def.defaultValue,
           channelTypes: def.type === "channel" ? def.channelTypes : undefined,
+          options: def.type === "select" ? def.options : undefined,
         })),
       };
       validateModal(spec);
