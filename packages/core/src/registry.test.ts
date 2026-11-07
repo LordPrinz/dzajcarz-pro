@@ -181,3 +181,41 @@ describe("option limits Discord checks at deploy time", () => {
     reject({ type: "integer", minValue: 5, maxValue: 1 }, "greater than maxValue");
   });
 });
+
+describe("contexts", () => {
+  const build = (extra: Partial<AnyCommand>) => () =>
+    createRegistry([{ name: "m", commands: [command("c", extra)] }]);
+
+  test("accepts places and installs that fit together", () => {
+    expect(
+      build({
+        contexts: { places: ["guild", "bot-dm", "private-channel"], installs: ["guild", "user"] },
+      }),
+    ).not.toThrow();
+    expect(build({ contexts: { places: ["guild", "bot-dm"], installs: ["guild"] } })).not.toThrow();
+  });
+
+  test("rejects empty lists and unknown values", () => {
+    expect(build({ contexts: { places: [], installs: ["guild"] } })).toThrow("at least one place");
+    expect(build({ contexts: { places: ["guild"], installs: [] } })).toThrow("at least one place");
+    expect(build({ contexts: { places: ["moon" as never], installs: ["guild"] } })).toThrow(
+      'unknown place "moon"',
+    );
+    expect(build({ contexts: { places: ["guild"], installs: ["robot" as never] } })).toThrow(
+      'unknown install type "robot"',
+    );
+  });
+
+  test("a private channel needs the user install", () => {
+    expect(build({ contexts: { places: ["private-channel"], installs: ["guild"] } })).toThrow(
+      'needs the "user" install',
+    );
+  });
+
+  test("permissions cannot be combined with a place outside servers", () => {
+    expect(
+      build({ permissions: 8n, contexts: { places: ["guild", "bot-dm"], installs: ["guild"] } }),
+    ).toThrow("guild-only");
+    expect(build({ permissions: 8n })).not.toThrow();
+  });
+});

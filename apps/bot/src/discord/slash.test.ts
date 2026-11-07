@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { defineCommand, defineSubcommand } from "@dzajcarz/core";
 import {
   ApplicationCommandOptionType,
+  ApplicationIntegrationType,
   InteractionContextType,
   PermissionFlagsBits,
 } from "discord.js";
@@ -51,8 +52,46 @@ describe("toSlashCommand", () => {
       },
       { name: "who", description: "Who", required: false, type: ApplicationCommandOptionType.User },
     ]);
-    expect(body.contexts).toEqual([InteractionContextType.Guild, InteractionContextType.BotDM]);
+    expect(body.contexts).toEqual([InteractionContextType.Guild]);
+    expect(body.integration_types).toEqual([ApplicationIntegrationType.GuildInstall]);
     expect(body.default_member_permissions).toBeUndefined();
+  });
+
+  test("sends the declared places and install types", () => {
+    const body = toSlashCommand(
+      defineCommand({
+        name: "ping",
+        description: "Ping",
+        contexts: {
+          places: ["guild", "bot-dm", "private-channel"],
+          installs: ["guild", "user"],
+        },
+        run: noop,
+      }),
+    );
+    expect(body.contexts).toEqual([
+      InteractionContextType.Guild,
+      InteractionContextType.BotDM,
+      InteractionContextType.PrivateChannel,
+    ]);
+    expect(body.integration_types).toEqual([
+      ApplicationIntegrationType.GuildInstall,
+      ApplicationIntegrationType.UserInstall,
+    ]);
+  });
+
+  test("a guild-scoped deploy leaves out contexts and integration types", () => {
+    const body = toSlashCommand(
+      defineCommand({
+        name: "ping",
+        description: "Ping",
+        contexts: { places: ["guild", "bot-dm"], installs: ["guild", "user"] },
+        run: noop,
+      }),
+      "guild",
+    );
+    expect(body).not.toHaveProperty("contexts");
+    expect(body).not.toHaveProperty("integration_types");
   });
 
   test("a command with permissions is guild-only and hidden from members without them", () => {

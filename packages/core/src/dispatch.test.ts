@@ -51,12 +51,11 @@ describe("executeCommand", () => {
     expect(entry.error.message).toBe("database password is hunter2");
   });
 
-  test("refuses guild-only commands in direct messages", async () => {
+  test("refuses commands without a DM context in direct messages", async () => {
     let ran = false;
     const command = defineCommand({
       name: "party",
       description: "Party",
-      guildOnly: true,
       run: async () => {
         ran = true;
       },
@@ -65,6 +64,22 @@ describe("executeCommand", () => {
     await executeCommand(command, ctx, silentLogger);
     expect(ran).toBe(false);
     expect(replyText(ctx.replies[0])).toBe("Ta komenda działa tylko na serwerze.");
+  });
+
+  test("runs a command whose contexts include the bot DM, with no guild or permissions", async () => {
+    let ran = false;
+    const command = defineCommand({
+      name: "ping",
+      description: "Ping",
+      contexts: { places: ["guild", "bot-dm"], installs: ["guild"] },
+      run: async () => {
+        ran = true;
+      },
+    });
+    const ctx = createFakeContext({ guildId: null });
+    await executeCommand(command, ctx, silentLogger);
+    expect(ran).toBe(true);
+    expect(ctx.replies).toEqual([]);
   });
 
   test("checks member permissions, which matters for prefix commands", async () => {

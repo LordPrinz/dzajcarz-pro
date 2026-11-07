@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type CommandContexts,
   createRegistry,
   defineButton,
   defineCommand,
@@ -35,11 +36,12 @@ describe("module toggles in routing", () => {
   const GUILD = "100000000000000001";
   const CHANNEL = "300000000000000003";
 
-  function setup(disabled: string[]) {
+  function setup(disabled: string[], contexts?: CommandContexts) {
     const ran: string[] = [];
     const ping = defineCommand({
       name: "ping",
       description: "x",
+      contexts,
       run: async () => {
         ran.push("command");
       },
@@ -88,6 +90,34 @@ describe("module toggles in routing", () => {
     const { ran, message, deps } = setup([]);
     await handleMessage(message, undefined, deps);
     expect(ran).toEqual(["command"]);
+  });
+
+  test("a guild-only command in a DM gets the server-only reply", async () => {
+    const { ran, replies, message, deps } = setup([]);
+    Object.assign(message, { guildId: null });
+    await handleMessage(message, undefined, deps);
+    expect(ran).toEqual([]);
+    expect(replies).toEqual([
+      expect.objectContaining({ content: "Ta komenda działa tylko na serwerze." }),
+    ]);
+  });
+
+  test("a command with a DM context runs in a DM and uses the default prefix", async () => {
+    const { ran, message, deps } = setup([], { places: ["guild", "bot-dm"], installs: ["guild"] });
+    Object.assign(message, { guildId: null });
+    const resolved: (string | null)[] = [];
+    await handleMessage(message, undefined, {
+      ...deps,
+      prefixes: {
+        resolve: async (guildId) => {
+          resolved.push(guildId);
+          return "!";
+        },
+        forget: async () => {},
+      },
+    });
+    expect(ran).toEqual(["command"]);
+    expect(resolved).toEqual([null]);
   });
 
   test("a prefix command of a disabled module is blocked without a reply", async () => {
@@ -152,15 +182,15 @@ describe("components in routing", () => {
     const record = (method: string) => async (payload: unknown) => {
       calls.push({ method, payload });
     };
-    const click = (customId: string, userId = OWNER) =>
+    const click = (customId: string, userId = OWNER, guildId: string | null = GUILD) =>
       ({
         customId,
         user: { id: userId, displayName: "t" },
-        guildId: GUILD,
+        guildId,
         channelId: "300000000000000003",
-        channel: { isThread: () => false },
-        inGuild: () => true,
-        memberPermissions: { bitfield: 0n },
+        channel: guildId === null ? null : { isThread: () => false },
+        inGuild: () => guildId !== null,
+        memberPermissions: guildId === null ? null : { bitfield: 0n },
         isStringSelectMenu: () => false,
         replied: false,
         deferred: false,
@@ -182,6 +212,20 @@ describe("components in routing", () => {
     const { ran, click, deps, button } = setup([]);
     await handleComponent(click(button.customId(OWNER, "7")), deps);
     expect(ran).toEqual(["go:7"]);
+  });
+
+  test("a click in a DM runs the handler", async () => {
+    const { ran, click, deps, button } = setup([]);
+    await handleComponent(click(button.customId(OWNER, "3"), OWNER, null), deps);
+    expect(ran).toEqual(["go:3"]);
+  });
+
+  test("a click in a guild the bot is not in (channel not cached) still runs the handler", async () => {
+    const { ran, click, deps, button } = setup([]);
+    const interaction = click(button.customId(OWNER, "4"));
+    Object.assign(interaction, { channel: null });
+    await handleComponent(interaction, deps);
+    expect(ran).toEqual(["go:4"]);
   });
 
   test("a click from someone else is refused ephemerally", async () => {
