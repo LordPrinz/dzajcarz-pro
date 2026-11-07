@@ -54,6 +54,8 @@ export async function executeCommand(
   }
 }
 
+export const MENU_GUILD_ONLY = "To menu działa tylko na serwerze.";
+export const MENU_NO_PERMISSION = "Nie masz uprawnień do tego menu.";
 export const NOT_YOUR_MENU = "To nie Twoje menu.";
 export const UNKNOWN_COMPONENT = "To menu jest nieaktualne. Wywołaj komendę jeszcze raz.";
 
@@ -74,9 +76,14 @@ export async function executeComponent(
   });
   try {
     if (ctx.user.id !== owner) throw new UserError(NOT_YOUR_MENU);
-    const denied = checkAccess(component, ctx);
+    const denied = checkAccess(component, ctx, {
+      guildOnly: MENU_GUILD_ONLY,
+      permissions: MENU_NO_PERMISSION,
+    });
     if (denied) throw new UserError(denied);
     await component.run(ctx);
+    // Discord shows "interaction failed" after 3 seconds without an answer.
+    if (!ctx.acknowledged) await ctx.defer();
   } catch (error) {
     const userFacing = error instanceof UserError;
     if (!userFacing) log.error("Component failed", { error });
@@ -114,14 +121,18 @@ export function checkPrefixAccess(
 export function checkAccess(
   target: { guildOnly?: boolean; permissions?: bigint },
   { guildId, memberPermissions }: Pick<CommandContext, "guildId" | "memberPermissions">,
+  messages = {
+    guildOnly: "Ta komenda działa tylko na serwerze.",
+    permissions: "Nie masz uprawnień do tej komendy.",
+  },
 ): string | null {
   if ((target.guildOnly || target.permissions !== undefined) && guildId === null) {
-    return "Ta komenda działa tylko na serwerze.";
+    return messages.guildOnly;
   }
   const required = target.permissions;
   if (required === undefined) return null;
   const granted = memberPermissions ?? 0n;
   const isAdmin = (granted & ADMINISTRATOR) === ADMINISTRATOR;
-  if (!isAdmin && (granted & required) !== required) return "Nie masz uprawnień do tej komendy.";
+  if (!isAdmin && (granted & required) !== required) return messages.permissions;
   return null;
 }

@@ -9,7 +9,8 @@ import {
   MessageFlags,
   type StringSelectMenuInteraction,
 } from "discord.js";
-import { contextFromComponent, toComponentRows } from "./components.ts";
+import { contextFromComponent } from "./component-context.ts";
+import { toComponentRows } from "./components.ts";
 import { contextFromMessage } from "./context.ts";
 import { toReplyPayload } from "./reply.ts";
 
@@ -89,12 +90,16 @@ function fakeClick(overrides: Record<string, unknown> = {}) {
     inGuild: () => true,
     memberPermissions: { bitfield: 8n },
     isStringSelectMenu: () => false,
-    replied: false,
-    deferred: false,
+    message: { id: "msg1" },
     update: record("update"),
+    deferUpdate: record("deferUpdate"),
     reply: record("reply"),
     editReply: record("editReply"),
     followUp: record("followUp"),
+    webhook: {
+      editMessage: async (id: string, payload: unknown) =>
+        void calls.push({ method: `editMessage:${id}`, payload }),
+    },
     ...overrides,
   };
   return { interaction, calls };
@@ -148,11 +153,47 @@ describe("contextFromComponent", () => {
   });
 
   test("a second update goes through editReply", async () => {
-    const { interaction, calls } = fakeClick({ replied: true });
-    await contextFromComponent(interaction as unknown as ButtonInteraction, resolved).update(
-      "again",
-    );
-    expect(calls[0]?.method).toBe("editReply");
+    const { interaction, calls } = fakeClick();
+    const ctx = contextFromComponent(interaction as unknown as ButtonInteraction, resolved);
+    await ctx.update("one");
+    await ctx.update("again");
+    expect(calls.map((c) => c.method)).toEqual(["update", "editReply"]);
+  });
+
+  test("update after reply edits the clicked message, not the ephemeral reply", async () => {
+    const { interaction, calls } = fakeClick();
+    const ctx = contextFromComponent(interaction as unknown as ButtonInteraction, resolved);
+    await ctx.reply("psst");
+    await ctx.update("new");
+    expect(calls.map((c) => c.method)).toEqual(["reply", "editMessage:msg1"]);
+    expect(calls[1]?.payload).toMatchObject({ content: "new", allowedMentions: { parse: [] } });
+  });
+
+  test("defer acknowledges the click and a later update goes through editReply", async () => {
+    const { interaction, calls } = fakeClick();
+    const ctx = contextFromComponent(interaction as unknown as ButtonInteraction, resolved);
+    expect(ctx.acknowledged).toBe(false);
+    await ctx.defer();
+    expect(ctx.acknowledged).toBe(true);
+    await ctx.defer();
+    await ctx.update("done");
+    expect(calls.map((c) => c.method)).toEqual(["deferUpdate", "editReply"]);
+  });
+
+  test("acknowledged turns true after update and after reply", async () => {
+    for (const act of ["update", "reply"] as const) {
+      const { interaction } = fakeClick();
+      const ctx = contextFromComponent(interaction as unknown as ButtonInteraction, resolved);
+      await ctx[act]("x");
+      expect(ctx.acknowledged).toBe(true);
+    }
+  });
+
+  test("an explicit ephemeral: undefined still replies ephemerally", async () => {
+    const { interaction, calls } = fakeClick();
+    const ctx = contextFromComponent(interaction as unknown as ButtonInteraction, resolved);
+    await ctx.reply({ content: "x", ephemeral: undefined });
+    expect(calls[0]).toMatchObject({ method: "reply", payload: { flags: MessageFlags.Ephemeral } });
   });
 
   test("reply is ephemeral by default and can opt out", async () => {
@@ -165,9 +206,11 @@ describe("contextFromComponent", () => {
   });
 
   test("reply after an answer becomes a follow-up", async () => {
-    const { interaction, calls } = fakeClick({ replied: true });
-    await contextFromComponent(interaction as unknown as ButtonInteraction, resolved).reply("x");
-    expect(calls[0]?.method).toBe("followUp");
+    const { interaction, calls } = fakeClick();
+    const ctx = contextFromComponent(interaction as unknown as ButtonInteraction, resolved);
+    await ctx.update("x");
+    await ctx.reply("y");
+    expect(calls[1]?.method).toBe("followUp");
   });
 });
 

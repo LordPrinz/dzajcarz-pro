@@ -26,18 +26,26 @@ the channel click a button on someone else's message.
 - **Same gates as commands:** `apps/bot` checks the module toggle (a disabled module answers with the
   ephemeral "module disabled" message), then `executeComponent` applies `guildOnly` / `permissions` of
   the component and the usual error policy (`UserError` shown, anything else logged).
-- `ComponentContext` has `update(reply)` (edit the message the component sits on), `reply(reply)`
-  (ephemeral unless `ephemeral: false`), the clicking user, guild and channel ids, `memberPermissions`,
+- `ComponentContext` has `update(reply)` (edit the message the component sits on, also after a `reply`),
+  `defer()` (acknowledge now, edit later), `reply(reply)` (ephemeral unless `ephemeral: false`),
+  `acknowledged`, which `executeComponent` checks: a handler that answers nothing is deferred so Discord
+  does not show "interaction failed". Components refuse with "To menu działa tylko na serwerze." and
+  "Nie masz uprawnień do tego menu.", the clicking user, guild and channel ids, `memberPermissions`,
   `state` and, for selects, `values`. Slash and prefix replies behave the same: a prefix reply is an
   ordinary message with components and its clicks are interactions.
 - **Larger state** goes through `createComponentStateStore(keyValueStore)`: `save(value)` returns a key
   for the `custom_id`, `load(key)` throws `ExpiredStateError` (a `UserError`) after the 15 minute TTL,
   which the user sees as the ephemeral "To menu wygasło. Wywołaj komendę jeszcze raz.". Redis is allowed
-  to lose it (ADR 3).
+  to lose it (ADR 3). Keys are 22 characters (16 random bytes, base64url) and the registry's prefix limit
+  leaves room for one next to the owner id. The store is available in core and is not wired into the
+  composition root; the first module that needs it builds one from the `KeyValueStore` it receives.
 - `createPaginator({ module, name, render })` is the ready-made pager: `first(viewer, data)` returns
   page 1, a row `◀ | Strona N/M | ▶` with the arrows disabled at the ends is appended, and `paginator.button`
   goes to `BotModule.components`. `render` runs on every click with the clicking member's permissions,
-  so a page can depend on them.
+  so a page can depend on them. `permissions` and `guildOnly` can be set on the paginator and are checked
+  on every click. `data` sits in the `custom_id` next to the names, the owner id and the page number
+  (`MAX_CUSTOM_ID - module.length - name.length - 28` characters are left), so keep it short or pass a
+  state store key.
 - Testing: `createFakeComponentContext` calls a handler directly; `clickComponent({ registry, customId })`
   plays a click through lookup, ownership, permissions and the error policy.
 

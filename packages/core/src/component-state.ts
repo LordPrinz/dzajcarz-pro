@@ -22,6 +22,13 @@ export interface ComponentStateStore {
   load<T>(key: string): Promise<T>;
 }
 
+/** Length of a generated key: 16 random bytes in base64url. It sits in the custom_id, so it counts. */
+export const STATE_KEY_LENGTH = 22;
+
+function randomKey(): string {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64url");
+}
+
 export const COMPONENT_STATE_TTL_MS = 15 * 60_000;
 
 /**
@@ -32,7 +39,7 @@ export function createComponentStateStore(
   storage: StateStorage,
   {
     ttlMs = COMPONENT_STATE_TTL_MS,
-    newKey = (): string => crypto.randomUUID(),
+    newKey = randomKey,
   }: { ttlMs?: number; newKey?: () => string } = {},
 ): ComponentStateStore {
   const storageKey = (key: string) => `component-state:${key}`;

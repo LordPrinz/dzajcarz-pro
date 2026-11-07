@@ -13,14 +13,13 @@ import {
   UNKNOWN_COMPONENT,
 } from "@dzajcarz/core";
 import {
-  type ButtonInteraction,
   type Client,
   Events,
   type Message,
+  type MessageComponentInteraction,
   MessageFlags,
-  type StringSelectMenuInteraction,
 } from "discord.js";
-import { contextFromComponent } from "./discord/components.ts";
+import { contextFromComponent } from "./discord/component-context.ts";
 import { contextFromInteraction, contextFromMessage } from "./discord/context.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { eventScope, toggleChannelId } from "./event-scope.ts";
@@ -78,7 +77,7 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
-      if (interaction.isButton() || interaction.isStringSelectMenu()) {
+      if (interaction.isMessageComponent()) {
         await handleComponent(interaction, deps);
         return;
       }
@@ -115,14 +114,20 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
  * then run through the owner and permission checks of `executeComponent`.
  */
 export async function handleComponent(
-  interaction: ButtonInteraction | StringSelectMenuInteraction,
+  interaction: MessageComponentInteraction,
   { registry, gate, logger }: BotDeps,
 ): Promise<void> {
-  const resolved = registry.resolveComponent(interaction.customId);
-  if (!resolved) {
-    // Posted by an older build or by another bot sharing the application: nothing to run.
+  const supported = interaction.isButton() || interaction.isStringSelectMenu();
+  const resolved = supported ? registry.resolveComponent(interaction.customId) : undefined;
+  if (!supported || !resolved) {
+    // Posted by an older build or by another bot sharing the application, or a select type no module
+    // handles yet (user, role, channel, mentionable): answer instead of leaving the click to time out.
     logger.warn("Unknown component", { customId: interaction.customId });
-    await interaction.reply({ content: UNKNOWN_COMPONENT, flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: UNKNOWN_COMPONENT,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: NO_MENTIONS,
+    });
     return;
   }
   const ctx = contextFromComponent(interaction, resolved);
