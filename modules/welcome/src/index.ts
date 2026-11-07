@@ -54,6 +54,20 @@ export interface WelcomeModuleDeps {
   logger: Logger;
 }
 
+/** Discord caps a message at 2000 characters; the fences and a margin leave room for the text. */
+const CHUNK_SIZE = 1900;
+
+/** The text as ephemeral-sized code blocks; a run of backticks gets a zero-width space so it cannot close one. */
+function codeBlocks(text: string): string[] {
+  const safe = text.replaceAll("`", "`\u200b");
+  const characters = [...safe];
+  const blocks: string[] = [];
+  for (let start = 0; start < characters.length; start += CHUNK_SIZE) {
+    blocks.push(`\`\`\`\n${characters.slice(start, start + CHUNK_SIZE).join("")}\n\`\`\``);
+  }
+  return blocks;
+}
+
 /** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
 const MANAGE_GUILD = 1n << 5n;
 
@@ -69,12 +83,14 @@ export function createWelcomeModule({
     return guildId;
   };
 
+  const tooLong = `Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`;
+
   /** Shared by the prefix form and the modal, so both refuse the same input. */
   async function saveWelcome(guildId: string, channelId: string, message: string): Promise<string> {
     const template = message.trim();
     if (template.length === 0) throw new UserError("Treść powitania nie może być pusta.");
     if ([...template].length > MAX_MESSAGE_LENGTH) {
-      throw new UserError(`Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`);
+      throw new UserError(tooLong);
     }
     if (!(await channels.isTextChannelOf(guildId, channelId))) {
       throw new UserError("Wybierz kanał tekstowy z tego serwera.");
@@ -98,16 +114,22 @@ export function createWelcomeModule({
       message: {
         type: "paragraph",
         label: "Treść powitania",
-        description: "Zmienne: {user}, {username}, {server}, {memberCount}",
+        description: `Zmienne: {user}, {username}, {server}, {memberCount}. Do ${MAX_MESSAGE_LENGTH} znaków.`,
+        // Left optional so an empty answer gets the same wording as the prefix form.
+        required: false,
         placeholder: "Witaj {user} na {server}! Jesteś {memberCount}. osobą.",
       },
     },
     run: async (ctx) => {
-      const content = await saveWelcome(
-        guildOf(ctx.guildId),
-        ctx.values.channel,
-        ctx.values.message,
-      );
+      const message = ctx.values.message ?? "";
+      if ([...message.trim()].length > MAX_MESSAGE_LENGTH) {
+        // The member typed all of it in a form that is now gone: hand the text back so it can be pasted again.
+        await ctx.reply({ content: tooLong, ephemeral: true });
+        for (const chunk of codeBlocks(message))
+          await ctx.reply({ content: chunk, ephemeral: true });
+        return;
+      }
+      const content = await saveWelcome(guildOf(ctx.guildId), ctx.values.channel, message);
       await ctx.reply({ content, ephemeral: true });
     },
   });
@@ -118,7 +140,7 @@ export function createWelcomeModule({
     permissions: MANAGE_GUILD,
     subcommands: {
       set: defineSubcommand({
-        description: "Ustawia kanał i treść powitania (formularz)",
+        description: "Ustawia kanał i treść powitania",
         options: {
           channel: {
             type: "channel",
@@ -137,17 +159,27 @@ export function createWelcomeModule({
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
           if (ctx.canShowModal) {
+            // showModal has to be the first answer, so only what is needed to prefill is looked up.
             const current = await store.get(guildId);
+            // A channel that was deleted or turned into a voice channel would only be refused on submit.
+            const channel =
+              current && (await channels.isTextChannelOf(guildId, current.channelId))
+                ? current.channelId
+                : undefined;
             await ctx.showModal(
               setForm.build(
                 ctx.user.id,
                 undefined,
-                current ? { channel: current.channelId, message: current.template } : undefined,
+                current ? { channel, message: current.template } : undefined,
               ),
             );
             return;
           }
-          const content = await saveWelcome(guildId, ctx.args.channel, ctx.args.message);
+          const { channel, message } = ctx.args;
+          if (channel === undefined || message === undefined) {
+            throw new UserError("Podaj kanał i treść: `welcome set <channel> <message...>`.");
+          }
+          const content = await saveWelcome(guildId, channel, message);
           await ctx.reply({ content, ephemeral: true });
         },
       }),

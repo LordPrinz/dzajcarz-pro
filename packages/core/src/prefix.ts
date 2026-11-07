@@ -171,12 +171,22 @@ function withChoices(option: OptionDef, value: string | number): Converted {
   return { ok: true, value: choice.value };
 }
 
-/** `play <query...> [volume]`, `prefix set <value>` or `prefix set|reset|show`. */
-export function usageLine(command: AnyCommand, subcommand?: string): string {
+/**
+ * `play <query...> [volume]`, `prefix set <value>` or `prefix set|reset|show`. The "slash" form leaves out
+ * `prefixOnly` options, which the slash command does not have.
+ */
+export function usageLine(
+  command: AnyCommand,
+  subcommand?: string,
+  form: "slash" | "prefix" = "prefix",
+): string {
   const { subcommands } = command;
   if (subcommands && !subcommand) return `${command.name} ${Object.keys(subcommands).join("|")}`;
   const options = subcommand ? subcommands?.[subcommand]?.options : command.options;
-  const parts = Object.entries(options ?? {}).map(([name, option]) => {
+  const shown = Object.entries(options ?? {}).filter(
+    ([, option]) => form === "prefix" || !option.prefixOnly,
+  );
+  const parts = shown.map(([name, option]) => {
     const label = option.rest ? `${name}...` : name;
     return option.required ? `<${label}>` : `[${label}]`;
   });

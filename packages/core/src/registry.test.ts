@@ -20,6 +20,7 @@ describe("createRegistry", () => {
         aliases: ["p"],
         module: "music",
         usage: "play",
+        slashUsage: "play",
         contexts: { places: ["guild"], installs: ["guild"] },
         subcommands: [],
       },
@@ -140,8 +141,13 @@ describe("subcommands", () => {
     });
     const registry = createRegistry([{ name: "settings", commands: [prefix] }]);
     expect(registry.summaries()[0]?.subcommands).toEqual([
-      { name: "set", description: "Sub", usage: "prefix set <value>" },
-      { name: "show", description: "Sub", usage: "prefix show" },
+      {
+        name: "set",
+        description: "Sub",
+        usage: "prefix set <value>",
+        slashUsage: "prefix set <value>",
+      },
+      { name: "show", description: "Sub", usage: "prefix show", slashUsage: "prefix show" },
     ]);
   });
 

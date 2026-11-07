@@ -42,7 +42,11 @@ export interface OptionDef<T extends OptionType = OptionType> {
 export type OptionsDef = Record<string, OptionDef>;
 
 type RequiredKeys<O extends OptionsDef> = {
-  [K in keyof O]: O[K]["required"] extends true ? K : never;
+  [K in keyof O]: O[K]["required"] extends true
+    ? O[K]["prefixOnly"] extends true
+      ? never
+      : K
+    : never;
 }[keyof O];
 
 export type OptionValues<O extends OptionsDef> = {

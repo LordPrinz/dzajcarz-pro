@@ -43,5 +43,8 @@ tested on a live server, and features reached into each other's files.
 - Commands and handlers are tested with a fake context; only the thin adapters need Discord.
 - Command options are limited to what both forms can express: no autocomplete or subcommand groups yet.
   When a module needs them, extend the model here instead of bypassing it.
+- The one exception is `prefixOnly: true` on an option: the slash command leaves it out (its input comes
+  from a modal instead), `/help` prints the slash usage without it, and `ctx.args` types it as optional so
+  `run` must check `canShowModal` or narrow before using it.
 - Removing a command requires `bun run commands:deploy`, or Discord keeps showing it (the bot logs a
   warning when such a command is used).

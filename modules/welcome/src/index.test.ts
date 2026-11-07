@@ -20,6 +20,7 @@ import {
 const MANAGE_GUILD = 1n << 5n;
 const guildId = "100000000000000001";
 const channelId = "400000000000000004";
+const announcementId = "400000000000000005";
 const foreignChannelId = "900000000000000009";
 
 function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
@@ -38,7 +39,8 @@ function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
   };
   // Only the guild's own text channel is known; everything else counts as foreign or not text.
   const channels: TextChannels = {
-    isTextChannelOf: async (id, channel) => id === guildId && channel === channelId,
+    isTextChannelOf: async (id, channel) =>
+      id === guildId && (channel === channelId || channel === announcementId),
   };
   const guilds: GuildLookup = {
     describe: async () => ({ name: "Dżajsy", memberCount: 12 }),
@@ -140,24 +142,60 @@ describe("/welcome set form", () => {
     expect(configs.size).toBe(0);
   });
 
-  test("an empty message is refused", async () => {
+  test("an announcement channel is accepted", async () => {
+    const { ctx, configs } = await openAndSubmit({ channel: [announcementId], message: "Hej" });
+    expect(configs.get(guildId)).toEqual({ channelId: announcementId, template: "Hej" });
+    expect(replyText(ctx.replies[0])).toContain(`<#${announcementId}>`);
+  });
+
+  test("an empty message gets the same wording as the prefix form", async () => {
     const { ctx, configs } = await openAndSubmit({ channel: [channelId], message: "   " });
-    expect(replyText(ctx.replies[0])).toContain("wymagane");
+    expect(replyText(ctx.replies[0])).toBe("Treść powitania nie może być pusta.");
     expect(configs.size).toBe(0);
   });
 
-  test("a message over the limit is refused", async () => {
-    const { ctx, configs } = await openAndSubmit({
-      channel: [channelId],
-      message: "a".repeat(2001),
-    });
+  test("a message over the limit is refused and handed back in code blocks", async () => {
+    const message = `${"a".repeat(1990)}\`\`\`${"b".repeat(30)}`;
+    const { ctx, configs } = await openAndSubmit({ channel: [channelId], message });
     expect(replyText(ctx.replies[0])).toContain("2000");
     expect(configs.size).toBe(0);
+    const blocks = ctx.replies.slice(1).map((reply) => replyText(reply));
+    expect(blocks.length).toBeGreaterThan(1);
+    for (const block of blocks) {
+      expect(block.length).toBeLessThanOrEqual(2000);
+      expect(block.startsWith("```\n")).toBe(true);
+      expect(block.endsWith("\n```")).toBe(true);
+      // Only the fences may be three backticks in a row.
+      expect(block.slice(4, -4)).not.toContain("```");
+    }
+    const joined = blocks.map((block) => block.slice(4, -4)).join("");
+    expect(joined.replaceAll("\u200b", "")).toBe(message);
+    expect(ctx.replies[1]).toMatchObject({ ephemeral: true });
+  });
+
+  test("2000 emoji are within the limit", async () => {
+    const message = "😀".repeat(2000);
+    const { ctx, configs } = await openAndSubmit({ channel: [channelId], message });
+    expect(configs.get(guildId)?.template).toBe(message);
+    expect(replyText(ctx.replies[0])).toContain(`<#${channelId}>`);
   });
 
   test("a submit without Manage Server saves nothing", async () => {
     const { configs } = await openAndSubmit({ channel: [channelId], message: "x" }, 0n);
     expect(configs.size).toBe(0);
+  });
+
+  test("the form is not prefilled with a channel that is no longer a text channel", async () => {
+    const { run, configs } = setup();
+    configs.set(guildId, { channelId: foreignChannelId, template: "Cześć {user}" });
+    const [spec] = (await run("set")).modals;
+    expect(spec?.fields.map((f) => f.value)).toEqual([undefined, "Cześć {user}"]);
+  });
+
+  test("slash without Manage Server opens no form", async () => {
+    const { run } = setup();
+    const result = await run("set", {}, 0n);
+    expect(result.modals).toHaveLength(0);
   });
 
   test("someone else cannot submit the form", async () => {

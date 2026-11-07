@@ -27,6 +27,8 @@ export interface SubcommandSummary {
   description: string;
   /** Prefix-form syntax without the prefix: `prefix set <value>`. */
   usage: string;
+  /** Slash-form syntax: `usage` without the `prefixOnly` options. */
+  slashUsage: string;
   /** Extra permission bits on top of the command's own. */
   permissions?: bigint;
 }
@@ -38,6 +40,8 @@ export interface CommandSummary {
   module: string;
   /** Prefix-form syntax without the prefix: `play [query...]`; for a command with subcommands `queue add|clear`. */
   usage: string;
+  /** Slash-form syntax: `usage` without the `prefixOnly` options. */
+  slashUsage: string;
   /** Permission bits the member needs; undefined when any member may run it. */
   permissions?: bigint;
   contexts: CommandContexts;
@@ -134,12 +138,14 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
         aliases: command.aliases ?? [],
         module: module.name,
         usage: usageLine(command),
+        slashUsage: usageLine(command, undefined, "slash"),
         permissions: command.permissions,
         contexts: command.contexts ?? DEFAULT_CONTEXTS,
         subcommands: Object.entries(command.subcommands ?? {}).map(([name, sub]) => ({
           name,
           description: sub.description,
           usage: usageLine(command, name),
+          slashUsage: usageLine(command, name, "slash"),
           permissions: sub.permissions,
         })),
       });
