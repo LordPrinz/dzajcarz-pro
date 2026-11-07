@@ -191,10 +191,11 @@ describe("components in routing", () => {
         channel: guildId === null ? null : { isThread: () => false },
         inGuild: () => guildId !== null,
         memberPermissions: guildId === null ? null : { bitfield: 0n },
+        isButton: () => true,
         isStringSelectMenu: () => false,
-        replied: false,
-        deferred: false,
+        message: { id: "msg1" },
         update: record("update"),
+        deferUpdate: record("deferUpdate"),
         reply: record("reply"),
         editReply: record("editReply"),
         followUp: record("followUp"),
@@ -249,6 +250,32 @@ describe("components in routing", () => {
     const { ran, calls, click, deps } = setup([]);
     await handleComponent(click(`gone:thing:${OWNER}:`), deps);
     expect(ran).toEqual([]);
-    expect(calls[0]).toMatchObject({ method: "reply" });
+    expect(calls[0]).toMatchObject({
+      method: "reply",
+      payload: { allowedMentions: { parse: [] } },
+    });
+  });
+
+  test("a select type no module handles is answered instead of left to time out", async () => {
+    const { ran, calls, click, deps, button } = setup([]);
+    const roleSelect = {
+      ...click(button.customId(OWNER)),
+      isButton: () => false,
+      isStringSelectMenu: () => false,
+    } as unknown as ButtonInteraction;
+    await handleComponent(roleSelect, deps);
+    expect(ran).toEqual([]);
+    expect(calls[0]).toMatchObject({
+      method: "reply",
+      payload: { allowedMentions: { parse: [] } },
+    });
+  });
+
+  test("a handler that says nothing still acknowledges the click", async () => {
+    const { calls, click, deps } = setup([]);
+    const quiet = defineButton({ module: "fun", name: "quiet", run: async () => {} });
+    const registry = createRegistry([{ name: "fun", components: [quiet] }]);
+    await handleComponent(click(quiet.customId(OWNER)), { ...deps, registry });
+    expect(calls.map((c) => c.method)).toEqual(["deferUpdate"]);
   });
 });

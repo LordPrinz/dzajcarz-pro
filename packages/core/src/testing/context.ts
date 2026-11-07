@@ -59,6 +59,8 @@ function checkComponents(reply: Reply): void {
 export interface FakeComponentContext extends ComponentContext {
   /** Every `update()`, in order. */
   readonly updates: Reply[];
+  /** True after `defer()`, explicit or by `executeComponent` when the handler said nothing. */
+  deferred: boolean;
   /** Every `reply()`, in order. */
   readonly replies: Reply[];
 }
@@ -88,9 +90,16 @@ export function createFakeComponentContext({
     user: { id: userId, displayName: "tester" },
     updates: [],
     replies: [],
+    deferred: false,
+    get acknowledged() {
+      return ctx.deferred || ctx.updates.length > 0 || ctx.replies.length > 0;
+    },
     async update(reply) {
       checkComponents(reply);
       ctx.updates.push(reply);
+    },
+    async defer() {
+      ctx.deferred = true;
     },
     async reply(reply) {
       checkComponents(reply);
@@ -108,8 +117,7 @@ export interface ClickOptions extends Omit<FakeComponentContextOptions, "state">
 
 /**
  * Plays a click through the same routing and checks as the bot (custom_id lookup, owner, permissions,
- * error policy) without Discord. The clicking user defaults to a different member than the owner only
- * if you pass `userId`; otherwise it is the owner named in the custom_id.
+ * error policy) without Discord. The clicking user is the owner from the custom_id unless you pass `userId`.
  */
 export async function clickComponent({
   registry,

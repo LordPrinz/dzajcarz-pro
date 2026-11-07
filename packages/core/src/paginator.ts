@@ -16,9 +16,15 @@ export interface PaginatorOptions {
   module: string;
   /** Component name of the ◀ ▶ buttons. */
   name: string;
+  /** Discord permission bits needed on every click; implies guildOnly. */
+  permissions?: bigint;
+  guildOnly?: boolean;
   /**
    * Renders page `page` (0-based, already clamped to `pageCount`) for `viewer`. `data` is whatever
-   * `first()` was given, for example a category. It runs again on every click.
+   * `first()` was given, for example a category. It runs again on every click. `data` shares the
+   * 100-character custom_id with the module and component names, the owner id and the page number:
+   * keep it under `MAX_CUSTOM_ID - module.length - name.length - 28` characters (prefix colons, a
+   * 20-digit owner id and up to 4 page digits with their colons), or put the real state in a ComponentStateStore and pass its key.
    */
   render(args: { page: number; data: string; viewer: Viewer }): Promise<PageView> | PageView;
 }
@@ -34,7 +40,13 @@ export interface Paginator {
  * Ready-made pagination: a row `◀ | Strona N/M | ▶`, the arrows disabled at the ends. Only the member
  * who ran the command can turn pages (the owner check in `executeComponent`).
  */
-export function createPaginator({ module, name, render }: PaginatorOptions): Paginator {
+export function createPaginator({
+  module,
+  name,
+  permissions,
+  guildOnly,
+  render,
+}: PaginatorOptions): Paginator {
   async function view(owner: string, data: string, requested: number, viewer: Viewer) {
     let page = Math.max(0, requested);
     let rendered = await render({ page, data, viewer });
@@ -86,6 +98,8 @@ export function createPaginator({ module, name, render }: PaginatorOptions): Pag
   const button = defineButton({
     module,
     name,
+    permissions,
+    guildOnly,
     async run(ctx) {
       const separator = ctx.state.indexOf(":");
       const to = Number(ctx.state.slice(0, separator));

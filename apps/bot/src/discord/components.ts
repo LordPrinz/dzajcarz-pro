@@ -1,20 +1,10 @@
-import {
-  type ButtonSpec,
-  type ComponentContext,
-  type ComponentRow,
-  type ResolvedComponent,
-  validateRows,
-} from "@dzajcarz/core";
+import { type ButtonSpec, type ComponentRow, validateRows } from "@dzajcarz/core";
 import {
   type APIActionRowComponent,
   type APIComponentInMessageActionRow,
-  type ButtonInteraction,
   ButtonStyle,
   ComponentType,
-  MessageFlags,
-  type StringSelectMenuInteraction,
 } from "discord.js";
-import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 export type ComponentRows = APIActionRowComponent<APIComponentInMessageActionRow>[];
 
@@ -69,44 +59,4 @@ export function toComponentRows(rows: readonly ComponentRow[] = []): ComponentRo
       };
     }),
   }));
-}
-
-/** A click on a button or a choice in a select menu, as a module handler sees it. */
-export function contextFromComponent(
-  interaction: ButtonInteraction | StringSelectMenuInteraction,
-  resolved: ResolvedComponent,
-): ComponentContext {
-  return {
-    state: resolved.state,
-    values: interaction.isStringSelectMenu() ? interaction.values : [],
-    user: { id: interaction.user.id, displayName: interaction.user.displayName },
-    guildId: interaction.guildId,
-    channelId: interaction.channelId,
-    memberPermissions: interaction.inGuild()
-      ? (interaction.memberPermissions?.bitfield ?? 0n)
-      : null,
-    async update(reply) {
-      const { content, embeds, components } = toReplyPayload(reply);
-      const payload = {
-        content: content ?? null,
-        embeds,
-        components,
-        allowedMentions: NO_MENTIONS,
-      };
-      // The first answer to a click may edit the message in place; later ones go through the webhook.
-      if (interaction.replied || interaction.deferred) await interaction.editReply(payload);
-      else await interaction.update(payload);
-    },
-    async reply(reply) {
-      const { content, embeds, components, ephemeral } = toReplyPayload({
-        ephemeral: true,
-        ...(typeof reply === "string" ? { content: reply } : reply),
-      });
-      const payload = { content, embeds, components, allowedMentions: NO_MENTIONS };
-      const flags = ephemeral ? MessageFlags.Ephemeral : undefined;
-      if (interaction.replied || interaction.deferred)
-        await interaction.followUp({ ...payload, flags });
-      else await interaction.reply({ ...payload, flags });
-    },
-  };
 }

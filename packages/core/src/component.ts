@@ -7,6 +7,7 @@
  * the component, `<data>` is small free-form state (page number, category…) and may contain colons.
  */
 import type { CommandContext, Reply } from "./command.ts";
+import { STATE_KEY_LENGTH } from "./component-state.ts";
 
 export type ButtonStyle = "primary" | "secondary" | "success" | "danger";
 
@@ -59,15 +60,23 @@ const MAX_ROWS = 5;
 const MAX_BUTTONS_PER_ROW = 5;
 const MAX_SELECT_OPTIONS = 25;
 const MAX_LABEL = 80;
+const MAX_OPTION_TEXT = 100;
+const MAX_PLACEHOLDER = 150;
+const MAX_URL = 512;
+const LINK_PROTOCOLS = ["http:", "https:", "discord:"];
 /** A snowflake has at most 20 digits; reserved when checking that an id can fit. */
 const MAX_OWNER_LENGTH = 20;
 
-/** Longest `<module>:<name>:` prefix that still leaves room for an owner id and a separator. */
-export const MAX_COMPONENT_PREFIX = MAX_CUSTOM_ID - MAX_OWNER_LENGTH - 2;
+/**
+ * Longest `<module>:<name>:` prefix. The rest of `<module>:<name>:<owner>:<data>` must fit an owner id,
+ * its separator and a state store key (`STATE_KEY_LENGTH`), the biggest `<data>` a component can rely on.
+ */
+export const MAX_COMPONENT_PREFIX = MAX_CUSTOM_ID - MAX_OWNER_LENGTH - 1 - STATE_KEY_LENGTH;
 
 /** Discord's limits, checked before the API refuses the whole message. Throws a descriptive Error. */
 export function validateRows(rows: readonly ComponentRow[]): void {
   if (rows.length > MAX_ROWS) throw new Error(`A message holds at most ${MAX_ROWS} component rows`);
+  const customIds = new Set<string>();
   rows.forEach((row, index) => {
     const at = `component row ${index + 1}`;
     if (row.length === 0) throw new Error(`${at} is empty`);
@@ -78,27 +87,78 @@ export function validateRows(rows: readonly ComponentRow[]): void {
     if (row.length > MAX_BUTTONS_PER_ROW) {
       throw new Error(`${at} holds more than ${MAX_BUTTONS_PER_ROW} buttons`);
     }
-    for (const component of row) validateComponent(component, at);
+    for (const component of row) {
+      validateComponent(component, at);
+      if (component.type === "link") continue;
+      if (customIds.has(component.customId)) {
+        throw new Error(`${at}: duplicate custom_id "${component.customId}" in one message`);
+      }
+      customIds.add(component.customId);
+    }
   });
+}
+
+function inRange(text: string, min: number, max: number): boolean {
+  return text.length >= min && text.length <= max;
 }
 
 function validateComponent(component: ComponentSpec, at: string): void {
   if (component.type === "link") {
-    if (!URL.canParse(component.url)) throw new Error(`${at}: invalid link URL "${component.url}"`);
-  } else if (component.customId.length < 1 || component.customId.length > MAX_CUSTOM_ID) {
+    validateLinkUrl(component.url, at);
+  } else if (!inRange(component.customId, 1, MAX_CUSTOM_ID)) {
     throw new Error(`${at}: custom_id must be 1–${MAX_CUSTOM_ID} characters`);
   }
-  if (component.type === "select") {
-    const { options } = component;
-    if (options.length < 1 || options.length > MAX_SELECT_OPTIONS) {
-      throw new Error(`${at}: a select menu needs 1–${MAX_SELECT_OPTIONS} options`);
-    }
-    const { minValues = 1, maxValues = 1 } = component;
-    if (minValues > maxValues || maxValues > options.length) {
-      throw new Error(`${at}: select minValues/maxValues do not fit its options`);
-    }
-  } else if (component.label.length < 1 || component.label.length > MAX_LABEL) {
+  if (component.type === "select") validateSelect(component, at);
+  else if (!inRange(component.label, 1, MAX_LABEL)) {
     throw new Error(`${at}: button label must be 1–${MAX_LABEL} characters`);
+  }
+}
+
+function validateLinkUrl(url: string, at: string): void {
+  if (!URL.canParse(url)) throw new Error(`${at}: invalid link URL "${url}"`);
+  if (url.length > MAX_URL) throw new Error(`${at}: link URL is longer than ${MAX_URL} characters`);
+  const protocol = new URL(url).protocol;
+  if (!LINK_PROTOCOLS.includes(protocol)) {
+    throw new Error(`${at}: link URL must start with http:, https: or discord:`);
+  }
+}
+
+function validateSelect(select: SelectSpec, at: string): void {
+  const { options, placeholder } = select;
+  if (options.length < 1 || options.length > MAX_SELECT_OPTIONS) {
+    throw new Error(`${at}: a select menu needs 1–${MAX_SELECT_OPTIONS} options`);
+  }
+  if (placeholder !== undefined && placeholder.length > MAX_PLACEHOLDER) {
+    throw new Error(`${at}: select placeholder is longer than ${MAX_PLACEHOLDER} characters`);
+  }
+  const values = new Set<string>();
+  for (const option of options) {
+    if (!inRange(option.label, 1, MAX_OPTION_TEXT)) {
+      throw new Error(`${at}: option label must be 1–${MAX_OPTION_TEXT} characters`);
+    }
+    if (!inRange(option.value, 1, MAX_OPTION_TEXT)) {
+      throw new Error(`${at}: option value must be 1–${MAX_OPTION_TEXT} characters`);
+    }
+    if ((option.description?.length ?? 0) > MAX_OPTION_TEXT) {
+      throw new Error(`${at}: option description is longer than ${MAX_OPTION_TEXT} characters`);
+    }
+    if (values.has(option.value))
+      throw new Error(`${at}: duplicate option value "${option.value}"`);
+    values.add(option.value);
+  }
+  const { minValues = 1, maxValues = 1 } = select;
+  if (
+    !Number.isInteger(minValues) ||
+    !Number.isInteger(maxValues) ||
+    minValues < 0 ||
+    minValues > MAX_SELECT_OPTIONS ||
+    maxValues < 1 ||
+    maxValues > MAX_SELECT_OPTIONS
+  ) {
+    throw new Error(`${at}: minValues must be an integer 0–25 and maxValues an integer 1–25`);
+  }
+  if (minValues > maxValues || maxValues > options.length) {
+    throw new Error(`${at}: select minValues/maxValues do not fit its options`);
   }
 }
 
@@ -109,8 +169,12 @@ export interface ComponentContext
   readonly state: string;
   /** Chosen option values of a select menu; empty for a button. */
   readonly values: readonly string[];
+  /** True once the click got any answer (`update`, `reply` or `defer`). */
+  readonly acknowledged: boolean;
   /** Edits the message the component is attached to. `ephemeral` is ignored. */
   update(reply: Reply): Promise<void>;
+  /** Acknowledges the click without changing anything yet; a later `update` edits the message. */
+  defer(): Promise<void>;
   /** A new message; ephemeral unless the reply says `ephemeral: false`. */
   reply(reply: Reply): Promise<void>;
 }

@@ -7,9 +7,11 @@ import {
   defineButton,
   defineSelect,
   ExpiredStateError,
+  MAX_COMPONENT_PREFIX,
   MENU_EXPIRED,
   NOT_YOUR_MENU,
   parseCustomId,
+  STATE_KEY_LENGTH,
   UNKNOWN_COMPONENT,
   UserError,
   validateRows,
@@ -117,7 +119,7 @@ describe("registry", () => {
   });
 
   test("rejects a prefix too long to leave room for the owner id", () => {
-    const module = "m".repeat(60);
+    const module = "m".repeat(MAX_COMPONENT_PREFIX);
     const c = defineButton({ module, name: "x".repeat(32), run: async () => {} });
     expect(() => createRegistry([{ name: module, components: [c] }])).toThrow("too long");
   });
@@ -172,7 +174,7 @@ describe("clicking", () => {
     });
     expect(clicks).toEqual([]);
     expect(denied.replies).toEqual([
-      { content: "Nie masz uprawnień do tej komendy.", ephemeral: true },
+      { content: "Nie masz uprawnień do tego menu.", ephemeral: true },
     ]);
     await clickComponent({
       registry,
@@ -181,9 +183,7 @@ describe("clicking", () => {
     });
     expect(clicks).toEqual(["admin"]);
     const dm = await clickComponent({ registry, customId: admin.customId(OWNER), guildId: null });
-    expect(dm.replies).toEqual([
-      { content: "Ta komenda działa tylko na serwerze.", ephemeral: true },
-    ]);
+    expect(dm.replies).toEqual([{ content: "To menu działa tylko na serwerze.", ephemeral: true }]);
   });
 
   test("a UserError is shown, any other error is hidden behind a generic message", async () => {
@@ -193,6 +193,32 @@ describe("clicking", () => {
     const other = await clickComponent({ registry, customId: boom.customId(OWNER, "other") });
     expect(JSON.stringify(other.replies)).not.toContain("password");
     expect(other.replies).toHaveLength(1);
+  });
+
+  test("a handler that answers nothing is deferred; one that answered is not", async () => {
+    const quiet = defineButton({ module: "fun", name: "quiet", run: async () => {} });
+    const loud = defineButton({
+      module: "fun",
+      name: "loud",
+      run: (ctx) => ctx.update("hi"),
+    });
+    const early = defineButton({
+      module: "fun",
+      name: "early",
+      async run(ctx) {
+        await ctx.defer();
+        await ctx.update("later");
+      },
+    });
+    const registry = createRegistry([{ name: "fun", components: [quiet, loud, early] }]);
+    const q = await clickComponent({ registry, customId: quiet.customId(OWNER) });
+    expect(q.deferred).toBe(true);
+    expect(q.acknowledged).toBe(true);
+    const l = await clickComponent({ registry, customId: loud.customId(OWNER) });
+    expect(l.deferred).toBe(false);
+    const e = await clickComponent({ registry, customId: early.customId(OWNER) });
+    expect(e.deferred).toBe(true);
+    expect(e.updates).toEqual(["later"]);
   });
 
   test("an unknown custom_id gets an ephemeral notice", async () => {
@@ -229,6 +255,69 @@ describe("validateRows", () => {
     expect(() => validateRows([[button("x".repeat(101))]])).toThrow("custom_id");
     expect(() => validateRows([[{ ...select, options: [] }]])).toThrow("options");
     expect(() => validateRows([[{ type: "link", url: "nope", label: "x" }]])).toThrow("URL");
+  });
+
+  describe("limits", () => {
+    const select = (over: object = {}) => ({
+      type: "select" as const,
+      customId: "s",
+      options: [
+        { label: "A", value: "a" },
+        { label: "B", value: "b" },
+      ],
+      ...over,
+    });
+    const reject = (row: ComponentRow, message: string) =>
+      expect(() => validateRows([row])).toThrow(message);
+
+    test("duplicate custom_id in one message", () => {
+      expect(() => validateRows([[button("a")], [button("a")]])).toThrow("duplicate custom_id");
+    });
+    test("option label and value length", () => {
+      reject([select({ options: [{ label: "", value: "a" }] })], "option label");
+      reject([select({ options: [{ label: "x".repeat(101), value: "a" }] })], "option label");
+      reject([select({ options: [{ label: "A", value: "" }] })], "option value");
+      reject([select({ options: [{ label: "A", value: "v".repeat(101) }] })], "option value");
+    });
+    test("option description length", () => {
+      const options = [{ label: "A", value: "a", description: "d".repeat(101) }];
+      reject([select({ options })], "description");
+    });
+    test("placeholder length", () => {
+      reject([select({ placeholder: "p".repeat(151) })], "placeholder");
+      expect(() => validateRows([[select({ placeholder: "p".repeat(150) })]])).not.toThrow();
+    });
+    test("duplicate option values", () => {
+      const options = [
+        { label: "A", value: "a" },
+        { label: "B", value: "a" },
+      ];
+      reject([select({ options })], "duplicate option value");
+    });
+    test("minValues is an integer 0-25", () => {
+      reject([select({ minValues: -1 })], "minValues");
+      reject([select({ minValues: 1.5 })], "minValues");
+      expect(() => validateRows([[select({ minValues: 0 })]])).not.toThrow();
+    });
+    test("maxValues is an integer 1-25", () => {
+      reject([select({ maxValues: 0 })], "maxValues");
+      reject([select({ maxValues: 26 })], "maxValues");
+      reject([select({ maxValues: 1.5 })], "maxValues");
+    });
+    test("minValues may not exceed maxValues", () => {
+      reject([select({ minValues: 2, maxValues: 1 })], "do not fit");
+    });
+    test("link URL scheme", () => {
+      for (const url of ["javascript:alert(1)", "file:///etc/passwd", "ftp://x.test/"]) {
+        reject([{ type: "link", url, label: "x" }], "http:");
+      }
+      for (const url of ["http://a.test", "https://a.test", "discord://-/channels/@me"]) {
+        expect(() => validateRows([[{ type: "link", url, label: "x" }]])).not.toThrow();
+      }
+    });
+    test("link URL length", () => {
+      reject([{ type: "link", url: `https://a.test/${"x".repeat(500)}`, label: "x" }], "512");
+    });
   });
 
   test("fake contexts apply the same validation to replies", async () => {
@@ -312,6 +401,48 @@ describe("paginator", () => {
     expect(ctx.replies).toEqual([{ content: NOT_YOUR_MENU, ephemeral: true }]);
   });
 
+  test("a malformed button state is acknowledged instead of ignored", async () => {
+    const { paginator, registry } = setupPaginator();
+    const ctx = await clickComponent({
+      registry,
+      customId: paginator.button.customId(OWNER, "garbage"),
+    });
+    expect(ctx.updates).toEqual([]);
+    expect(ctx.deferred).toBe(true);
+  });
+
+  test("permissions and guildOnly are checked on every click", async () => {
+    const paginator = createPaginator({
+      module: "fun",
+      name: "pages",
+      permissions: 1n << 5n,
+      render: () => ({ content: "x", pageCount: 2 }),
+    });
+    const registry = createRegistry([{ name: "fun", components: [paginator.button] }]);
+    const customId = paginator.button.customId(OWNER, "1:");
+    const denied = await clickComponent({ registry, customId, memberPermissions: 0n });
+    expect(denied.updates).toEqual([]);
+    expect(denied.replies).toEqual([
+      { content: "Nie masz uprawnień do tego menu.", ephemeral: true },
+    ]);
+    const allowed = await clickComponent({ registry, customId, memberPermissions: 1n << 5n });
+    expect(allowed.updates).toHaveLength(1);
+
+    const guildOnly = createPaginator({
+      module: "fun",
+      name: "pages",
+      guildOnly: true,
+      render: () => ({ content: "x", pageCount: 2 }),
+    });
+    const guildRegistry = createRegistry([{ name: "fun", components: [guildOnly.button] }]);
+    const dm = await clickComponent({
+      registry: guildRegistry,
+      customId: guildOnly.button.customId(OWNER, "1:"),
+      guildId: null,
+    });
+    expect(dm.replies).toEqual([{ content: "To menu działa tylko na serwerze.", ephemeral: true }]);
+  });
+
   test("a page past the end after the list shrank falls back to the last page", async () => {
     const { paginator, registry } = setupPaginator(["only"]);
     const stale = paginator.button.customId(OWNER, "5:");
@@ -356,6 +487,21 @@ describe("component state store", () => {
     clock = 15 * 60_000;
     await expect(store.load("k")).rejects.toThrow(ExpiredStateError);
     await expect(store.load("k")).rejects.toThrow(MENU_EXPIRED);
+  });
+
+  test("generated keys are 22 characters of base64url and differ", async () => {
+    const store = createComponentStateStore(memory(() => 0));
+    const keys = [await store.save(1), await store.save(2)];
+    for (const key of keys) expect(key).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(keys[0]).not.toBe(keys[1]);
+    expect(STATE_KEY_LENGTH).toBe(22);
+  });
+
+  test("a prefix plus owner and a state key fits a custom_id", () => {
+    const module = "m".repeat(MAX_COMPONENT_PREFIX - 2 - 32);
+    const c = defineButton({ module, name: "x".repeat(32), run: async () => {} });
+    const id = c.customId("9".repeat(20), "k".repeat(STATE_KEY_LENGTH));
+    expect(id.length).toBeLessThanOrEqual(100);
   });
 
   test("an expired state reaches the user as an ephemeral message", async () => {
