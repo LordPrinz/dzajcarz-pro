@@ -9,15 +9,49 @@ export interface PrefixSettings {
   reset(guildId: string): Promise<void>;
 }
 
+/** One place a module is switched off. */
+export interface DisabledModule {
+  module: string;
+  /** null: the whole server. */
+  channelId: string | null;
+}
+
+/** Which modules a guild has switched off. Cache invalidation is the implementation's job. */
+export interface ModuleToggles {
+  /** Every module the bot runs. */
+  moduleNames(): readonly string[];
+  list(guildId: string): Promise<readonly DisabledModule[]>;
+  disable(guildId: string, module: string, channelId: string | null): Promise<void>;
+  /** False when that module was not disabled there. */
+  enable(guildId: string, module: string, channelId: string | null): Promise<boolean>;
+}
+
+/** Asks Discord about channels, so a channel id typed by a member is never trusted on its own. */
+export interface GuildChannels {
+  /** Whether the channel exists and belongs to this guild. */
+  belongsTo(guildId: string, channelId: string): Promise<boolean>;
+  /** Whether the channel is a thread; toggles follow the parent channel, so threads cannot be switched. */
+  isThread(guildId: string, channelId: string): Promise<boolean>;
+}
+
 export interface SettingsModuleDeps {
   prefixes: PrefixSettings;
   defaultPrefix: string;
+  modules: ModuleToggles;
+  channels: GuildChannels;
 }
+
+/** Modules that stay on: without them nobody could turn anything back on or ask for help. */
+export const PROTECTED_MODULES: ReadonlySet<string> = new Set(["general", "settings"]);
 
 /** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
 const MANAGE_GUILD = 1n << 5n;
 
 const MAX_PREFIX_LENGTH = 5;
+const MAX_ECHOED_NAME = 32;
+/** Discord rejects messages over 2000 characters; the rest is left for the "and N more" line. */
+const MAX_LIST_LENGTH = 1900;
+const MAX_CHANNELS_PER_LINE = 10;
 
 /** Throws a UserError (Polish) unless the prefix is 1-5 characters of non-whitespace, non-backtick text. */
 function validatePrefix(prefix: string): void {
@@ -33,7 +67,25 @@ function validatePrefix(prefix: string): void {
   if (prefix.includes("`")) throw new UserError("Prefiks nie może zawierać znaku `.");
 }
 
-export function createSettingsModule({ prefixes, defaultPrefix }: SettingsModuleDeps): BotModule {
+/** Joins lines while they fit in one message; the lines that do not fit become "...i jeszcze N". */
+function fitToMessage(lines: readonly string[]): string {
+  const kept: string[] = [];
+  let length = 0;
+  for (const line of lines) {
+    if (length + line.length + 1 > MAX_LIST_LENGTH) break;
+    kept.push(line);
+    length += line.length + 1;
+  }
+  const hidden = lines.length - kept.length;
+  return hidden > 0 ? [...kept, `…i jeszcze ${hidden}`].join("\n") : kept.join("\n");
+}
+
+export function createSettingsModule({
+  prefixes,
+  defaultPrefix,
+  modules,
+  channels,
+}: SettingsModuleDeps): BotModule {
   // Guild-only is implied by `permissions`, so guildId is set when these run.
   const guildOf = (guildId: string | null): string => {
     if (guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
@@ -79,5 +131,104 @@ export function createSettingsModule({ prefixes, defaultPrefix }: SettingsModule
     },
   });
 
-  return { name: "settings", commands: [prefix] };
+  /** Throws a UserError (Polish) listing the valid names unless `name` is a module that can be toggled. */
+  const toggleable = (name: string): string => {
+    const module = name.toLowerCase();
+    const known = modules.moduleNames();
+    if (!known.includes(module)) {
+      const valid = known.filter((n) => !PROTECTED_MODULES.has(n));
+      // The name is echoed inside a code span: a backtick would close it, and length is capped for Discord's limit.
+      const shown = name.replaceAll("`", "").slice(0, MAX_ECHOED_NAME);
+      throw new UserError(
+        `Nie ma modułu \`${shown}\`. Dostępne moduły: ${valid.map((n) => `\`${n}\``).join(", ") || "brak"}.`,
+      );
+    }
+    if (PROTECTED_MODULES.has(module)) {
+      throw new UserError(`Modułu \`${module}\` nie można wyłączyć.`);
+    }
+    return module;
+  };
+
+  /**
+   * The channel option is only an id, so check that it is a channel of this guild before storing it.
+   * `enable` skips this: a row for a deleted channel must stay removable.
+   */
+  const requireToggleableChannel = async (guildId: string, channelId: string | null) => {
+    if (channelId === null) return;
+    if (!(await channels.belongsTo(guildId, channelId))) {
+      throw new UserError("Nie znalazłem takiego kanału na tym serwerze.");
+    }
+    if (await channels.isThread(guildId, channelId)) {
+      throw new UserError(
+        "Wątki dziedziczą ustawienia kanału nadrzędnego. Wybierz kanał, w którym wątek leży.",
+      );
+    }
+  };
+
+  const where = (channelId: string | null) =>
+    channelId ? `na kanale <#${channelId}>` : "na serwerze";
+
+  const modulesCommand = defineCommand({
+    name: "modules",
+    description: "Włącza i wyłącza moduły bota na serwerze albo na wybranym kanale",
+    permissions: MANAGE_GUILD,
+    subcommands: {
+      list: defineSubcommand({
+        description: "Pokazuje moduły i miejsca, w których są wyłączone",
+        run: async (ctx) => {
+          const disabled = await modules.list(guildOf(ctx.guildId));
+          const lines = modules.moduleNames().map((name) => {
+            const entries = disabled.filter((d) => d.module === name);
+            if (entries.length === 0) return `\`${name}\`: włączony`;
+            if (entries.some((d) => d.channelId === null))
+              return `\`${name}\`: wyłączony na serwerze`;
+            const shown = entries.slice(0, MAX_CHANNELS_PER_LINE).map((d) => `<#${d.channelId}>`);
+            const hidden = entries.length - shown.length;
+            const more = hidden > 0 ? ` i jeszcze ${hidden}` : "";
+            return `\`${name}\`: wyłączony na kanałach ${shown.join(", ")}${more}`;
+          });
+          await ctx.reply({ content: fitToMessage(lines), ephemeral: true });
+        },
+      }),
+      disable: defineSubcommand({
+        description: "Wyłącza moduł na serwerze albo na jednym kanale",
+        options: {
+          module: { type: "string", description: "Nazwa modułu", required: true },
+          channel: { type: "channel", description: "Kanał (domyślnie cały serwer)" },
+        },
+        run: async (ctx) => {
+          const module = toggleable(ctx.args.module);
+          const channelId = ctx.args.channel ?? null;
+          const guildId = guildOf(ctx.guildId);
+          await requireToggleableChannel(guildId, channelId);
+          await modules.disable(guildId, module, channelId);
+          await ctx.reply({
+            content: `Moduł \`${module}\` jest wyłączony ${where(channelId)}.`,
+            ephemeral: true,
+          });
+        },
+      }),
+      enable: defineSubcommand({
+        description: "Włącza moduł z powrotem na serwerze albo na jednym kanale",
+        options: {
+          module: { type: "string", description: "Nazwa modułu", required: true },
+          channel: { type: "channel", description: "Kanał (domyślnie cały serwer)" },
+        },
+        run: async (ctx) => {
+          const module = toggleable(ctx.args.module);
+          const channelId = ctx.args.channel ?? null;
+          const guildId = guildOf(ctx.guildId);
+          const changed = await modules.enable(guildId, module, channelId);
+          await ctx.reply({
+            content: changed
+              ? `Moduł \`${module}\` jest znów włączony ${where(channelId)}.`
+              : `Moduł \`${module}\` nie był wyłączony ${where(channelId)}.`,
+            ephemeral: true,
+          });
+        },
+      }),
+    },
+  });
+
+  return { name: "settings", commands: [prefix, modulesCommand] };
 }

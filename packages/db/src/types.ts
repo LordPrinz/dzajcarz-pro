@@ -8,3 +8,11 @@ export interface GuildSettingsRow {
   created_at: Date;
   updated_at: Date;
 }
+
+export interface ModuleDisabledRow {
+  guild_id: string;
+  module: string;
+  /** '' = the whole guild. */
+  channel_id: string;
+  created_at: Date;
+}

@@ -1,4 +1,5 @@
 import {
+  type AnyCommand,
   type CommandRegistry,
   checkPrefixAccess,
   executeCommand,
@@ -6,62 +7,101 @@ import {
   matchPrefix,
   type PrefixInvocation,
   parsePrefixArgs,
+  type RegisteredEvent,
   splitInvocation,
 } from "@dzajcarz/core";
 import { type Client, Events, type Message } from "discord.js";
 import { contextFromInteraction, contextFromMessage } from "./discord/context.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
+import { eventScope, toggleChannelId } from "./event-scope.ts";
+import type { ModuleGate } from "./module-gate.ts";
 import type { PrefixResolver } from "./prefix-resolver.ts";
 
 export interface BotDeps {
   registry: CommandRegistry;
   prefixes: PrefixResolver;
+  gate: ModuleGate;
   logger: Logger;
 }
 
+const MODULE_DISABLED_REPLY = "Ten moduł jest wyłączony na tym serwerze albo kanale.";
+
+/** Whether the module that owns `command` is on where the command was used. */
+async function commandEnabled(
+  { registry, gate }: Pick<BotDeps, "registry" | "gate">,
+  command: AnyCommand,
+  guildId: string | null,
+  channelId: string,
+): Promise<boolean> {
+  const module = registry.moduleOf(command);
+  return module === undefined || (await gate.isEnabled(guildId, channelId, module));
+}
+
+/**
+ * Wraps a module's event handler: it is skipped when its module is off for the event's guild and
+ * channel, and a failing handler is logged instead of crashing the process.
+ */
+export function createEventListener(
+  { module, handler }: RegisteredEvent,
+  gate: ModuleGate,
+  logger: Logger,
+): (...args: unknown[]) => Promise<void> {
+  return async (...args) => {
+    try {
+      const scope = eventScope(handler.event, args);
+      if (scope && !(await gate.isEnabled(scope.guildId, scope.channelId, module))) return;
+      await handler.run(...args);
+    } catch (error) {
+      logger.error("Event handler failed", { handler: handler.name, event: handler.event, error });
+    }
+  };
+}
+
 /** Routes Discord events to module handlers and commands. */
-export function attachHandlers(client: Client, { registry, prefixes, logger }: BotDeps): void {
-  for (const { handler } of registry.events()) {
-    const listener = async (...args: unknown[]) => {
-      try {
-        await handler.run(...args);
-      } catch (error) {
-        logger.error("Event handler failed", {
-          handler: handler.name,
-          event: handler.event,
-          error,
-        });
-      }
-    };
-    if (handler.once) client.once(handler.event, listener);
-    else client.on(handler.event, listener);
+export function attachHandlers(client: Client, deps: BotDeps): void {
+  const { registry, gate, logger } = deps;
+  for (const entry of registry.events()) {
+    const listener = createEventListener(entry, gate, logger);
+    if (entry.handler.once) client.once(entry.handler.event, listener);
+    else client.on(entry.handler.event, listener);
   }
 
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-    const command = registry.find(interaction.commandName);
-    if (!command) {
-      // Registered on Discord but not in this build: deploy commands again after removing one.
-      logger.warn("Unknown slash command", { command: interaction.commandName });
-      return;
+    try {
+      if (!interaction.isChatInputCommand()) return;
+      const command = registry.find(interaction.commandName);
+      if (!command) {
+        // Registered on Discord but not in this build: deploy commands again after removing one.
+        logger.warn("Unknown slash command", { command: interaction.commandName });
+        return;
+      }
+      const ctx = contextFromInteraction(interaction);
+      const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
+      if (!(await commandEnabled(deps, command, ctx.guildId, toggleChannel))) {
+        await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
+        return;
+      }
+      await executeCommand(command, ctx, logger);
+    } catch (error) {
+      logger.error("Interaction handling failed", { interactionId: interaction.id, error });
     }
-    await executeCommand(command, contextFromInteraction(interaction), logger);
   });
 
   client.on(Events.MessageCreate, async (message) => {
     try {
-      await handleMessage(message, client.user?.id, { registry, prefixes, logger });
+      await handleMessage(message, client.user?.id, deps);
     } catch (error) {
       logger.error("Message handling failed", { messageId: message.id, error });
     }
   });
 }
 
-async function handleMessage(
+export async function handleMessage(
   message: Message,
   botUserId: string | undefined,
-  { registry, prefixes, logger }: BotDeps,
+  deps: BotDeps,
 ): Promise<void> {
+  const { registry, prefixes, logger } = deps;
   if (message.author.bot || message.webhookId) return;
   const invocation = matchInvocation(
     message.content,
@@ -72,6 +112,16 @@ async function handleMessage(
   // Another bot may share the prefix, so unknown names stay silent.
   const command = registry.find(invocation.name);
   if (!command) return;
+  // Silent like an unknown name: a reply to every attempt in a muted channel would be noise.
+  if (
+    !(await commandEnabled(
+      deps,
+      command,
+      message.guildId,
+      toggleChannelId(message.channel, message.channelId),
+    ))
+  )
+    return;
 
   // Checked before parsing so a member without access never learns the usage of a command they cannot run.
   const context = contextFromMessage(message, {});

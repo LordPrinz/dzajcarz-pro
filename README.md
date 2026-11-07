@@ -35,7 +35,7 @@ packages/
   kv/               KeyValueStore port with Redis and in-memory adapters
 modules/
   general/          ping, help
-  settings/         prefix (set, reset, show)
+  settings/         prefix (set, reset, show), modules (list, disable, enable)
   …                 music, party, moderation, welcome, fun (see the board)
 infra/              docker-compose: Postgres, Redis, Lavalink (profile "music")
 scripts/            git hooks and GitHub automation (Bun scripts)

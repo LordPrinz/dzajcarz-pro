@@ -25,6 +25,10 @@ describe.skipIf(!sql)("migrator", () => {
     const tables = await db<{ table_name: string }[]>`
       SELECT table_name FROM information_schema.tables WHERE table_schema = ${schema}
     `;
-    expect(tables.map((t) => t.table_name).sort()).toEqual(["guild_settings", "schema_migrations"]);
+    expect(tables.map((t) => t.table_name).sort()).toEqual([
+      "guild_settings",
+      "module_disabled",
+      "schema_migrations",
+    ]);
   });
 });

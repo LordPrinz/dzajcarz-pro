@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { matchInvocation } from "./bot.ts";
+import { createRegistry, defineCommand, defineEvent, silentLogger } from "@dzajcarz/core";
+import type { Message } from "discord.js";
+import { createEventListener, handleMessage, matchInvocation } from "./bot.ts";
+import type { ModuleGate } from "./module-gate.ts";
 
 const BOT = "111111111111111111";
 
@@ -19,5 +22,88 @@ describe("matchInvocation", () => {
       name: "prefix",
       rest: "reset",
     });
+  });
+});
+
+describe("module toggles in routing", () => {
+  const GUILD = "100000000000000001";
+  const CHANNEL = "300000000000000003";
+
+  function setup(disabled: string[]) {
+    const ran: string[] = [];
+    const ping = defineCommand({
+      name: "ping",
+      description: "x",
+      run: async () => {
+        ran.push("command");
+      },
+    });
+    const event = defineEvent({
+      name: "on-message",
+      event: "messageCreate",
+      run: () => {
+        ran.push("event");
+      },
+    });
+    const registry = createRegistry([{ name: "fun", commands: [ping], events: [event] }]);
+    const gate: ModuleGate = {
+      isEnabled: async (_guild, _channel, module) => !disabled.includes(module),
+      forget: async () => {},
+    };
+    const replies: unknown[] = [];
+    const message = {
+      author: { bot: false },
+      webhookId: null,
+      content: "!ping",
+      guildId: GUILD,
+      channelId: CHANNEL,
+      member: null,
+      channel: { isDMBased: () => false, isSendable: () => false },
+      reply: async (payload: unknown) => void replies.push(payload),
+    } as unknown as Message;
+    const deps = {
+      registry,
+      gate,
+      prefixes: { resolve: async () => "!", forget: async () => {} },
+      logger: silentLogger,
+    };
+    return { ran, replies, message, deps, registry, gate };
+  }
+
+  test("a prefix command runs while its module is on", async () => {
+    const { ran, message, deps } = setup([]);
+    await handleMessage(message, undefined, deps);
+    expect(ran).toEqual(["command"]);
+  });
+
+  test("a prefix command of a disabled module is blocked without a reply", async () => {
+    const { ran, replies, message, deps } = setup(["fun"]);
+    await handleMessage(message, undefined, deps);
+    expect(ran).toEqual([]);
+    expect(replies).toEqual([]);
+  });
+
+  test("an event handler runs while its module is on", async () => {
+    const { ran, registry, gate, message } = setup([]);
+    const [entry] = registry.events();
+    if (!entry) throw new Error("event missing");
+    await createEventListener(entry, gate, silentLogger)(message);
+    expect(ran).toEqual(["event"]);
+  });
+
+  test("an event handler of a disabled module is skipped", async () => {
+    const { ran, registry, gate, message } = setup(["fun"]);
+    const [entry] = registry.events();
+    if (!entry) throw new Error("event missing");
+    await createEventListener(entry, gate, silentLogger)(message);
+    expect(ran).toEqual([]);
+  });
+
+  test("an event outside any guild is never gated", async () => {
+    const { ran, registry, gate, message } = setup(["fun"]);
+    const [entry] = registry.events();
+    if (!entry) throw new Error("event missing");
+    await createEventListener(entry, gate, silentLogger)({ ...message, guildId: null });
+    expect(ran).toEqual(["event"]);
   });
 });
