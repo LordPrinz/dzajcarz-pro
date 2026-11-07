@@ -1,5 +1,6 @@
 import type { ClientEvents } from "discord.js";
 import type { AnyCommand } from "./command.ts";
+import type { AnyComponent } from "./component.ts";
 
 export interface EventHandler<E extends keyof ClientEvents = keyof ClientEvents> {
   /** For logs: which handler failed. */
@@ -32,6 +33,8 @@ export interface BotModule {
   name: string;
   commands?: readonly AnyCommand[];
   events?: readonly AnyEventHandler[];
+  /** Button and select handlers for the components this module attaches to replies. */
+  components?: readonly AnyComponent[];
   /** Called on shutdown, before the Discord client is destroyed: stop timers, flush buffers. */
   dispose?(): Promise<void> | void;
 }
