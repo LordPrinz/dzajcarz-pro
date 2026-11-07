@@ -31,6 +31,7 @@ export interface PartyAreaRow {
   category_id: string;
   name_template: string;
   command_channel: boolean;
+  panel_message_id: string | null;
   created_at: Date;
 }
 

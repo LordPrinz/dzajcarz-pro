@@ -6,6 +6,7 @@ const GUILD_INSTALL_PERMISSIONS =
   PermissionFlagsBits.SendMessages |
   PermissionFlagsBits.EmbedLinks |
   PermissionFlagsBits.ReadMessageHistory |
+  PermissionFlagsBits.ManageMessages |
   PermissionFlagsBits.ManageChannels |
   PermissionFlagsBits.ManageRoles |
   PermissionFlagsBits.MoveMembers |

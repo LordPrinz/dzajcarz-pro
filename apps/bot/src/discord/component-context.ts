@@ -1,12 +1,17 @@
 import type { ComponentContext, ResolvedComponent } from "@dzajcarz/core";
-import { type ButtonInteraction, MessageFlags, type StringSelectMenuInteraction } from "discord.js";
+import {
+  type ButtonInteraction,
+  MessageFlags,
+  type StringSelectMenuInteraction,
+  type UserSelectMenuInteraction,
+} from "discord.js";
 import { MODAL_NOT_FIRST, placeOf } from "./context.ts";
 import { toModalPayload } from "./modals.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 /** A click on a button or a choice in a select menu, as a module handler sees it. */
 export function contextFromComponent(
-  interaction: ButtonInteraction | StringSelectMenuInteraction,
+  interaction: ButtonInteraction | StringSelectMenuInteraction | UserSelectMenuInteraction,
   resolved: ResolvedComponent,
 ): ComponentContext {
   // How the click was answered decides where `update` lands:
@@ -15,7 +20,8 @@ export function contextFromComponent(
   let answer: "none" | "update" | "reply" = "none";
   return {
     state: resolved.state,
-    values: interaction.isStringSelectMenu() ? interaction.values : [],
+    values:
+      interaction.isStringSelectMenu() || interaction.isUserSelectMenu() ? interaction.values : [],
     user: { id: interaction.user.id, displayName: interaction.user.displayName },
     guildId: interaction.guildId,
     place: placeOf(interaction.context, interaction.guildId),

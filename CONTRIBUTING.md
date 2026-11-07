@@ -55,7 +55,7 @@ In the Discord Developer Portal, open the application, then _Installation_:
   install link.
 - Guild Install default scopes: `bot` and `applications.commands`.
 - Guild Install permissions: View Channels, Send Messages, Embed Links, Read Message History, Manage
-  Channels, Manage Roles, Move Members, Connect, Speak.
+  Messages, Manage Channels, Manage Roles, Move Members, Connect, Speak.
 - Privileged intents on the _Bot_ page: Message Content and Server Members.
 
 A user install adds the bot to a person's account: `/help` and `/ping` then work in DMs, group DMs and

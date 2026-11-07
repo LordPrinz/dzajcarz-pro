@@ -6,6 +6,8 @@ import {
   defineCommand,
   defineEvent,
   defineModal,
+  defineUserSelect,
+  PUBLIC_OWNER,
   silentLogger,
   UNKNOWN_MODAL,
 } from "@dzajcarz/core";
@@ -209,6 +211,7 @@ describe("components in routing", () => {
         memberPermissions: guildId === null ? null : { bitfield: 0n },
         isButton: () => true,
         isStringSelectMenu: () => false,
+        isUserSelectMenu: () => false,
         message: { id: "msg1" },
         update: record("update"),
         deferUpdate: record("deferUpdate"),
@@ -292,12 +295,77 @@ describe("components in routing", () => {
     });
   });
 
+  test("a public component runs for anyone, and a private one still refuses a stranger", async () => {
+    const { ran, calls, click, deps } = setup([]);
+    const panel = defineButton({
+      module: "fun",
+      name: "panel",
+      public: true,
+      run: async (ctx) => void ran.push(`panel:${ctx.user.id}`),
+    });
+    const registry = createRegistry([{ name: "fun", components: [panel] }]);
+    await handleComponent(click(panel.customId(PUBLIC_OWNER), "999999999999999999"), {
+      ...deps,
+      registry,
+    });
+    expect(ran).toEqual(["panel:999999999999999999"]);
+    expect(calls.find((c) => c.method === "reply")).toBeUndefined();
+
+    const {
+      ran: privateRan,
+      calls: privateCalls,
+      click: privateClick,
+      deps: privateDeps,
+      button,
+    } = setup([]);
+    await handleComponent(
+      privateClick(button.customId(PUBLIC_OWNER), "999999999999999999"),
+      privateDeps,
+    );
+    expect(privateRan).toEqual([]);
+    expect(privateCalls[0]).toMatchObject({ payload: { content: "To nie Twoje menu." } });
+  });
+
+  test("a user select reaches a user-select handler with the chosen user", async () => {
+    const { calls, click, deps } = setup([]);
+    const seen: string[][] = [];
+    const pick = defineUserSelect({
+      module: "fun",
+      name: "pick",
+      run: async (ctx) => void seen.push([...ctx.values]),
+    });
+    const registry = createRegistry([{ name: "fun", components: [pick] }]);
+    const interaction = {
+      ...click(pick.customId(OWNER)),
+      isButton: () => false,
+      isUserSelectMenu: () => true,
+      values: ["42"],
+    } as unknown as ButtonInteraction;
+    await handleComponent(interaction, { ...deps, registry });
+    expect(seen).toEqual([["42"]]);
+    expect(calls.map((c) => c.method)).toEqual(["deferUpdate"]);
+  });
+
+  test("a custom_id whose component kind differs from the interaction is answered as unknown", async () => {
+    const { ran, calls, click, deps, button } = setup([]);
+    const asUserSelect = {
+      ...click(button.customId(OWNER)),
+      isButton: () => false,
+      isUserSelectMenu: () => true,
+      values: ["42"],
+    } as unknown as ButtonInteraction;
+    await handleComponent(asUserSelect, deps);
+    expect(ran).toEqual([]);
+    expect(calls[0]).toMatchObject({ method: "reply" });
+  });
+
   test("a select type no module handles is answered instead of left to time out", async () => {
     const { ran, calls, click, deps, button } = setup([]);
     const roleSelect = {
       ...click(button.customId(OWNER)),
       isButton: () => false,
       isStringSelectMenu: () => false,
+      isUserSelectMenu: () => false,
     } as unknown as ButtonInteraction;
     await handleComponent(roleSelect, deps);
     expect(ran).toEqual([]);

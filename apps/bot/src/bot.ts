@@ -1,6 +1,7 @@
 import {
   type AnyCommand,
   type CommandRegistry,
+  type ComponentKind,
   checkPrefixAccess,
   executeCommand,
   executeComponent,
@@ -134,6 +135,13 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
   });
 }
 
+function componentKind(interaction: MessageComponentInteraction): ComponentKind | undefined {
+  if (interaction.isButton()) return "button";
+  if (interaction.isStringSelectMenu()) return "select";
+  if (interaction.isUserSelectMenu()) return "user-select";
+  return undefined;
+}
+
 /**
  * A click on a button or select menu: found by custom_id, gated by its module's toggles like a command,
  * then run through the owner and permission checks of `executeComponent`.
@@ -143,11 +151,14 @@ export async function handleComponent(
   deps: BotDeps,
 ): Promise<void> {
   const { registry, logger } = deps;
-  const supported = interaction.isButton() || interaction.isStringSelectMenu();
-  const resolved = supported ? registry.resolveComponent(interaction.customId) : undefined;
+  const supported =
+    interaction.isButton() || interaction.isStringSelectMenu() || interaction.isUserSelectMenu();
+  const found = supported ? registry.resolveComponent(interaction.customId) : undefined;
+  // A handler written for a button must not receive a select's values, whatever custom_id arrives.
+  const resolved = found?.component.kind === componentKind(interaction) ? found : undefined;
   if (!supported || !resolved) {
     // Posted by an older build or by another bot sharing the application, or a select type no module
-    // handles yet (user, role, channel, mentionable): answer instead of leaving the click to time out.
+    // handles yet (role, channel, mentionable): answer instead of leaving the click to time out.
     logger.warn("Unknown component", { customId: interaction.customId });
     await interaction.reply({
       content: UNKNOWN_COMPONENT,

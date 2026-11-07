@@ -1,4 +1,9 @@
-import type { EveryoneAccess, PartyChannels, PartyPermissions } from "@dzajcarz/module-party";
+import type {
+  EveryoneAccess,
+  PartyChannels,
+  PartyChat,
+  PartyPermissions,
+} from "@dzajcarz/module-party";
 import {
   type Channel,
   ChannelType,
@@ -6,6 +11,7 @@ import {
   PermissionFlagsBits,
   RESTJSONErrorCodes,
 } from "discord.js";
+import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 const UNKNOWN_CHANNEL = RESTJSONErrorCodes.UnknownChannel;
 
@@ -252,6 +258,68 @@ export function createPartyPermissions(client: Client): PartyPermissions {
       const channel = await voiceChannel(channelId);
       const member = await memberOf(guildId, userId);
       return channel.permissionsFor(member).has(PermissionFlagsBits.ManageChannels);
+    },
+  };
+}
+
+const UNKNOWN_MESSAGE = RESTJSONErrorCodes.UnknownMessage;
+/** Discord returns at most this many messages per request. */
+const HISTORY_PAGE = 100;
+
+export function createPartyChat(client: Client): PartyChat {
+  /** The text chat of a voice channel. */
+  async function chatOf(channelId: string) {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel?.isTextBased()) throw new Error(`Not a text chat: ${channelId}`);
+    return channel;
+  }
+
+  return {
+    async post(channelId, message) {
+      const { content, embeds, components } = toReplyPayload(message);
+      const channel = await chatOf(channelId);
+      if (!("send" in channel)) throw new Error(`Cannot send to ${channelId}`);
+      const sent = await channel.send({
+        content,
+        embeds,
+        components,
+        allowedMentions: NO_MENTIONS,
+      });
+      return sent.id;
+    },
+
+    async exists(channelId, messageId) {
+      const channel = await chatOf(channelId);
+      try {
+        await channel.messages.fetch({ message: messageId, force: true });
+        return true;
+      } catch (error) {
+        if (hasCode(error, UNKNOWN_MESSAGE)) return false;
+        throw error;
+      }
+    },
+
+    async recentMessageIds(channelId) {
+      const channel = await chatOf(channelId);
+      const messages = await channel.messages.fetch({ limit: HISTORY_PAGE });
+      return [...messages.keys()];
+    },
+
+    async deleteMessages(channelId, messageIds) {
+      const channel = await chatOf(channelId);
+      // Bulk delete refuses messages older than 14 days (filtered out here), so those go one by one.
+      const bulk =
+        messageIds.length > 1 && "bulkDelete" in channel
+          ? await channel.bulkDelete(messageIds, true)
+          : undefined;
+      for (const id of messageIds) {
+        if (bulk?.has(id)) continue;
+        try {
+          await channel.messages.delete(id);
+        } catch (error) {
+          if (!hasCode(error, UNKNOWN_MESSAGE)) throw error;
+        }
+      }
     },
   };
 }

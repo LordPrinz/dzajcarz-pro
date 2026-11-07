@@ -232,6 +232,7 @@ describe("opening", () => {
       channelId: "3",
       inGuild: () => false,
       isStringSelectMenu: () => false,
+      isUserSelectMenu: () => false,
       showModal: async (payload: unknown) => {
         shown.push(payload);
       },
@@ -254,6 +255,7 @@ describe("opening", () => {
       channelId: "3",
       inGuild: () => false,
       isStringSelectMenu: () => false,
+      isUserSelectMenu: () => false,
       deferUpdate: async () => {},
       showModal: async () => {},
     } as unknown as MessageComponentInteraction;

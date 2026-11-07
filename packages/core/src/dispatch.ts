@@ -84,7 +84,7 @@ interface GateMessages {
  * is logged and replaced by a generic message, always as an ephemeral reply.
  */
 async function runGated(
-  target: { guildOnly?: boolean; permissions?: bigint },
+  target: { guildOnly?: boolean; permissions?: bigint; public?: boolean },
   owner: string,
   ctx: GatedContext,
   messages: GateMessages,
@@ -93,7 +93,7 @@ async function runGated(
   answerSilently: () => Promise<void>,
 ): Promise<void> {
   try {
-    if (ctx.user.id !== owner) throw new UserError(messages.notOwner);
+    if (!target.public && ctx.user.id !== owner) throw new UserError(messages.notOwner);
     const denied = checkAccess(target, ctx, messages);
     if (denied) throw new UserError(denied);
     await run();

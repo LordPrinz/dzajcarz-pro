@@ -1,11 +1,16 @@
 import {
   type BotModule,
   type CommandContext,
+  defineButton,
   defineCommand,
   defineEvent,
   defineModal,
   defineSubcommand,
+  defineUserSelect,
   type Logger,
+  PUBLIC_OWNER,
+  type Reply,
+  type Scheduler,
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
@@ -17,8 +22,10 @@ export interface PartyArea {
   joinChannelId: string;
   /** Name of the area's new channels; `{user}` becomes the member's display name. */
   nameTemplate: string;
-  /** Whether the area wants a command channel. Only stored here; the panel is a separate feature. */
+  /** Whether the area wants a command channel: the text chat of the join channel, with a panel. */
   commandChannel: boolean;
+  /** The control panel message in that chat; null until one is posted. */
+  panelMessageId: string | null;
 }
 
 export interface PartyChannel {
@@ -32,12 +39,14 @@ export interface PartyChannel {
 
 /** Where areas and owned channels are stored. */
 export interface PartyRepository {
-  addArea(area: PartyArea): Promise<void>;
+  addArea(area: Omit<PartyArea, "panelMessageId">): Promise<void>;
   /** Changes the settings of an area; false when the area is gone. */
   updateArea(
     joinChannelId: string,
     settings: Pick<PartyArea, "nameTemplate" | "commandChannel">,
   ): Promise<boolean>;
+  /** Remembers (or with null forgets) the panel message; false when the area is gone. */
+  setPanelMessage(joinChannelId: string, messageId: string | null): Promise<boolean>;
   listAreas(guildId: string): Promise<PartyArea[]>;
   listAllAreas(): Promise<PartyArea[]>;
   findAreaByJoinChannel(joinChannelId: string): Promise<PartyArea | null>;
@@ -96,6 +105,19 @@ export interface PartyChannels {
   voiceChannelOf(guildId: string, userId: string): Promise<string | null>;
 }
 
+/**
+ * The text chat of an area's join voice channel, where the panel lives. Every method rejects when Discord
+ * refuses (no access, no Manage Messages). A message that is already gone counts as deleted.
+ */
+export interface PartyChat {
+  /** Posts the message and returns its id. */
+  post(channelId: string, message: Reply): Promise<string>;
+  exists(channelId: string, messageId: string): Promise<boolean>;
+  /** Ids of the most recent messages (up to 100), newest first. */
+  recentMessageIds(channelId: string): Promise<string[]>;
+  deleteMessages(channelId: string, messageIds: string[]): Promise<void>;
+}
+
 /** What `setEveryone` changes: true allows, false denies, null clears the overwrite, undefined leaves it alone. */
 export interface EveryoneAccess {
   connect?: boolean | null;
@@ -142,6 +164,11 @@ export interface PartyModuleDeps {
   repository: PartyRepository;
   channels: PartyChannels;
   permissions: PartyPermissions;
+  chat: PartyChat;
+  /** Delays the cleanup of command channel messages. */
+  scheduler: Scheduler;
+  /** Whether the module is on in that channel; the startup sweep leaves areas where it is off alone. */
+  moduleEnabled: (guildId: string, channelId: string, module: string) => Promise<boolean>;
   /** The join lock and the creation cooldown. */
   lock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
   logger: Logger;
@@ -169,6 +196,9 @@ const FALLBACK_CHANNEL_NAME = "Kanał imprezowy";
 
 /** Modal state of a form that creates a new area (an edit carries the area's join channel id instead). */
 const NEW_AREA = "new";
+
+/** What the owner controls need from whoever triggers them: a command, a button, a select or a form. */
+type ControlContext = Pick<CommandContext, "guildId" | "user" | "reply">;
 
 const characters = (text: string): number => [...text].length;
 
@@ -222,6 +252,10 @@ function fitModalText(text: string, max: number): string {
   return out;
 }
 
+const PANEL_OUTDATED = "Ten panel jest nieaktualny. Poproś administratora o nowy.";
+const PANEL_PROBLEM =
+  "Nie udało się zaktualizować panelu w kanale komend. Sprawdź, czy bot może tam pisać i usuwać wiadomości.";
+
 const COMMAND_CHANNEL_ON = "on";
 const COMMAND_CHANNEL_OFF = "off";
 
@@ -234,11 +268,16 @@ const MAX_CREATIONS = 3;
 const CREATION_WINDOW_MS = 60_000;
 /** Reconciliation leaves younger channels alone: their owner may still be mid-join. */
 const RECONCILE_GRACE_MS = 15_000;
+/** Messages in a command channel (the panel excepted) are deleted this long after they appear. */
+const CHAT_CLEANUP_MS = 15_000;
 
 export function createPartyModule({
   repository,
   channels,
   permissions,
+  chat,
+  scheduler,
+  moduleEnabled,
   lock,
   logger,
 }: PartyModuleDeps): BotModule {
@@ -420,7 +459,11 @@ export function createPartyModule({
       await ctx.defer();
       if (ctx.state === NEW_AREA) {
         const joinChannelId = await createArea(guildId, settings);
-        await ctx.reply({ content: createdMessage(joinChannelId), ephemeral: true });
+        const panelProblem = settings.commandChannel ? await syncPanel(joinChannelId) : null;
+        await ctx.reply({
+          content: [createdMessage(joinChannelId), panelProblem].filter(Boolean).join(" "),
+          ephemeral: true,
+        });
         return;
       }
       const area = await repository.findAreaByJoinChannel(ctx.state);
@@ -436,8 +479,11 @@ export function createPartyModule({
       ) {
         throw new UserError("Ta strefa już nie istnieje.");
       }
+      // The panel follows the flag (posted when turned on, removed when turned off) before any rename.
+      const panelProblem = await syncPanel(area.joinChannelId);
+      const renamed = await renameAreaChannels(area, settings, guildId);
       await ctx.reply({
-        content: await renameAreaChannels(area, settings, guildId),
+        content: [renamed, panelProblem].filter(Boolean).join(" "),
         ephemeral: true,
       });
     },
@@ -527,21 +573,11 @@ export function createPartyModule({
       }),
       lock: defineSubcommand({
         description: "Zamyka twój kanał dla nowych osób",
-        run: async (ctx) => {
-          const { channel, reason } = await controlledChannel(ctx, "lock");
-          await permissions.setEveryone(channel.channelId, { connect: false }, reason);
-          await ownerReply(ctx, channel, "lock", "Kanał zamknięty. Wejdą tylko zaproszeni.");
-        },
+        run: (ctx) => lockChannel(ctx),
       }),
       unlock: defineSubcommand({
         description: "Otwiera twój kanał z powrotem",
-        run: async (ctx) => {
-          const { channel, reason } = await controlledChannel(ctx, "unlock");
-          // Back to what the category says, so a private area stays private.
-          const { connect } = await permissions.inheritedEveryone(channel.channelId);
-          await permissions.setEveryone(channel.channelId, { connect }, reason);
-          await ownerReply(ctx, channel, "unlock", "Kanał otwarty.");
-        },
+        run: (ctx) => unlockChannel(ctx),
       }),
       limit: defineSubcommand({
         description: "Ustawia limit osób na twoim kanale (0 = bez limitu)",
@@ -554,100 +590,406 @@ export function createPartyModule({
             maxValue: MAX_USER_LIMIT,
           },
         },
-        run: async (ctx) => {
-          const { channel, reason } = await controlledChannel(ctx, "limit");
-          await permissions.setLimit(channel.channelId, ctx.args.count, reason);
-          await ownerReply(
-            ctx,
-            channel,
-            "limit",
-            ctx.args.count === 0
-              ? "Limit osób usunięty."
-              : `Limit osób ustawiony na ${ctx.args.count}.`,
-          );
-        },
+        run: (ctx) => limitChannel(ctx, ctx.args.count),
       }),
       rename: defineSubcommand({
         description: "Zmienia nazwę twojego kanału",
         options: {
           name: { type: "string", description: "Nowa nazwa", required: true, rest: true },
         },
-        run: async (ctx) => {
-          const name = ctx.args.name.trim();
-          if (name.length === 0) throw new UserError("Podaj nową nazwę kanału.");
-          if ([...name].length > MAX_NAME_LENGTH) {
-            throw new UserError(`Nazwa może mieć najwyżej ${MAX_NAME_LENGTH} znaków.`);
-          }
-          const { channel, reason } = await controlledChannel(ctx, "rename");
-          if (await overRenameLimit(channel.channelId)) {
-            throw new UserError("Discord pozwala zmienić nazwę 2 razy na 10 minut.");
-          }
-          await permissions.rename(channel.channelId, name, reason);
-          await ownerReply(ctx, channel, "rename", `Nazwa kanału zmieniona na „${name}”.`);
-        },
+        run: (ctx) => renameChannel(ctx, ctx.args.name),
       }),
       invite: defineSubcommand({
         description: "Wpuszcza wskazaną osobę na twój kanał, nawet zamknięty lub ukryty",
         options: {
           user: { type: "user", description: "Kogo zaprosić", required: true },
         },
-        run: async (ctx) => {
-          const { channel, reason } = await controlledChannel(ctx, "invite");
-          await pickMember(ctx, ctx.args.user);
-          await permissions.allowMember(channel.channelId, ctx.args.user, reason);
-          await ownerReply(ctx, channel, "invite", `<@${ctx.args.user}> może wejść na kanał.`);
-        },
+        run: (ctx) => inviteMember(ctx, ctx.args.user),
       }),
       block: defineSubcommand({
         description: "Blokuje wskazaną osobę na twoim kanale i wyrzuca ją, jeśli tam jest",
         options: {
           user: { type: "user", description: "Kogo zablokować", required: true },
         },
-        run: async (ctx) => {
-          const { channel, reason } = await controlledChannel(ctx, "block");
-          const userId = ctx.args.user;
-          if (userId === channel.ownerId) {
-            throw new UserError("Nie można zablokować właściciela kanału.");
-          }
-          const member = await pickMember(ctx, userId);
-          if (member.moderator) throw new UserError("Nie możesz zablokować moderatora.");
-          await permissions.denyMember(channel.channelId, userId, reason);
-          if ((await channels.members(channel.channelId))?.includes(userId)) {
-            await permissions.disconnect(guildOf(ctx.guildId), userId, channel.channelId, reason);
-          }
-          await ownerReply(ctx, channel, "block", `<@${userId}> jest zablokowany na kanale.`);
-        },
+        run: (ctx) => blockMember(ctx, ctx.args.user),
       }),
       hide: defineSubcommand({
         description: "Ukrywa twój kanał na liście",
-        run: async (ctx) => {
-          const { channel, reason } = await controlledChannel(ctx, "hide");
-          await permissions.setEveryone(channel.channelId, { view: false }, reason);
-          await ownerReply(ctx, channel, "hide", "Kanał ukryty.");
-        },
+        run: (ctx) => hideChannel(ctx),
       }),
       show: defineSubcommand({
         description: "Pokazuje twój kanał na liście",
-        run: async (ctx) => {
-          const { channel, reason } = await controlledChannel(ctx, "show");
-          const { view } = await permissions.inheritedEveryone(channel.channelId);
-          await permissions.setEveryone(channel.channelId, { view }, reason);
-          await ownerReply(ctx, channel, "show", "Kanał znów widoczny.");
-        },
+        run: (ctx) => showChannel(ctx),
       }),
     },
   });
 
-  /**
-   * The party channel the caller is in, provided they own it or have Manage Channels on it, plus the
-   * audit-log reason for the edit. Counts against the member's control cooldown.
+  const limitModal = defineModal({
+    module: "party",
+    name: "limit",
+    title: "Limit osób",
+    guildOnly: true,
+    fields: {
+      count: {
+        type: "short",
+        label: "Limit osób (0 = bez limitu)",
+        placeholder: `0-${MAX_USER_LIMIT}`,
+        maxLength: 2,
+      },
+    },
+    run: async (ctx) => {
+      if (!/^\d{1,2}$/.test(ctx.values.count)) {
+        throw new UserError(`Limit osób to liczba od 0 do ${MAX_USER_LIMIT}.`);
+      }
+      await limitChannel(ctx, Number(ctx.values.count));
+    },
+  });
+
+  const renameModal = defineModal({
+    module: "party",
+    name: "rename",
+    title: "Zmień nazwę kanału",
+    guildOnly: true,
+    fields: {
+      name: { type: "short", label: "Nowa nazwa", maxLength: MAX_NAME_LENGTH },
+    },
+    run: (ctx) => renameChannel(ctx, ctx.values.name),
+  });
+
+  /** What a panel button does; the id is the button's custom_id state. */
+  const PANEL_BUTTONS = {
+    lock: { label: "Zamknij", emoji: "🔒", run: lockChannel },
+    unlock: { label: "Otwórz", emoji: "🔓", run: unlockChannel },
+    hide: { label: "Ukryj", emoji: "🙈", run: hideChannel },
+    show: { label: "Pokaż", emoji: "👁️", run: showChannel },
+  } as const;
+  const PANEL_FORMS = {
+    limit: { label: "Limit", emoji: "👥", modal: limitModal },
+    rename: { label: "Zmień nazwę", emoji: "✏️", modal: renameModal },
+  } as const;
+  const PANEL_USER_ACTIONS = {
+    invite: { placeholder: "Zaproś osobę…", run: inviteMember },
+    block: { placeholder: "Zablokuj osobę…", run: blockMember },
+  } as const;
+
+  const isKey = <T extends object>(table: T, key: string): key is Extract<keyof T, string> =>
+    Object.hasOwn(table, key);
+
+  // Public: anyone may press them, and each press acts on the presser's own party channel.
+  const panelButton = defineButton({
+    module: "party",
+    name: "panel",
+    guildOnly: true,
+    public: true,
+    run: async (ctx) => {
+      if (isKey(PANEL_BUTTONS, ctx.state)) return PANEL_BUTTONS[ctx.state].run(ctx);
+      if (isKey(PANEL_FORMS, ctx.state)) {
+        // Refuse before the form opens, so nobody types a name only to be told they have no channel.
+        await ownChannel(ctx);
+        return ctx.showModal(PANEL_FORMS[ctx.state].modal.build(ctx.user.id));
+      }
+      throw new UserError(PANEL_OUTDATED);
+    },
+  });
+
+  const panelUserSelect = defineUserSelect({
+    module: "party",
+    name: "panel-user",
+    guildOnly: true,
+    public: true,
+    run: async (ctx) => {
+      const userId = ctx.values[0];
+      if (!isKey(PANEL_USER_ACTIONS, ctx.state) || !userId) throw new UserError(PANEL_OUTDATED);
+      // Redrawing the panel clears the choice in the menu, so the next pick starts from the placeholder.
+      await ctx.update(panelMessage());
+      await PANEL_USER_ACTIONS[ctx.state].run(ctx, userId);
+    },
+  });
+
+  /** The embed and controls in a command channel. Static, so any press can redraw it unchanged. */
+  function panelMessage(): Reply {
+    const buttons = { ...PANEL_BUTTONS, ...PANEL_FORMS };
+    const button = (action: keyof typeof buttons) => ({
+      type: "button" as const,
+      customId: panelButton.customId(PUBLIC_OWNER, action),
+      label: buttons[action].label,
+      emoji: buttons[action].emoji,
+    });
+    const userSelect = (action: keyof typeof PANEL_USER_ACTIONS) => ({
+      type: "user-select" as const,
+      customId: panelUserSelect.customId(PUBLIC_OWNER, action),
+      placeholder: PANEL_USER_ACTIONS[action].placeholder,
+    });
+    return {
+      embeds: [
+        {
+          title: "Panel kanału party",
+          description:
+            "Przyciski sterują twoim kanałem głosowym: wejdź na niego i wybierz akcję. " +
+            "Odpowiedzi widzisz tylko ty, a wiadomości na tym czacie znikają po 15 sekundach.",
+        },
+      ],
+      components: [
+        [button("lock"), button("unlock"), button("hide"), button("show")],
+        [button("limit"), button("rename")],
+        [userSelect("invite")],
+        [userSelect("block")],
+      ],
+    };
+  }
+
+  /*
+   * The command channel: the text chat of an area's join voice channel. One panel message (its id is in
+   * `party_area.panel_message_id`), everything else is deleted after CHAT_CLEANUP_MS.
    */
-  async function controlledChannel(
-    ctx: CommandContext,
-    action: string,
-  ): Promise<{ channel: PartyChannel; reason: string }> {
+
+  /** Panel work per area runs one at a time, so two triggers (an edit, a deleted panel) never post two. */
+  const panelQueue = new Map<string, Promise<unknown>>();
+  function serialized<T>(joinChannelId: string, task: () => Promise<T>): Promise<T> {
+    const previous = panelQueue.get(joinChannelId) ?? Promise.resolve();
+    const result = previous.then(task);
+    const tail = result.catch(() => {});
+    panelQueue.set(joinChannelId, tail);
+    void tail.then(() => {
+      if (panelQueue.get(joinChannelId) === tail) panelQueue.delete(joinChannelId);
+    });
+    return result;
+  }
+
+  /**
+   * Makes the chat match the area's flag: panel posted (again, if it is gone) when on, removed when off.
+   * With `sweep` it also deletes the leftover messages, for startup. Returns null, or a Polish sentence
+   * saying what failed, for the caller to show.
+   */
+  function syncPanel(joinChannelId: string, sweep = false): Promise<string | null> {
+    return serialized(joinChannelId, async () => {
+      try {
+        const area = await repository.findAreaByJoinChannel(joinChannelId);
+        if (!area) return null;
+        if (!area.commandChannel) {
+          await removePanel(area);
+          return null;
+        }
+        const panelId = await ensurePanel(area);
+        if (sweep) await deleteLeftovers(joinChannelId, panelId);
+        return null;
+      } catch (error) {
+        logger.warn("Party panel not synced", { joinChannelId, error });
+        return PANEL_PROBLEM;
+      }
+    });
+  }
+
+  /** The id of the area's panel, posting a new one when there is none or it was deleted. */
+  async function ensurePanel(area: PartyArea): Promise<string> {
+    const { joinChannelId, panelMessageId } = area;
+    if (panelMessageId && (await chat.exists(joinChannelId, panelMessageId))) return panelMessageId;
+    const messageId = await chat.post(joinChannelId, panelMessage());
+    let stored: boolean;
+    try {
+      stored = await repository.setPanelMessage(joinChannelId, messageId);
+    } catch (error) {
+      await chat.deleteMessages(joinChannelId, [messageId]).catch(() => {});
+      throw error;
+    }
+    // The area was removed meanwhile; its chat goes with the channel, but do not leave a panel behind.
+    if (!stored) await chat.deleteMessages(joinChannelId, [messageId]).catch(() => {});
+    return messageId;
+  }
+
+  async function removePanel(area: PartyArea): Promise<void> {
+    if (!area.panelMessageId) return;
+    await chat.deleteMessages(area.joinChannelId, [area.panelMessageId]);
+    await repository.setPanelMessage(area.joinChannelId, null);
+  }
+
+  async function deleteLeftovers(joinChannelId: string, panelId: string): Promise<void> {
+    const stale = (await chat.recentMessageIds(joinChannelId)).filter((id) => id !== panelId);
+    if (stale.length > 0) await chat.deleteMessages(joinChannelId, stale);
+  }
+
+  /** Timers waiting to delete a message, so shutdown can cancel them. */
+  const cleanups = new Set<() => void>();
+
+  function scheduleCleanup(joinChannelId: string, messageId: string): void {
+    const cancel = scheduler.after(CHAT_CLEANUP_MS, () => {
+      cleanups.delete(cancel);
+      void deleteStale(joinChannelId, messageId);
+    });
+    cleanups.add(cancel);
+  }
+
+  /** Never throws. Looks again when the timer fires: the flag or the panel may have changed meanwhile. */
+  async function deleteStale(joinChannelId: string, messageId: string): Promise<void> {
+    try {
+      const area = await repository.findAreaByJoinChannel(joinChannelId);
+      if (!area?.commandChannel || area.panelMessageId === messageId) return;
+      await chat.deleteMessages(joinChannelId, [messageId]);
+    } catch (error) {
+      logger.warn("Could not delete a command channel message", {
+        joinChannelId,
+        messageId,
+        error,
+      });
+    }
+  }
+
+  const chatMessage = defineEvent({
+    name: "party-chat-message",
+    event: "messageCreate",
+    // Gated like any other party feature: switch the module off in a channel and its chat is left alone.
+    run: async (message: { id: string; channelId: string; guildId: string | null }) => {
+      if (!message.guildId) return;
+      try {
+        const area = await repository.findAreaByJoinChannel(message.channelId);
+        if (!area?.commandChannel || message.id === area.panelMessageId) return;
+        scheduleCleanup(area.joinChannelId, message.id);
+      } catch (error) {
+        logger.warn("Could not schedule command channel cleanup", {
+          channelId: message.channelId,
+          error,
+        });
+      }
+    },
+  });
+
+  /** Never throws. Reposts the panel when it is among the deleted messages. */
+  async function onMessagesDeleted(channelId: string, messageIds: string[]): Promise<void> {
+    try {
+      const area = await repository.findAreaByJoinChannel(channelId);
+      if (!area?.commandChannel || !area.panelMessageId) return;
+      if (messageIds.includes(area.panelMessageId)) await syncPanel(area.joinChannelId);
+    } catch (error) {
+      logger.warn("Party panel repost failed", { channelId, error });
+    }
+  }
+
+  const panelDeleted = defineEvent({
+    name: "party-panel-deleted",
+    event: "messageDelete",
+    run: (message: { id: string; channelId: string }) =>
+      onMessagesDeleted(message.channelId, [message.id]),
+  });
+
+  const panelBulkDeleted = defineEvent({
+    name: "party-panel-bulk-deleted",
+    event: "messageDeleteBulk",
+    run: (messages: ReadonlyMap<string, unknown>, channel: { id: string }) =>
+      onMessagesDeleted(channel.id, [...messages.keys()]),
+  });
+
+  const panels = defineEvent({
+    name: "party-panels",
+    event: "clientReady",
+    once: true,
+    // Not alwaysRun for the same reason as the cleanup, but there is no channel on this event to gate by,
+    // so `restorePanels` asks the module gate per area.
+    run: (_client: Client<true>) => restorePanels(),
+  });
+
+  /** On startup: panels missing or deleted while offline come back, messages left over are deleted. Never throws. */
+  async function restorePanels(): Promise<void> {
+    try {
+      let restored = 0;
+      for (const { guildId, joinChannelId, commandChannel } of await repository.listAllAreas()) {
+        if (!commandChannel) continue;
+        try {
+          if (!(await moduleEnabled(guildId, joinChannelId, "party"))) continue;
+          if ((await syncPanel(joinChannelId, true)) === null) restored++;
+        } catch (error) {
+          logger.warn("Could not restore a party panel", { joinChannelId, error });
+        }
+      }
+      logger.info("Party panels restored", { restored });
+    } catch (error) {
+      logger.error("Party panel restore failed", { error });
+    }
+  }
+
+  /*
+   * The owner controls. Slash and prefix subcommands and the panel's buttons all call these, so a control
+   * behaves the same wherever it was triggered. They need only who asked and a way to answer.
+   */
+
+  async function lockChannel(ctx: ControlContext): Promise<void> {
+    const { channel, reason } = await controlledChannel(ctx, "lock");
+    await permissions.setEveryone(channel.channelId, { connect: false }, reason);
+    await ownerReply(ctx, channel, "lock", "Kanał zamknięty. Wejdą tylko zaproszeni.");
+  }
+
+  async function unlockChannel(ctx: ControlContext): Promise<void> {
+    const { channel, reason } = await controlledChannel(ctx, "unlock");
+    // Back to what the category says, so a private area stays private.
+    const { connect } = await permissions.inheritedEveryone(channel.channelId);
+    await permissions.setEveryone(channel.channelId, { connect }, reason);
+    await ownerReply(ctx, channel, "unlock", "Kanał otwarty.");
+  }
+
+  async function hideChannel(ctx: ControlContext): Promise<void> {
+    const { channel, reason } = await controlledChannel(ctx, "hide");
+    await permissions.setEveryone(channel.channelId, { view: false }, reason);
+    await ownerReply(ctx, channel, "hide", "Kanał ukryty.");
+  }
+
+  async function showChannel(ctx: ControlContext): Promise<void> {
+    const { channel, reason } = await controlledChannel(ctx, "show");
+    const { view } = await permissions.inheritedEveryone(channel.channelId);
+    await permissions.setEveryone(channel.channelId, { view }, reason);
+    await ownerReply(ctx, channel, "show", "Kanał znów widoczny.");
+  }
+
+  async function limitChannel(ctx: ControlContext, count: number): Promise<void> {
+    if (!Number.isInteger(count) || count < 0 || count > MAX_USER_LIMIT) {
+      throw new UserError(`Limit osób to liczba od 0 do ${MAX_USER_LIMIT}.`);
+    }
+    const { channel, reason } = await controlledChannel(ctx, "limit");
+    await permissions.setLimit(channel.channelId, count, reason);
+    await ownerReply(
+      ctx,
+      channel,
+      "limit",
+      count === 0 ? "Limit osób usunięty." : `Limit osób ustawiony na ${count}.`,
+    );
+  }
+
+  async function renameChannel(ctx: ControlContext, rawName: string): Promise<void> {
+    const name = rawName.trim();
+    if (name.length === 0) throw new UserError("Podaj nową nazwę kanału.");
+    if ([...name].length > MAX_NAME_LENGTH) {
+      throw new UserError(`Nazwa może mieć najwyżej ${MAX_NAME_LENGTH} znaków.`);
+    }
+    const { channel, reason } = await controlledChannel(ctx, "rename");
+    if (await overRenameLimit(channel.channelId)) {
+      throw new UserError("Discord pozwala zmienić nazwę 2 razy na 10 minut.");
+    }
+    await permissions.rename(channel.channelId, name, reason);
+    await ownerReply(ctx, channel, "rename", `Nazwa kanału zmieniona na „${name}”.`);
+  }
+
+  async function inviteMember(ctx: ControlContext, userId: string): Promise<void> {
+    const { channel, reason } = await controlledChannel(ctx, "invite");
+    await pickMember(ctx, userId);
+    await permissions.allowMember(channel.channelId, userId, reason);
+    await ownerReply(ctx, channel, "invite", `<@${userId}> może wejść na kanał.`);
+  }
+
+  async function blockMember(ctx: ControlContext, userId: string): Promise<void> {
+    const { channel, reason } = await controlledChannel(ctx, "block");
+    if (userId === channel.ownerId) {
+      throw new UserError("Nie można zablokować właściciela kanału.");
+    }
+    const member = await pickMember(ctx, userId);
+    if (member.moderator) throw new UserError("Nie możesz zablokować moderatora.");
+    await permissions.denyMember(channel.channelId, userId, reason);
+    if ((await channels.members(channel.channelId))?.includes(userId)) {
+      await permissions.disconnect(guildOf(ctx.guildId), userId, channel.channelId, reason);
+    }
+    await ownerReply(ctx, channel, "block", `<@${userId}> jest zablokowany na kanale.`);
+  }
+
+  /** controlledChannel's checks (the cooldown aside), also used to refuse early before a form opens. */
+  async function ownChannel(ctx: ControlContext): Promise<PartyChannel> {
     const guildId = guildOf(ctx.guildId);
-    await enforceControlCooldown(guildId, ctx.user.id);
     const here = await channels.voiceChannelOf(guildId, ctx.user.id);
     const channel = here ? await repository.findChannel(here) : null;
     if (!channel || channel.guildId !== guildId) {
@@ -659,6 +1001,19 @@ export function createPartyModule({
     ) {
       throw new UserError("Tylko właściciel kanału może to zrobić.");
     }
+    return channel;
+  }
+
+  /**
+   * The party channel the caller is in, provided they own it or have Manage Channels on it, plus the
+   * audit-log reason for the edit. Counts against the member's control cooldown.
+   */
+  async function controlledChannel(
+    ctx: ControlContext,
+    action: string,
+  ): Promise<{ channel: PartyChannel; reason: string }> {
+    await enforceControlCooldown(guildOf(ctx.guildId), ctx.user.id);
+    const channel = await ownChannel(ctx);
     return { channel, reason: `Party: ${action} by ${ctx.user.id}` };
   }
 
@@ -688,7 +1043,7 @@ export function createPartyModule({
   }
 
   /** Refuses the caller, the bot and people who are not on the server. */
-  async function pickMember(ctx: CommandContext, userId: string): Promise<GuildMemberInfo> {
+  async function pickMember(ctx: ControlContext, userId: string): Promise<GuildMemberInfo> {
     if (userId === ctx.user.id) throw new UserError("Nie możesz zrobić tego sam sobie.");
     const member = await permissions.lookupMember(guildOf(ctx.guildId), userId);
     if (!member) throw new UserError("Nie ma takiej osoby na tym serwerze.");
@@ -698,7 +1053,7 @@ export function createPartyModule({
 
   /** Logs the finished control action, then tells the caller. */
   async function ownerReply(
-    ctx: CommandContext,
+    ctx: ControlContext,
     channel: PartyChannel,
     action: string,
     content: string,
@@ -1045,7 +1400,12 @@ export function createPartyModule({
   return {
     name: "party",
     commands: [party],
-    modals: [areaModal],
-    events: [leave, join, removed, reconcile],
+    components: [panelButton, panelUserSelect],
+    modals: [areaModal, limitModal, renameModal],
+    events: [leave, join, removed, reconcile, chatMessage, panelDeleted, panelBulkDeleted, panels],
+    dispose() {
+      for (const cancel of cleanups) cancel();
+      cleanups.clear();
+    },
   };
 }

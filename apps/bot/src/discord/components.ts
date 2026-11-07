@@ -21,7 +21,10 @@ export function toComponentRows(rows: readonly ComponentRow[] = []): ComponentRo
   return rows.map((row) => ({
     type: ComponentType.ActionRow,
     components: row.map((spec): APIComponentInMessageActionRow => {
-      const emoji = spec.type === "select" || !spec.emoji ? undefined : { name: spec.emoji };
+      const emoji =
+        spec.type === "select" || spec.type === "user-select" || !spec.emoji
+          ? undefined
+          : { name: spec.emoji };
       if (spec.type === "link") {
         return {
           type: ComponentType.Button,
@@ -39,6 +42,16 @@ export function toComponentRows(rows: readonly ComponentRow[] = []): ComponentRo
           custom_id: spec.customId,
           label: spec.label,
           emoji,
+          disabled: spec.disabled,
+        };
+      }
+      if (spec.type === "user-select") {
+        return {
+          type: ComponentType.UserSelect,
+          custom_id: spec.customId,
+          placeholder: spec.placeholder,
+          min_values: 1,
+          max_values: 1,
           disabled: spec.disabled,
         };
       }

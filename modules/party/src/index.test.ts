@@ -4,9 +4,16 @@ import {
   executeCommand,
   type LogFields,
   type Logger,
+  type Reply,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext, replyText, submitModal } from "@dzajcarz/core/testing";
+import {
+  clickComponent,
+  createFakeContext,
+  createFakeScheduler,
+  replyText,
+  submitModal,
+} from "@dzajcarz/core/testing";
 import { createMemoryStore } from "@dzajcarz/kv";
 import type { Channel, VoiceState } from "discord.js";
 import {
@@ -14,6 +21,7 @@ import {
   type PartyArea,
   type PartyChannel,
   type PartyChannels,
+  type PartyChat,
   type PartyPermissions,
   type PartyRepository,
   renderChannelName,
@@ -28,6 +36,7 @@ const area: PartyArea = {
   joinChannelId: "400",
   nameTemplate: "Kanał {user}",
   commandChannel: false,
+  panelMessageId: null,
 };
 
 interface SetupOptions {
@@ -61,7 +70,13 @@ function setup({
   const areas = new Map<string, PartyArea>();
   const owned = new Map<string, PartyChannel>();
   const repository: PartyRepository = {
-    addArea: async (a) => void areas.set(a.joinChannelId, a),
+    addArea: async (a) => void areas.set(a.joinChannelId, { ...a, panelMessageId: null }),
+    setPanelMessage: async (id, messageId) => {
+      const current = areas.get(id);
+      if (!current) return false;
+      areas.set(id, { ...current, panelMessageId: messageId });
+      return true;
+    },
     updateArea: async (id, settings) => {
       const current = areas.get(id);
       if (!current) return false;
@@ -208,6 +223,37 @@ function setup({
     },
   };
 
+  /** channel id -> ids of the messages in its text chat, oldest first; absent = no such chat. */
+  const chats = new Map<string, string[]>();
+  const posted: { channelId: string; message: Reply; id: string }[] = [];
+  let nextMessageId = 9000;
+  const chatFailures = { post: false, delete: false };
+  const chat: PartyChat = {
+    async post(channelId, message) {
+      if (chatFailures.post) throw new Error("Missing Access");
+      const id = String(nextMessageId++);
+      chats.set(channelId, [...(chats.get(channelId) ?? []), id]);
+      posted.push({ channelId, message, id });
+      return id;
+    },
+    async exists(channelId, messageId) {
+      return chats.get(channelId)?.includes(messageId) ?? false;
+    },
+    async recentMessageIds(channelId) {
+      return [...(chats.get(channelId) ?? [])].reverse();
+    },
+    async deleteMessages(channelId, ids) {
+      if (chatFailures.delete) throw new Error("Missing Permissions");
+      chats.set(
+        channelId,
+        (chats.get(channelId) ?? []).filter((id) => !ids.includes(id)),
+      );
+    },
+  };
+  const scheduler = createFakeScheduler();
+  /** Modules switched off per channel id. */
+  const disabledIn = new Set<string>();
+
   const warnings: { message: string; fields?: LogFields }[] = [];
   const infos: { message: string; fields?: LogFields }[] = [];
   const logger: Logger = {
@@ -217,7 +263,16 @@ function setup({
     child: () => logger,
   };
   const store = lock ?? createMemoryStore();
-  const module = createPartyModule({ repository, channels, permissions, lock: store, logger });
+  const module = createPartyModule({
+    repository,
+    channels,
+    permissions,
+    chat,
+    scheduler,
+    moduleEnabled: async (_guild, channelId) => !disabledIn.has(channelId),
+    lock: store,
+    logger,
+  });
   const registry = createRegistry([module]);
   const command = registry.find("party");
   if (!command) throw new Error("party command missing");
@@ -264,6 +319,14 @@ function setup({
     run,
     voice,
     eventFor,
+    registry,
+    chat,
+    chats,
+    posted,
+    chatFailures,
+    scheduler,
+    disabledIn,
+    nextMessage: () => String(nextMessageId++),
     areas,
     owned,
     discord,
@@ -341,6 +404,9 @@ describe("/party create", () => {
         renameArea: async () => {},
       },
       permissions: {} as PartyPermissions,
+      chat: {} as PartyChat,
+      scheduler: createFakeScheduler(),
+      moduleEnabled: async () => true,
       lock: createMemoryStore(),
       logger: silentLogger,
     });
@@ -571,6 +637,7 @@ async function failingRepo(): Promise<PartyRepository> {
   };
   return {
     addArea: nope,
+    setPanelMessage: async () => false,
     updateArea: async () => false,
     listAreas: async () => [],
     listAllAreas: async () => [],
@@ -1264,5 +1331,483 @@ describe("owner controls", () => {
     await t.voice("1000", null);
     expect(t.owned.get("1000")?.ownerId).toBe("friend");
     expect(t.calls).toEqual(["allow 1000 friend", "clear 1000 u1"]);
+  });
+});
+
+describe("command channel panel", () => {
+  const panelArea: PartyArea = { ...area, commandChannel: true };
+  const form = {
+    categoryName: "Impreza",
+    joinChannelName: "Wejście",
+    nameTemplate: "Kanał {user}",
+    commandChannel: "on",
+  };
+
+  /** An area with the command channel on and its panel already posted. */
+  async function withPanel(options: SetupOptions = {}) {
+    const t = setup(options);
+    t.areas.set("400", panelArea);
+    t.discord.set("400", new Set());
+    t.chats.set("400", []);
+    await t.eventFor("party-panels").run({} as never);
+    return t;
+  }
+
+  /** u1 owns channel 1000 (made by joining), u2 owns the next one. */
+  async function withOwners() {
+    const t = await withPanel();
+    await t.voice(null, "400", "u1");
+    await t.voice(null, "400", "u2");
+    t.calls.length = 0;
+    return t;
+  }
+
+  const panelId = (t: Awaited<ReturnType<typeof withPanel>>) => t.areas.get("400")?.panelMessageId;
+  const panelRows = (t: Awaited<ReturnType<typeof withPanel>>) => {
+    const message = t.posted[0]?.message;
+    return typeof message === "string" ? [] : (message?.components ?? []);
+  };
+  const customIdOf = (t: Awaited<ReturnType<typeof withPanel>>, action: string) => {
+    const spec = panelRows(t)
+      .flat()
+      .find((c) => c.type !== "link" && c.customId.endsWith(`:${action}`));
+    if (!spec || spec.type === "link") throw new Error(`no panel control ${action}`);
+    return spec.customId;
+  };
+  const click = (
+    t: Awaited<ReturnType<typeof withPanel>>,
+    action: string,
+    userId: string,
+    values: string[] = [],
+  ) =>
+    clickComponent({
+      registry: t.registry,
+      customId: customIdOf(t, action),
+      userId,
+      values,
+      guildId,
+    });
+
+  describe("posting", () => {
+    test("startup posts the panel in the join channel's chat and stores its id", async () => {
+      const t = await withPanel();
+      expect(t.posted).toHaveLength(1);
+      expect(t.posted[0]?.channelId).toBe("400");
+      expect(panelId(t)).toBe(t.posted[0]?.id);
+      const message = t.posted[0]?.message as Exclude<Reply, string>;
+      expect(message.embeds?.[0]?.title).toBe("Panel kanału party");
+      expect(panelRows(t)).toHaveLength(4);
+    });
+
+    test("every panel control is public, so a member who did not post it can press it", async () => {
+      const t = await withPanel();
+      const ids = panelRows(t)
+        .flat()
+        .map((c) => (c.type === "link" ? "" : c.customId));
+      expect(ids).toHaveLength(8);
+      for (const id of ids) expect(id.startsWith("party:panel")).toBe(true);
+      for (const id of ids) expect(t.registry.resolveComponent(id)?.owner).toBe("*");
+    });
+
+    test("startup leaves a panel that is still there alone", async () => {
+      const t = await withPanel();
+      const first = panelId(t);
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.posted).toHaveLength(1);
+      expect(panelId(t)).toBe(first);
+    });
+
+    test("startup reposts a panel that was deleted while the bot was offline", async () => {
+      const t = await withPanel();
+      const old = panelId(t);
+      t.chats.set("400", []);
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.posted).toHaveLength(2);
+      expect(panelId(t)).not.toBe(old);
+      expect(t.chats.get("400")).toEqual([panelId(t) ?? ""]);
+    });
+
+    test("startup deletes leftover messages but never the panel", async () => {
+      const t = await withPanel();
+      const panel = panelId(t) ?? "";
+      t.chats.set("400", ["1", "2", panel, "3"]);
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.chats.get("400")).toEqual([panel]);
+    });
+
+    test("startup skips areas without the flag and areas where the module is off", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      t.areas.set("410", { ...panelArea, joinChannelId: "410", categoryId: "310" });
+      t.disabledIn.add("410");
+      t.chats.set("410", ["1"]);
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.posted).toHaveLength(0);
+      expect(t.chats.get("410")).toEqual(["1"]);
+    });
+
+    test("a failing area does not stop the others", async () => {
+      const t = setup();
+      t.areas.set("400", panelArea);
+      t.areas.set("410", { ...panelArea, joinChannelId: "410", categoryId: "310" });
+      t.chatFailures.post = true;
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.warnings.some((w) => w.message === "Party panel not synced")).toBe(true);
+      t.chatFailures.post = false;
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.posted.map((p) => p.channelId).sort()).toEqual(["400", "410"]);
+    });
+
+    test("a deleted panel is posted again", async () => {
+      const t = await withPanel();
+      const old = panelId(t) ?? "";
+      t.chats.set("400", []);
+      await t.eventFor("party-panel-deleted").run({ id: old, channelId: "400" });
+      expect(t.posted).toHaveLength(2);
+      expect(panelId(t)).toBe(t.posted[1]?.id);
+    });
+
+    test("deleting another message does not touch the panel", async () => {
+      const t = await withPanel();
+      await t.eventFor("party-panel-deleted").run({ id: "123", channelId: "400" });
+      expect(t.posted).toHaveLength(1);
+    });
+
+    test("a bulk delete that takes the panel with it posts it again", async () => {
+      const t = await withPanel();
+      const old = panelId(t) ?? "";
+      t.chats.set("400", []);
+      await t.eventFor("party-panel-bulk-deleted").run(new Map([[old, {}]]), { id: "400" });
+      expect(t.posted).toHaveLength(2);
+    });
+
+    test("two deletions at once post one panel", async () => {
+      const t = await withPanel();
+      const old = panelId(t) ?? "";
+      t.chats.set("400", []);
+      const gone = { id: old, channelId: "400" };
+      await Promise.all([
+        t.eventFor("party-panel-deleted").run(gone),
+        t.eventFor("party-panel-deleted").run(gone),
+      ]);
+      expect(t.posted).toHaveLength(2);
+    });
+  });
+
+  describe("the flag in the form", () => {
+    test("creating an area with the flag on posts the panel", async () => {
+      const t = setup();
+      const [spec] = (await t.run("create")).modals;
+      const ctx = await t.submit(spec?.customId ?? "", form);
+      const [stored] = [...t.areas.values()];
+      expect(t.posted).toHaveLength(1);
+      expect(t.posted[0]?.channelId).toBe(stored?.joinChannelId);
+      expect(stored?.panelMessageId).toBe(t.posted[0]?.id);
+      expect(replyText(ctx.replies[0])).not.toContain("panelu");
+    });
+
+    test("creating an area with the flag off posts nothing", async () => {
+      const t = setup();
+      const [spec] = (await t.run("create")).modals;
+      await t.submit(spec?.customId ?? "", { ...form, commandChannel: "off" });
+      expect(t.posted).toHaveLength(0);
+    });
+
+    test("turning the flag on in /party edit posts the panel, turning it off removes it", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      t.chats.set("400", []);
+      const [spec] = (await t.run("edit")).modals;
+      const id = spec?.customId ?? "";
+      await t.submit(id, form);
+      const panel = t.areas.get("400")?.panelMessageId;
+      expect(panel).toBe(t.posted[0]?.id);
+      expect(t.chats.get("400")).toEqual([panel ?? ""]);
+
+      await t.submit(id, form);
+      expect(t.posted).toHaveLength(1);
+
+      await t.submit(id, { ...form, commandChannel: "off" });
+      expect(t.areas.get("400")?.panelMessageId).toBeNull();
+      expect(t.chats.get("400")).toEqual([]);
+    });
+
+    test("the reply says so when the panel cannot be posted, and the settings stay saved", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      t.chatFailures.post = true;
+      const [spec] = (await t.run("edit")).modals;
+      const ctx = await t.submit(spec?.customId ?? "", form);
+      expect(t.areas.get("400")?.commandChannel).toBe(true);
+      expect(replyText(ctx.replies[0])).toContain("panelu");
+    });
+  });
+
+  describe("cleanup", () => {
+    const message = (id: string, channelId = "400") => ({ id, channelId, guildId });
+
+    test("a message is deleted 15 seconds after it appears, not before", async () => {
+      const t = await withPanel();
+      t.chats.set("400", [...(t.chats.get("400") ?? []), "5001"]);
+      await t.eventFor("party-chat-message").run(message("5001"));
+      t.scheduler.advance(14_999);
+      await Bun.sleep(0);
+      expect(t.chats.get("400")).toContain("5001");
+      t.scheduler.advance(1);
+      await Bun.sleep(0);
+      expect(t.chats.get("400")).toEqual([panelId(t) ?? ""]);
+    });
+
+    test("the panel is never scheduled, even the one the bot just posted", async () => {
+      const t = await withPanel();
+      await t.eventFor("party-chat-message").run(message(panelId(t) ?? ""));
+      expect(t.scheduler.pending).toBe(0);
+    });
+
+    test("the panel's own creation event, delivered before its id is stored, still spares it", async () => {
+      const t = await withPanel();
+      const posted = panelId(t) ?? "";
+      // The event arrived while the stored id was still empty.
+      t.areas.set("400", { ...panelArea, panelMessageId: null });
+      await t.eventFor("party-chat-message").run(message(posted));
+      t.areas.set("400", { ...panelArea, panelMessageId: posted });
+      t.scheduler.advance(15_000);
+      await Bun.sleep(0);
+      expect(t.chats.get("400")).toContain(posted);
+    });
+
+    test("the bot's reply to a prefix command is cleaned like any other message", async () => {
+      const t = await withPanel();
+      t.chats.set("400", [...(t.chats.get("400") ?? []), "6001", "6002"]);
+      await t.eventFor("party-chat-message").run(message("6001"));
+      await t.eventFor("party-chat-message").run(message("6002"));
+      expect(t.scheduler.pending).toBe(2);
+      t.scheduler.advance(15_000);
+      await Bun.sleep(0);
+      expect(t.chats.get("400")).toEqual([panelId(t) ?? ""]);
+    });
+
+    test("other channels, DMs and areas without the flag are left alone", async () => {
+      const t = await withPanel();
+      t.areas.set("410", { ...area, joinChannelId: "410", categoryId: "310" });
+      await t.eventFor("party-chat-message").run(message("1", "999"));
+      await t.eventFor("party-chat-message").run(message("2", "410"));
+      await t.eventFor("party-chat-message").run({ id: "3", channelId: "400", guildId: null });
+      expect(t.scheduler.pending).toBe(0);
+    });
+
+    test("turning the flag off before the timer fires keeps the message", async () => {
+      const t = await withPanel();
+      t.chats.set("400", [...(t.chats.get("400") ?? []), "7001"]);
+      await t.eventFor("party-chat-message").run(message("7001"));
+      t.areas.set("400", { ...panelArea, commandChannel: false });
+      t.scheduler.advance(15_000);
+      await Bun.sleep(0);
+      expect(t.chats.get("400")).toContain("7001");
+    });
+
+    test("a refused delete is logged and does not throw", async () => {
+      const t = await withPanel();
+      t.chats.set("400", [...(t.chats.get("400") ?? []), "8001"]);
+      await t.eventFor("party-chat-message").run(message("8001"));
+      t.chatFailures.delete = true;
+      t.scheduler.advance(15_000);
+      await Bun.sleep(0);
+      expect(t.warnings.some((w) => w.message.includes("command channel message"))).toBe(true);
+    });
+
+    test("dispose cancels the waiting timers", async () => {
+      const t = await withPanel();
+      await t.eventFor("party-chat-message").run(message("9101"));
+      expect(t.scheduler.pending).toBe(1);
+      await t.module.dispose?.();
+      expect(t.scheduler.pending).toBe(0);
+    });
+
+    test("cleanup is gated by the module, the startup restore too", () => {
+      const t = setup();
+      for (const name of ["party-chat-message", "party-panel-deleted", "party-panels"]) {
+        expect(t.eventFor(name).alwaysRun).toBeUndefined();
+      }
+    });
+  });
+
+  describe("buttons", () => {
+    test("Zamknij locks the channel of the member who pressed, whoever posted the panel", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "lock", "u2");
+      expect(t.calls[0]).toContain('everyone 1001 {"connect":false}');
+      expect(replyText(ctx.replies[0])).toContain("zamknięty");
+      expect(ctx.replies[0]).toMatchObject({ ephemeral: true });
+    });
+
+    test("Otwórz, Ukryj and Pokaż use the same controls as the commands", async () => {
+      const t = await withOwners();
+      await click(t, "unlock", "u1");
+      await click(t, "hide", "u1");
+      await click(t, "show", "u1");
+      expect(t.calls).toEqual([
+        'everyone 1000 {"connect":null} (Party: unlock by u1)',
+        'everyone 1000 {"view":false} (Party: hide by u1)',
+        'everyone 1000 {"view":null} (Party: show by u1)',
+      ]);
+    });
+
+    test("a member without a party channel is told so", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "lock", "friend");
+      expect(replyText(ctx.replies[0])).toBe("Musisz być na swoim kanale party.");
+      expect(t.calls).toEqual([]);
+    });
+
+    test("a member standing in someone else's channel cannot control it", async () => {
+      const t = await withOwners();
+      t.addMember("1000", "friend");
+      const ctx = await click(t, "lock", "friend");
+      expect(replyText(ctx.replies[0])).toBe("Tylko właściciel kanału może to zrobić.");
+      expect(t.calls).toEqual([]);
+    });
+
+    test("Limit opens the limit form, and submitting it sets the limit", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "limit", "u1");
+      expect(ctx.modals).toHaveLength(1);
+      const submitted = await submitModal({
+        registry: t.registry,
+        customId: ctx.modals[0]?.customId ?? "",
+        values: { count: " 5 " },
+        guildId,
+      });
+      expect(t.calls).toEqual(["limit 1000 5"]);
+      expect(replyText(submitted.replies[0])).toContain("5");
+    });
+
+    test("the limit form refuses text and out-of-range numbers", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "limit", "u1");
+      const customId = ctx.modals[0]?.customId ?? "";
+      for (const count of ["abc", "-1", "1.5", "100"]) {
+        const submitted = await submitModal({
+          registry: t.registry,
+          customId,
+          values: { count },
+          guildId,
+        });
+        expect(replyText(submitted.replies[0])).toMatch(/0 do 99|do 2 znaków/);
+      }
+      expect(t.calls).toEqual([]);
+    });
+
+    test("Limit and Zmień nazwę refuse before opening a form when there is no channel", async () => {
+      const t = await withOwners();
+      for (const action of ["limit", "rename"]) {
+        const ctx = await click(t, action, "friend");
+        expect(ctx.modals).toHaveLength(0);
+        expect(replyText(ctx.replies[0])).toBe("Musisz być na swoim kanale party.");
+      }
+    });
+
+    test("Zmień nazwę opens the rename form, and submitting it renames", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "rename", "u2");
+      const submitted = await submitModal({
+        registry: t.registry,
+        customId: ctx.modals[0]?.customId ?? "",
+        values: { name: "  Chill  " },
+        guildId,
+      });
+      expect(t.calls).toEqual(["rename 1001 Chill"]);
+      expect(replyText(submitted.replies[0])).toContain("Chill");
+    });
+
+    test("a form opened by one member cannot be submitted by another", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "rename", "u1");
+      const submitted = await submitModal({
+        registry: t.registry,
+        customId: ctx.modals[0]?.customId ?? "",
+        values: { name: "Cudze" },
+        userId: "u2",
+        guildId,
+      });
+      expect(replyText(submitted.replies[0])).toBe("To nie Twój formularz.");
+      expect(t.calls).toEqual([]);
+    });
+
+    test("the rename form keeps the two-per-ten-minutes limit", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "rename", "u1");
+      const customId = ctx.modals[0]?.customId ?? "";
+      const submit = () =>
+        submitModal({ registry: t.registry, customId, values: { name: "x" }, guildId });
+      await submit();
+      await submit();
+      const third = await submit();
+      expect(replyText(third.replies[0])).toContain("2 razy na 10 minut");
+    });
+
+    test("buttons do not work in direct messages", async () => {
+      const t = await withPanel();
+      const ctx = await clickComponent({
+        registry: t.registry,
+        customId: customIdOf(t, "lock"),
+        userId: "u1",
+        guildId: null,
+      });
+      expect(replyText(ctx.replies[0])).toContain("tylko na serwerze");
+    });
+
+    test("an unknown panel action is answered, not ignored", async () => {
+      const t = await withPanel();
+      const ctx = await clickComponent({
+        registry: t.registry,
+        customId: "party:panel:*:explode",
+        userId: "u1",
+        guildId,
+      });
+      expect(replyText(ctx.replies[0])).toContain("nieaktualny");
+    });
+  });
+
+  describe("user selects", () => {
+    test("Zaproś lets the chosen member in and redraws the panel", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "invite", "u1", ["friend"]);
+      expect(t.calls).toEqual(["allow 1000 friend"]);
+      expect(ctx.updates).toHaveLength(1);
+      expect(replyText(ctx.replies[0])).toContain("<@friend>");
+      expect(ctx.replies[0]).toMatchObject({ ephemeral: true });
+    });
+
+    test("Zablokuj denies the chosen member and disconnects them", async () => {
+      const t = await withOwners();
+      t.addMember("1000", "friend");
+      await click(t, "block", "u1", ["friend"]);
+      expect(t.calls).toEqual(["deny 1000 friend", "disconnect friend 1000"]);
+    });
+
+    test("the same refusals apply as for the commands", async () => {
+      const t = await withOwners();
+      const self = await click(t, "invite", "u1", ["u1"]);
+      expect(replyText(self.replies[0])).toBe("Nie możesz zrobić tego sam sobie.");
+      const mod = await click(t, "block", "u1", ["mod"]);
+      expect(replyText(mod.replies[0])).toBe("Nie możesz zablokować moderatora.");
+      const bot = await click(t, "invite", "u1", ["bot-self"]);
+      expect(replyText(bot.replies[0])).toBe("Tego nie zrobię botowi.");
+      expect(t.calls).toEqual([]);
+    });
+
+    test("a member without a channel is told so", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "invite", "friend", ["u1"]);
+      expect(replyText(ctx.replies.at(-1))).toBe("Musisz być na swoim kanale party.");
+      expect(t.calls).toEqual([]);
+    });
+
+    test("a select without a choice is refused", async () => {
+      const t = await withOwners();
+      const ctx = await click(t, "invite", "u1", []);
+      expect(replyText(ctx.replies[0])).toContain("nieaktualny");
+    });
   });
 });
