@@ -15,6 +15,7 @@
     "@dzajcarz/db": "workspace:*",
     "@dzajcarz/kv": "workspace:*",
     "@dzajcarz/module-general": "workspace:*",
+    "@dzajcarz/module-party": "workspace:*",
     "@dzajcarz/module-settings": "workspace:*",
     "@dzajcarz/module-welcome": "workspace:*",
     "discord.js": "14.27.0",

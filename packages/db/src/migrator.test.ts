@@ -28,6 +28,8 @@ describe.skipIf(!sql)("migrator", () => {
     expect(tables.map((t) => t.table_name).sort()).toEqual([
       "guild_settings",
       "module_disabled",
+      "party_area",
+      "party_channel",
       "schema_migrations",
       "welcome_config",
     ]);

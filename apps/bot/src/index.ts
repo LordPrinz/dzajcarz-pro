@@ -4,6 +4,7 @@ import {
   createDb,
   createGuildSettingsRepository,
   createModuleToggleRepository,
+  createPartyRepository,
   createWelcomeRepository,
 } from "@dzajcarz/db";
 import { createRedisStore, keepConnected } from "@dzajcarz/kv";
@@ -11,6 +12,7 @@ import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
+import { createPartyChannels } from "./discord/party.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
@@ -72,6 +74,9 @@ const modules = createModules({
   welcomeConfigs: createWelcomeRepository(sql),
   welcomeSender: createWelcomeSender(client),
   guildLookup: createGuildLookup(client, logger.child({ component: "guild-lookup" })),
+  partyAreas: createPartyRepository(sql),
+  partyChannels: createPartyChannels(client),
+  partyLock: createRedisStore(redis),
   logger,
 });
 const registry = createRegistry(modules);

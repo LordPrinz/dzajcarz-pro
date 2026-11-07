@@ -37,7 +37,8 @@ modules/
   general/          ping, help
   settings/         prefix (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set, off, test), greets new members
-  …                 music, party, moderation, fun (see the board)
+  party/            party (create, delete), a voice channel per member who joins the party area
+  …                 music, moderation, fun (see the board)
 infra/              docker-compose: Postgres, Redis, Lavalink (profile "music")
 scripts/            git hooks and GitHub automation (Bun scripts)
 docs/               design doc and ADRs

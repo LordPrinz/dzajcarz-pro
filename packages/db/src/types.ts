@@ -24,3 +24,18 @@ export interface WelcomeConfigRow {
   created_at: Date;
   updated_at: Date;
 }
+
+export interface PartyAreaRow {
+  join_channel_id: string;
+  guild_id: string;
+  category_id: string;
+  created_at: Date;
+}
+
+export interface PartyChannelRow {
+  channel_id: string;
+  guild_id: string;
+  owner_id: string;
+  area_join_channel_id: string;
+  created_at: Date;
+}

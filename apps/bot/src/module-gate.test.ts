@@ -27,7 +27,15 @@ function brokenStore(): KeyValueStore {
   const fail = async () => {
     throw new Error("redis down");
   };
-  return { get: fail, set: fail, del: fail, increment: fail, ping: async () => false };
+  return {
+    get: fail,
+    set: fail,
+    setIfAbsent: fail,
+    del: fail,
+    delIfEquals: fail,
+    increment: fail,
+    ping: async () => false,
+  };
 }
 
 describe("module gate", () => {

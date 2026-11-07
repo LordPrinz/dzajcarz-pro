@@ -7,5 +7,6 @@ export function createDb(url: string): SQL {
 export type Db = SQL;
 export * from "./guild-settings.ts";
 export * from "./module-toggles.ts";
+export * from "./party.ts";
 export * from "./types.ts";
 export * from "./welcome.ts";

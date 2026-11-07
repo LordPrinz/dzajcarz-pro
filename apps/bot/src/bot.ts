@@ -39,7 +39,7 @@ async function commandEnabled(
 
 /**
  * Wraps a module's event handler: it is skipped when its module is off for the event's guild and
- * channel, and a failing handler is logged instead of crashing the process.
+ * channel (unless the handler is `alwaysRun`), and a failing handler is logged instead of crashing the process.
  */
 export function createEventListener(
   { module, handler }: RegisteredEvent,
@@ -48,7 +48,7 @@ export function createEventListener(
 ): (...args: unknown[]) => Promise<void> {
   return async (...args) => {
     try {
-      const scope = eventScope(handler.event, args);
+      const scope = handler.alwaysRun ? undefined : eventScope(handler.event, args);
       if (scope && !(await gate.isEnabled(scope.guildId, scope.channelId, module))) return;
       await handler.run(...args);
     } catch (error) {

@@ -8,6 +8,12 @@ if redis.call('PTTL', KEYS[1]) < 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) 
 return { count, redis.call('PTTL', KEYS[1]) }
 `;
 
+// Compare-and-delete, so a lock holder never releases a lock that expired and was taken by someone else.
+const DEL_IF_EQUALS_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0
+`;
+
 export interface RedisStoreOptions {
   /** Namespace for every key. */
   prefix?: string;
@@ -32,8 +38,16 @@ export function createRedisStore(
       assertTtl(ttlMs);
       await client.set(k(key), value, "PX", ttlMs);
     },
+    async setIfAbsent(key, value, ttlMs) {
+      assertTtl(ttlMs);
+      return (await client.set(k(key), value, "NX", "PX", String(ttlMs))) === "OK";
+    },
     async del(key) {
       await client.del(k(key));
+    },
+    async delIfEquals(key, value) {
+      const deleted = await client.send("EVAL", [DEL_IF_EQUALS_SCRIPT, "1", k(key), value]);
+      return deleted === 1;
     },
     async increment(key, ttlMs): Promise<Counter> {
       assertTtl(ttlMs);
