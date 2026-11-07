@@ -69,9 +69,14 @@ export function describeCommand(command: CommandSummary, prefix: string | null):
     command.subcommands.length > 0
       ? command.subcommands.slice(0, MAX_EMBED_FIELDS - aliasFields.length).map((s) => ({
           name: `${command.name} ${s.name}`,
-          value: `${syntax(s.usage, prefix)}\n${s.description}`,
+          value: `${syntax({ slash: s.slashUsage, prefix: s.usage }, prefix)}\n${s.description}`,
         }))
-      : [{ name: "Użycie", value: syntax(command.usage, prefix) }];
+      : [
+          {
+            name: "Użycie",
+            value: syntax({ slash: command.slashUsage, prefix: command.usage }, prefix),
+          },
+        ];
   return {
     title: `/${command.name}`,
     description: command.description,

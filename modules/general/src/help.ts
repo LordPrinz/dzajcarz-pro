@@ -43,6 +43,7 @@ export const COMMAND_NOT_FOUND = (name: string) => `Nie znam komendy \`${name}\`
 /** One line of the list: a command, or one subcommand of a command. */
 interface Entry {
   usage: string;
+  slashUsage: string;
   description: string;
 }
 
@@ -98,14 +99,26 @@ function visibleCommands(
 function entriesOf(commands: readonly CommandSummary[]): Entry[] {
   return commands.flatMap((command) =>
     command.subcommands.length === 0
-      ? [{ usage: command.usage, description: command.description }]
-      : command.subcommands.map((sub) => ({ usage: sub.usage, description: sub.description })),
+      ? [
+          {
+            usage: command.usage,
+            slashUsage: command.slashUsage,
+            description: command.description,
+          },
+        ]
+      : command.subcommands.map((sub) => ({
+          usage: sub.usage,
+          slashUsage: sub.slashUsage,
+          description: sub.description,
+        })),
   );
 }
 
-/** Slash form, plus the prefix form when the bot has a prefix here. */
-export function syntax(usage: string, prefix: string | null): string {
-  return prefix === null ? `\`/${usage}\`` : `\`/${usage}\` · \`${prefix}${usage}\``;
+/** Slash form, plus the prefix form when the bot has a prefix here; each form shows its own options. */
+export function syntax(usage: { slash: string; prefix: string }, prefix: string | null): string {
+  return prefix === null
+    ? `\`/${usage.slash}\``
+    : `\`/${usage.slash}\` · \`${prefix}${usage.prefix}\``;
 }
 
 export function createHelp(deps: HelpDeps) {
@@ -200,7 +213,10 @@ export function createHelp(deps: HelpDeps) {
         description:
           slice.length > 0
             ? slice
-                .map((entry) => `${syntax(entry.usage, prefix)}\n${entry.description}`)
+                .map(
+                  (entry) =>
+                    `${syntax({ slash: entry.slashUsage, prefix: entry.usage }, prefix)}\n${entry.description}`,
+                )
                 .join("\n\n")
             : "Brak dostępnych komend w tej kategorii.",
         color: BRAND_COLOR,
