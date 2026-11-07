@@ -9,7 +9,13 @@ import {
   silentLogger,
   UNKNOWN_MODAL,
 } from "@dzajcarz/core";
-import type { ButtonInteraction, Client, Message, ModalSubmitInteraction } from "discord.js";
+import {
+  type ButtonInteraction,
+  type Client,
+  ComponentType,
+  type Message,
+  type ModalSubmitInteraction,
+} from "discord.js";
 import {
   attachHandlers,
   createEventListener,
@@ -414,7 +420,7 @@ describe("modals in routing", () => {
         channel: { isThread: () => false },
         inGuild: () => true,
         memberPermissions: { bitfield: 0n },
-        fields: { fields: new Map([["name", { value: name }]]) },
+        fields: { fields: new Map([["name", { type: ComponentType.TextInput, value: name }]]) },
         isFromMessage: () => false,
         reply: record("reply"),
         deferReply: record("deferReply"),

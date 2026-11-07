@@ -14,6 +14,7 @@ export function contextFromModal(
   return {
     state,
     user: { id: interaction.user.id, displayName: interaction.user.displayName },
+    canUpdate: interaction.isFromMessage(),
     guildId: interaction.guildId,
     place: placeOf(interaction.context, interaction.guildId),
     channelId: interaction.channelId ?? "",

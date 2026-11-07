@@ -1,6 +1,6 @@
 import type { ComponentContext, ResolvedComponent } from "@dzajcarz/core";
 import { type ButtonInteraction, MessageFlags, type StringSelectMenuInteraction } from "discord.js";
-import { placeOf } from "./context.ts";
+import { MODAL_NOT_FIRST, placeOf } from "./context.ts";
 import { toModalPayload } from "./modals.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
@@ -64,8 +64,9 @@ export function contextFromComponent(
       }
     },
     async showModal(modal) {
+      if (answer !== "none") throw new Error(MODAL_NOT_FIRST);
       await interaction.showModal(toModalPayload(modal));
-      // The modal is the answer; nothing may defer or update the click afterwards.
+      // The modal is the response; later answers are follow-ups or webhook edits.
       answer = "reply";
     },
   };

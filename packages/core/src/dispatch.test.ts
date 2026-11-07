@@ -1,9 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { defineCommand, defineSubcommand } from "./command.ts";
-import { checkAccess, checkPrefixAccess, executeCommand, GENERIC_ERROR } from "./dispatch.ts";
+import { defineButton } from "./component.ts";
+import {
+  checkAccess,
+  checkPrefixAccess,
+  executeCommand,
+  executeComponent,
+  GENERIC_ERROR,
+  MENU_NO_PERMISSION,
+  NOT_YOUR_MENU,
+} from "./dispatch.ts";
 import { UserError } from "./errors.ts";
 import { createJsonLogger, silentLogger } from "./logger.ts";
-import { createFakeContext, replyText } from "./testing/context.ts";
+import { createFakeComponentContext, createFakeContext, replyText } from "./testing/context.ts";
 
 const BAN = 1n << 2n;
 
@@ -337,5 +346,74 @@ describe("checkAccess", () => {
     );
     expect(checkAccess({ permissions: BAN }, { guildId, memberPermissions: BAN })).toBeNull();
     expect(checkAccess({ permissions: BAN }, { guildId, memberPermissions: 1n << 3n })).toBeNull();
+  });
+});
+
+describe("executeComponent order of checks", () => {
+  const OWNER = "200000000000000002";
+  const resolved = (run: () => Promise<void>, permissions?: bigint) =>
+    ({
+      component: defineButton({ module: "fun", name: "b", permissions, run }),
+      owner: OWNER,
+      state: "",
+    }) as never;
+
+  test("owner, then access, then run, then auto-defer", async () => {
+    const log: string[] = [];
+    const click = (userId: string, memberPermissions: bigint, permissions?: bigint) => {
+      const ctx = createFakeComponentContext({ userId, memberPermissions });
+      const defer = ctx.defer;
+      ctx.defer = async () => {
+        log.push("defer");
+        await defer();
+      };
+      return {
+        ctx,
+        done: executeComponent(
+          resolved(async () => {
+            log.push("run");
+          }, permissions),
+          ctx,
+          silentLogger,
+        ),
+      };
+    };
+
+    const stranger = click("999999999999999999", 0n, BAN);
+    await stranger.done;
+    expect(replyText(stranger.ctx.replies[0])).toBe(NOT_YOUR_MENU);
+
+    const denied = click(OWNER, 0n, BAN);
+    await denied.done;
+    expect(replyText(denied.ctx.replies[0])).toBe(MENU_NO_PERMISSION);
+    expect(log).toEqual([]);
+
+    const allowed = click(OWNER, BAN, BAN);
+    await allowed.done;
+    expect(log).toEqual(["run", "defer"]);
+    expect(allowed.ctx.replies).toEqual([]);
+  });
+
+  test("a handler that answered is not deferred again, and an error is shown ephemerally", async () => {
+    const ctx = createFakeComponentContext();
+    await executeComponent(
+      resolved(async () => {
+        await ctx.reply("hej");
+      }),
+      ctx,
+      silentLogger,
+    );
+    expect(ctx.replies).toEqual(["hej"]);
+    expect(ctx.deferred).toBe(false);
+
+    const failing = createFakeComponentContext();
+    await executeComponent(
+      resolved(async () => {
+        throw new UserError("Nie teraz.");
+      }),
+      failing,
+      silentLogger,
+    );
+    expect(failing.replies).toEqual([{ content: "Nie teraz.", ephemeral: true }]);
   });
 });
