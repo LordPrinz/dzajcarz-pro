@@ -271,6 +271,7 @@ function setup({
     created,
     categories,
     renamed,
+    names,
     submit,
     calls,
     managers,
@@ -361,7 +362,7 @@ describe("party area form", () => {
     categoryName: "  Impreza ",
     joinChannelName: "Wejście",
     nameTemplate: "🔥 {user}",
-    commandChannel: "Tak",
+    commandChannel: "on",
   };
 
   test("/party create opens the form with defaults instead of creating", async () => {
@@ -371,7 +372,7 @@ describe("party area form", () => {
     const fields = Object.fromEntries(
       answer.modals[0]?.fields.map((f) => [f.customId, f.value]) ?? [],
     );
-    expect(fields).toMatchObject({ nameTemplate: "🎉 {user}", commandChannel: "nie" });
+    expect(fields).toMatchObject({ nameTemplate: "Kanał {user}", commandChannel: "off" });
     expect(t.areas.size).toBe(0);
   });
 
@@ -402,7 +403,7 @@ describe("party area form", () => {
     const long = await t.submit(id, { ...form, nameTemplate: `${"a".repeat(86)}{user}` });
     expect(replyText(long.replies[0])).toContain("90");
     const flag = await t.submit(id, { ...form, commandChannel: "może" });
-    expect(replyText(flag.replies[0])).toContain("tak");
+    expect(replyText(flag.replies[0])).toContain("nieprawidłową");
     const blank = await t.submit(id, { ...form, categoryName: "   " });
     expect(blank.replies).toHaveLength(1);
     expect(t.areas.size).toBe(0);
@@ -419,7 +420,7 @@ describe("party area form", () => {
     const t = setup();
     await t.run("create", { name: "Impreza" }, MANAGE_CHANNELS, undefined, "prefix");
     const [stored] = [...t.areas.values()];
-    expect(stored).toMatchObject({ nameTemplate: "🎉 {user}", commandChannel: false });
+    expect(stored).toMatchObject({ nameTemplate: "Kanał {user}", commandChannel: false });
     expect(t.categories[0]?.categoryName).toBe("Impreza");
   });
 
@@ -435,29 +436,67 @@ describe("party area form", () => {
         categoryName: "Impreza",
         joinChannelName: "Wejście",
         nameTemplate: "💥 {user}",
-        commandChannel: "tak",
+        commandChannel: "on",
       });
+    });
+
+    test("never splits a surrogate pair when cutting the prefill", async () => {
+      const t = setup();
+      t.areas.set("400", { ...area, nameTemplate: `${"a".repeat(89)}🎉{user}` });
+      const answer = await t.run("edit");
+      const template = answer.modals[0]?.fields.find((f) => f.customId === "nameTemplate")?.value;
+      expect(template).toBe("a".repeat(89));
     });
 
     test("submit renames the channels and updates the row", async () => {
       const t = setup();
       t.areas.set("400", area);
       const [spec] = (await t.run("edit")).modals;
-      const ctx = await t.submit(spec?.customId ?? "", form);
+      const ctx = await t.submit(spec?.customId ?? "", { ...form, categoryName: "Zabawa" });
       expect(t.renamed).toEqual([
-        { categoryId: "300", joinChannelId: "400", categoryName: "Impreza" },
+        { categoryId: "300", joinChannelId: "400", categoryName: "Zabawa" },
       ]);
       expect(t.areas.get("400")).toMatchObject({ nameTemplate: "🔥 {user}", commandChannel: true });
       expect(replyText(ctx.replies[0])).toContain("zaktualizowana");
     });
 
-    test("keeps the row when Discord refuses the rename", async () => {
+    test("renames only the channel whose name changed", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      const [spec] = (await t.run("edit")).modals;
+      const ctx = await t.submit(spec?.customId ?? "", { ...form, categoryName: "Impreza" });
+      expect(t.renamed).toEqual([]);
+      expect(replyText(ctx.replies[0])).toContain("zaktualizowana");
+      const second = await t.submit(spec?.customId ?? "", { ...form, categoryName: "Nowa" });
+      expect(t.renamed).toEqual([
+        { categoryId: "300", joinChannelId: "400", categoryName: "Nowa" },
+      ]);
+      expect(t.names.get("400")).toBe("Wejście");
+      expect(replyText(second.replies[0])).toContain("zaktualizowana");
+    });
+
+    test("saves the settings and says so when Discord refuses the rename", async () => {
       const t = setup({ renameFails: true });
       t.areas.set("400", area);
       const [spec] = (await t.run("edit")).modals;
-      const ctx = await t.submit(spec?.customId ?? "", form);
-      expect(replyText(ctx.replies[0])).toContain("Nie mogę");
-      expect(t.areas.get("400")).toEqual(area);
+      const ctx = await t.submit(spec?.customId ?? "", { ...form, categoryName: "Zabawa" });
+      expect(replyText(ctx.replies[0])).toContain("Ustawienia zapisane, ale nie udało się");
+      expect(t.areas.get("400")).toMatchObject({ nameTemplate: "🔥 {user}", commandChannel: true });
+    });
+
+    test("saves the settings and skips a rename over the limit, before touching Discord", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      const [spec] = (await t.run("edit")).modals;
+      const id = spec?.customId ?? "";
+      await t.submit(id, { ...form, categoryName: "A" });
+      await t.submit(id, { ...form, categoryName: "B" });
+      const ctx = await t.submit(id, { ...form, categoryName: "C", nameTemplate: "💥 {user}" });
+      expect(replyText(ctx.replies[0])).toBe(
+        "Ustawienia zapisane, ale nazwy kategorii nie zmieniono: Discord pozwala zmienić nazwę 2 razy na 10 minut.",
+      );
+      expect(t.renamed.map((r) => r.categoryName)).toEqual(["A", "B"]);
+      expect(t.areas.get("400")?.nameTemplate).toBe("💥 {user}");
     });
 
     test("says so when the area was removed meanwhile", async () => {
@@ -506,6 +545,8 @@ describe("channel name template", () => {
     expect(renderChannelName("{user}", "   ")).toBe("Kanał imprezowy");
     expect(renderChannelName("{user}", "a$&b")).toBe("a$&b");
     expect(renderChannelName("x {user}", "A\nB")).toBe("x A B");
+    expect(renderChannelName("{user}", "\u200b\u2060")).toBe("Kanał imprezowy");
+    expect(renderChannelName("\u200b{user}", "A\u200bB")).toBe("AB");
   });
 
   test("validation wants {user} and a sensible length", () => {

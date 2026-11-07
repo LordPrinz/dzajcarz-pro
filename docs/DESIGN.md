@@ -139,12 +139,13 @@ warning. It needs the privileged `GuildMembers` intent. The welcome sender is th
 ### Party areas
 
 `/party create` opens a form (a modal, see Modals) with the category name, the join channel name, a channel
-name template and whether the area wants a command channel ("tak" / "nie"). Submitting makes a category and a
+name template and whether the area wants a command channel (a select with "Włączony" / "Wyłączony"). Submitting makes a category and a
 join voice channel and stores them in `party_area` (`join_channel_id` is the key, `category_id` is unique, plus
-`name_template`, default `🎉 {user}`, and `command_channel`, default false; the flag is only stored, the panel
+`name_template`, default `Kanał {user}`, and `command_channel`, default false; the flag is only stored, the panel
 is a separate feature). `/party edit [channel]` opens the same form filled with the area's current values
-(`PartyChannels.areaNames`); submitting renames the category and join channel (`renameArea`, which skips
-names that did not change because Discord limits renames) and updates the row. The `channel` option picks the
+(`PartyChannels.areaNames`); submitting saves the template and the flag first, then renames only the channels whose name changed
+(`renameArea`), each checked against the rename limit (2 per 10 minutes) before Discord is called, and the
+reply says exactly what was and was not renamed. The `channel` option picks the
 area when a server has several. The prefix forms keep arguments: `party create <name>` uses the default
 template and no command channel, `party edit` answers that editing needs the slash command. The template must
 contain `{user}` and be at most 90 characters; names are at most 100. Joining the join channel creates a voice

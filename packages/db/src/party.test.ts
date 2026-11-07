@@ -25,7 +25,7 @@ describe.skipIf(!sql)("party repository", () => {
     guildId,
     categoryId: "301",
     joinChannelId: "401",
-    nameTemplate: "🎉 {user}",
+    nameTemplate: "Kanał {user}",
     commandChannel: false,
   };
   const channel = { channelId: "501", guildId, ownerId: "601", joinChannelId: "401" };
