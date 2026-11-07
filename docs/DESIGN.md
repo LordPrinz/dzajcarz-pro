@@ -53,6 +53,19 @@ The registry remembers which module registered each command (`moduleOf`) and eac
 instead of every module checking its own switch. A module may declare `dispose()`; `apps/bot` calls it
 for every module on shutdown, before the Discord client is destroyed.
 
+### Buttons, select menus and pagination
+
+Replies carry `components` as plain data; handlers are `defineButton` / `defineSelect` on
+`BotModule.components`. A click is routed by `custom_id` (`<module>:<component>:<owner>:<data>`), checked
+against the module toggle like a command, and refused ephemerally for anyone but the member who ran the
+command (`owner`). Small state rides in `<data>`; larger state goes to `KeyValueStore` for 15 minutes and
+an expired one answers "To menu wygasło". The state store (`createComponentStateStore`) is available in
+core but not wired into the composition root: the first module that needs it creates one from the
+`KeyValueStore` it is given. `createPaginator` renders `◀ | Strona N/M | ▶`; its `data` shares the
+100-character `custom_id` with the names, the owner id and the page number, so keep it short or pass a state
+store key. A click that the handler leaves unanswered is acknowledged automatically. Slash and prefix
+replies work alike. See ADR 6.
+
 ### Errors
 
 `UserError` messages go to the caller as they are (Polish). Any other error is logged with the command,

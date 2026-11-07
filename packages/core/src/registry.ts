@@ -1,4 +1,5 @@
 import type { AnyCommand, OptionDef, OptionsDef } from "./command.ts";
+import { type AnyComponent, MAX_COMPONENT_PREFIX, parseCustomId } from "./component.ts";
 import type { AnyEventHandler, BotModule } from "./module.ts";
 import { usageLine } from "./prefix.ts";
 
@@ -29,11 +30,24 @@ export interface RegisteredEvent {
   handler: AnyEventHandler;
 }
 
+/** A click matched to the component that handles it. */
+export interface ResolvedComponent {
+  component: AnyComponent;
+  /** Name of the module that owns the component. */
+  module: string;
+  /** Id of the member the component was created for. */
+  owner: string;
+  /** The `<data>` part of the custom_id. */
+  state: string;
+}
+
 export interface CommandRegistry {
   /** Looks up a command by name or prefix alias. */
   find(name: string): AnyCommand | undefined;
   commands(): readonly AnyCommand[];
   events(): readonly RegisteredEvent[];
+  /** Matches a `custom_id` (`<module>:<component>:<owner>:<data>`) to its handler; undefined if unknown. */
+  resolveComponent(customId: string): ResolvedComponent | undefined;
   /** Name of the module that registered the command (a value returned by `find` or `commands`). */
   moduleOf(command: AnyCommand): string | undefined;
   /** What `/help` shows. */
@@ -52,6 +66,7 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
   const owners = new Map<AnyCommand, string>();
   const summaries: CommandSummary[] = [];
   const moduleNames = new Set<string>();
+  const componentsById = new Map<string, AnyComponent>();
 
   for (const module of modules) {
     if (moduleNames.has(module.name))
@@ -83,6 +98,12 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
         })),
       });
     }
+    for (const component of module.components ?? []) {
+      validateComponent(component, module.name);
+      const id = `${module.name}:${component.name}`;
+      if (componentsById.has(id)) throw new Error(`Component "${id}" is registered twice`);
+      componentsById.set(id, component);
+    }
     for (const handler of module.events ?? []) events.push({ module: module.name, handler });
   }
 
@@ -91,8 +112,30 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
     commands: () => commands,
     events: () => events,
     summaries: () => summaries,
+    resolveComponent(customId) {
+      const parsed = parseCustomId(customId);
+      const component = parsed && componentsById.get(`${parsed.module}:${parsed.name}`);
+      if (!parsed || !component) return undefined;
+      return { component, module: parsed.module, owner: parsed.owner, state: parsed.data };
+    },
     moduleOf: (command) => owners.get(command),
   };
+}
+
+function validateComponent(component: AnyComponent, module: string): void {
+  const where = `component "${component.name}" (module "${module}")`;
+  if (component.module !== module) {
+    throw new Error(`${where} says it belongs to module "${component.module}"`);
+  }
+  // A colon would shift the fields of the custom_id.
+  if (!NAME_PATTERN.test(component.name) || module.includes(":")) {
+    throw new Error(
+      `Invalid ${where}: use 1–32 lowercase letters, digits, - or _ (no colon in the module name)`,
+    );
+  }
+  if (module.length + component.name.length + 2 > MAX_COMPONENT_PREFIX) {
+    throw new Error(`${where}: "<module>:<component>:" is too long for a 100-character custom_id`);
+  }
 }
 
 function validateCommand(command: AnyCommand, module: string): void {

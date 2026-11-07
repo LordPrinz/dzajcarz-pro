@@ -3,14 +3,23 @@ import {
   type CommandRegistry,
   checkPrefixAccess,
   executeCommand,
+  executeComponent,
   type Logger,
   matchPrefix,
   type PrefixInvocation,
   parsePrefixArgs,
   type RegisteredEvent,
   splitInvocation,
+  UNKNOWN_COMPONENT,
 } from "@dzajcarz/core";
-import { type Client, Events, type Message } from "discord.js";
+import {
+  type Client,
+  Events,
+  type Message,
+  type MessageComponentInteraction,
+  MessageFlags,
+} from "discord.js";
+import { contextFromComponent } from "./discord/component-context.ts";
 import { contextFromInteraction, contextFromMessage } from "./discord/context.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { eventScope, toggleChannelId } from "./event-scope.ts";
@@ -68,6 +77,10 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
+      if (interaction.isMessageComponent()) {
+        await handleComponent(interaction, deps);
+        return;
+      }
       if (!interaction.isChatInputCommand()) return;
       const command = registry.find(interaction.commandName);
       if (!command) {
@@ -94,6 +107,36 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
       logger.error("Message handling failed", { messageId: message.id, error });
     }
   });
+}
+
+/**
+ * A click on a button or select menu: found by custom_id, gated by its module's toggles like a command,
+ * then run through the owner and permission checks of `executeComponent`.
+ */
+export async function handleComponent(
+  interaction: MessageComponentInteraction,
+  { registry, gate, logger }: BotDeps,
+): Promise<void> {
+  const supported = interaction.isButton() || interaction.isStringSelectMenu();
+  const resolved = supported ? registry.resolveComponent(interaction.customId) : undefined;
+  if (!supported || !resolved) {
+    // Posted by an older build or by another bot sharing the application, or a select type no module
+    // handles yet (user, role, channel, mentionable): answer instead of leaving the click to time out.
+    logger.warn("Unknown component", { customId: interaction.customId });
+    await interaction.reply({
+      content: UNKNOWN_COMPONENT,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: NO_MENTIONS,
+    });
+    return;
+  }
+  const ctx = contextFromComponent(interaction, resolved);
+  const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
+  if (!(await gate.isEnabled(ctx.guildId, toggleChannel, resolved.module))) {
+    await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
+    return;
+  }
+  await executeComponent(resolved, ctx, logger);
 }
 
 export async function handleMessage(

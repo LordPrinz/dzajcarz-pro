@@ -66,6 +66,11 @@ so slash commands show up there at once instead of after the global rollout.
    anything the caller should read; other errors are logged and replaced by a generic message.
 4. Add the module to `apps/bot/src/modules.ts` and pass its dependencies from `apps/bot/src/index.ts`.
 5. Test commands with `createFakeContext` from `@dzajcarz/core/testing`, without Discord.
+6. Buttons and select menus (optional, ADR 6): put plain-data rows in `ctx.reply({ components })`, build each
+   `custom_id` with `component.customId(ctx.user.id, state)`, declare the handlers with `defineButton` /
+   `defineSelect` and list them in `BotModule.components`. For paging use `createPaginator`; for state
+   that does not fit into 100 characters use `createComponentStateStore`. Test clicks with
+   `clickComponent({ registry, customId })` from `@dzajcarz/core/testing`.
 
 ## Git hooks (Husky)
 

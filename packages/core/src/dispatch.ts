@@ -1,7 +1,9 @@
 import type { AnyCommand, CommandContext } from "./command.ts";
+import type { ComponentContext } from "./component.ts";
 import { UserError } from "./errors.ts";
 import type { Logger } from "./logger.ts";
 import { splitInvocation, usage } from "./prefix.ts";
+import type { ResolvedComponent } from "./registry.ts";
 
 /** PermissionFlagsBits.Administrator: Discord grants every permission to it. */
 const ADMINISTRATOR = 1n << 3n;
@@ -52,6 +54,47 @@ export async function executeCommand(
   }
 }
 
+export const MENU_GUILD_ONLY = "To menu działa tylko na serwerze.";
+export const MENU_NO_PERMISSION = "Nie masz uprawnień do tego menu.";
+export const NOT_YOUR_MENU = "To nie Twoje menu.";
+export const UNKNOWN_COMPONENT = "To menu jest nieaktualne. Wywołaj komendę jeszcze raz.";
+
+/**
+ * Runs a component handler after the checks every click shares: only the member the component was made
+ * for may use it, then the component's own guild/permission rules. Errors follow the command policy
+ * (UserError shown, anything else logged), always as an ephemeral reply.
+ */
+export async function executeComponent(
+  { component, owner }: ResolvedComponent,
+  ctx: ComponentContext,
+  logger: Logger,
+): Promise<void> {
+  const log = logger.child({
+    component: `${component.module}:${component.name}`,
+    guildId: ctx.guildId,
+    userId: ctx.user.id,
+  });
+  try {
+    if (ctx.user.id !== owner) throw new UserError(NOT_YOUR_MENU);
+    const denied = checkAccess(component, ctx, {
+      guildOnly: MENU_GUILD_ONLY,
+      permissions: MENU_NO_PERMISSION,
+    });
+    if (denied) throw new UserError(denied);
+    await component.run(ctx);
+    // Discord shows "interaction failed" after 3 seconds without an answer.
+    if (!ctx.acknowledged) await ctx.defer();
+  } catch (error) {
+    const userFacing = error instanceof UserError;
+    if (!userFacing) log.error("Component failed", { error });
+    try {
+      await ctx.reply({ content: userFacing ? error.message : GENERIC_ERROR, ephemeral: true });
+    } catch (replyError) {
+      log.warn("Could not report a component error to the user", { error: replyError });
+    }
+  }
+}
+
 /**
  * The pre-parse gate of a prefix invocation: the command's own access plus the permissions of the subcommand
  * named by the first word, so a member without access gets "no permission" instead of a usage error.
@@ -78,14 +121,18 @@ export function checkPrefixAccess(
 export function checkAccess(
   target: { guildOnly?: boolean; permissions?: bigint },
   { guildId, memberPermissions }: Pick<CommandContext, "guildId" | "memberPermissions">,
+  messages = {
+    guildOnly: "Ta komenda działa tylko na serwerze.",
+    permissions: "Nie masz uprawnień do tej komendy.",
+  },
 ): string | null {
   if ((target.guildOnly || target.permissions !== undefined) && guildId === null) {
-    return "Ta komenda działa tylko na serwerze.";
+    return messages.guildOnly;
   }
   const required = target.permissions;
   if (required === undefined) return null;
   const granted = memberPermissions ?? 0n;
   const isAdmin = (granted & ADMINISTRATOR) === ADMINISTRATOR;
-  if (!isAdmin && (granted & required) !== required) return "Nie masz uprawnień do tej komendy.";
+  if (!isAdmin && (granted & required) !== required) return messages.permissions;
   return null;
 }
