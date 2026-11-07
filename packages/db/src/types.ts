@@ -29,6 +29,8 @@ export interface PartyAreaRow {
   join_channel_id: string;
   guild_id: string;
   category_id: string;
+  name_template: string;
+  command_channel: boolean;
   created_at: Date;
 }
 

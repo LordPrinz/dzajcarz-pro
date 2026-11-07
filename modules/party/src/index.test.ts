@@ -6,7 +6,7 @@ import {
   type Logger,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext, replyText } from "@dzajcarz/core/testing";
+import { createFakeContext, replyText, submitModal } from "@dzajcarz/core/testing";
 import { createMemoryStore } from "@dzajcarz/kv";
 import type { Channel, VoiceState } from "discord.js";
 import {
@@ -16,11 +16,19 @@ import {
   type PartyChannels,
   type PartyPermissions,
   type PartyRepository,
+  renderChannelName,
+  validateTemplate,
 } from "./index.ts";
 
 const MANAGE_CHANNELS = 1n << 4n;
 const guildId = "100000000000000001";
-const area: PartyArea = { guildId, categoryId: "300", joinChannelId: "400" };
+const area: PartyArea = {
+  guildId,
+  categoryId: "300",
+  joinChannelId: "400",
+  nameTemplate: "Kanał {user}",
+  commandChannel: false,
+};
 
 interface SetupOptions {
   moveFails?: boolean;
@@ -29,6 +37,7 @@ interface SetupOptions {
   lock?: ReturnType<typeof createMemoryStore>;
   allowFails?: boolean;
   allowSelfFails?: boolean;
+  renameFails?: boolean;
   /** What the channel's category says about @everyone. */
   inherited?: { connect: boolean | null; view: boolean | null };
 }
@@ -46,12 +55,19 @@ function setup({
   lock,
   allowFails = false,
   allowSelfFails = false,
+  renameFails = false,
   inherited = { connect: null, view: null },
 }: SetupOptions = {}) {
   const areas = new Map<string, PartyArea>();
   const owned = new Map<string, PartyChannel>();
   const repository: PartyRepository = {
     addArea: async (a) => void areas.set(a.joinChannelId, a),
+    updateArea: async (id, settings) => {
+      const current = areas.get(id);
+      if (!current) return false;
+      areas.set(id, { ...current, ...settings });
+      return true;
+    },
     listAreas: async (g) => [...areas.values()].filter((a) => a.guildId === g),
     findAreaByJoinChannel: async (id) => areas.get(id) ?? null,
     findAreaByCategory: async (id) => [...areas.values()].find((a) => a.categoryId === id) ?? null,
@@ -89,6 +105,9 @@ function setup({
   const discord = new Map<string, Set<string>>();
   const moves: { userId: string; channelId: string }[] = [];
   const created: { name: string; categoryId: string; ownerId: string }[] = [];
+  const categories: { categoryName: string; joinChannelName: string }[] = [];
+  const renamed: { categoryId: string; joinChannelId: string; categoryName: string }[] = [];
+  const names = new Map<string, string>();
   let nextId = 1000;
   const channels: PartyChannels = {
     async createVoiceChannel(_guild, categoryId, name, ownerId) {
@@ -115,7 +134,8 @@ function setup({
     async exists(channelId) {
       return discord.has(channelId);
     },
-    async createCategoryWithJoinChannel() {
+    async createCategoryWithJoinChannel(_guild, categoryName, joinChannelName) {
+      categories.push({ categoryName, joinChannelName });
       const categoryId = String(nextId++);
       const joinChannelId = String(nextId++);
       discord.set(categoryId, new Set());
@@ -125,6 +145,18 @@ function setup({
     async voiceChannelOf(_guild, userId) {
       for (const [id, members] of discord) if (members.has(userId)) return id;
       return null;
+    },
+    async areaNames(categoryId, joinChannelId) {
+      return {
+        categoryName: names.get(categoryId) ?? "Impreza",
+        joinChannelName: names.get(joinChannelId) ?? "Wejście",
+      };
+    },
+    async renameArea(categoryId, joinChannelId, newNames) {
+      if (renameFails) throw new Error("Missing Permissions");
+      renamed.push({ categoryId, joinChannelId, categoryName: newNames.categoryName });
+      names.set(categoryId, newNames.categoryName);
+      names.set(joinChannelId, newNames.joinChannelName);
     },
   };
 
@@ -200,14 +232,20 @@ function setup({
     args: Record<string, unknown> = {},
     memberPermissions: bigint = MANAGE_CHANNELS,
     userId?: string,
+    invocation: "slash" | "prefix" = "slash",
   ) => {
-    const ctx = createFakeContext({ args, subcommand, memberPermissions, userId });
+    const ctx = createFakeContext({ args, subcommand, memberPermissions, userId, invocation });
     await executeCommand(command, ctx, silentLogger);
     return Object.assign(
       ctx.replies.map((r) => replyText(r)),
-      { deferOptions: ctx.deferOptions },
+      { deferOptions: ctx.deferOptions, modals: ctx.modals },
     );
   };
+  const submit = (
+    customId: string,
+    values: Record<string, string>,
+    memberPermissions: bigint = MANAGE_CHANNELS,
+  ) => submitModal({ registry, customId, values, memberPermissions, guildId });
   /** Discord changes its state first, then calls every listener in registration order without waiting. */
   const voice = async (oldChannel: string | null, newChannel: string | null, userId = "u1") => {
     if (oldChannel) discord.get(oldChannel)?.delete(userId);
@@ -231,6 +269,9 @@ function setup({
     discord,
     moves,
     created,
+    categories,
+    renamed,
+    submit,
     calls,
     managers,
     warnings,
@@ -253,7 +294,13 @@ function voiceState(channelId: string | null, userId: string, bot = false): Voic
 describe("/party create", () => {
   test("creates the channels and stores the area", async () => {
     const { run, areas } = setup();
-    const [reply] = await run("create", { name: "  Impreza  " });
+    const [reply] = await run(
+      "create",
+      { name: "  Impreza  " },
+      MANAGE_CHANNELS,
+      undefined,
+      "prefix",
+    );
     const [stored] = [...areas.values()];
     expect(stored?.guildId).toBe(guildId);
     expect(reply).toContain(`<#${stored?.joinChannelId}>`);
@@ -261,15 +308,19 @@ describe("/party create", () => {
 
   test("needs Manage Channels", async () => {
     const { run, areas } = setup();
-    const [reply] = await run("create", { name: "x" }, 0n);
+    const [reply] = await run("create", { name: "x" }, 0n, undefined, "prefix");
     expect(areas.size).toBe(0);
     expect(reply).toBeDefined();
   });
 
   test("rejects an empty or too long name", async () => {
     const { run, areas } = setup();
-    expect((await run("create", { name: "   " }))[0]).toContain("nazw");
-    expect((await run("create", { name: "a".repeat(101) }))[0]).toContain("100");
+    expect(
+      (await run("create", { name: "   " }, MANAGE_CHANNELS, undefined, "prefix"))[0],
+    ).toContain("nazw");
+    expect(
+      (await run("create", { name: "a".repeat(101) }, MANAGE_CHANNELS, undefined, "prefix"))[0],
+    ).toContain("100");
     expect(areas.size).toBe(0);
   });
 
@@ -285,6 +336,8 @@ describe("/party create", () => {
         deleteChannel: async (id) => void deleted.push(id),
         createCategoryWithJoinChannel: async () => ({ categoryId: "c", joinChannelId: "j" }),
         voiceChannelOf: async () => null,
+        areaNames: async () => null,
+        renameArea: async () => {},
       },
       permissions: {} as PartyPermissions,
       lock: createMemoryStore(),
@@ -293,6 +346,7 @@ describe("/party create", () => {
     const ctx = createFakeContext({
       args: { name: "x" },
       subcommand: "create",
+      invocation: "prefix",
       memberPermissions: MANAGE_CHANNELS,
     });
     const command = failing.commands?.[0];
@@ -302,12 +356,181 @@ describe("/party create", () => {
   });
 });
 
+describe("party area form", () => {
+  const form = {
+    categoryName: "  Impreza ",
+    joinChannelName: "Wejście",
+    nameTemplate: "🔥 {user}",
+    commandChannel: "Tak",
+  };
+
+  test("/party create opens the form with defaults instead of creating", async () => {
+    const t = setup();
+    const answer = await t.run("create");
+    expect(answer.modals).toHaveLength(1);
+    const fields = Object.fromEntries(
+      answer.modals[0]?.fields.map((f) => [f.customId, f.value]) ?? [],
+    );
+    expect(fields).toMatchObject({ nameTemplate: "🎉 {user}", commandChannel: "nie" });
+    expect(t.areas.size).toBe(0);
+  });
+
+  test("a name typed with /party create prefills the form", async () => {
+    const t = setup();
+    const answer = await t.run("create", { name: "Impreza" });
+    expect(answer.modals[0]?.fields.find((f) => f.customId === "categoryName")?.value).toBe(
+      "Impreza",
+    );
+  });
+
+  test("submitting the form creates the area with its template and flag", async () => {
+    const t = setup();
+    const [spec] = (await t.run("create")).modals;
+    const ctx = await t.submit(spec?.customId ?? "", form);
+    const [stored] = [...t.areas.values()];
+    expect(stored).toMatchObject({ guildId, nameTemplate: "🔥 {user}", commandChannel: true });
+    expect(t.categories).toEqual([{ categoryName: "Impreza", joinChannelName: "Wejście" }]);
+    expect(replyText(ctx.replies[0])).toContain(`<#${stored?.joinChannelId}>`);
+  });
+
+  test("the form refuses a bad template or flag with a Polish message and creates nothing", async () => {
+    const t = setup();
+    const [spec] = (await t.run("create")).modals;
+    const id = spec?.customId ?? "";
+    const noUser = await t.submit(id, { ...form, nameTemplate: "Impreza" });
+    expect(replyText(noUser.replies[0])).toContain("{user}");
+    const long = await t.submit(id, { ...form, nameTemplate: `${"a".repeat(86)}{user}` });
+    expect(replyText(long.replies[0])).toContain("90");
+    const flag = await t.submit(id, { ...form, commandChannel: "może" });
+    expect(replyText(flag.replies[0])).toContain("tak");
+    const blank = await t.submit(id, { ...form, categoryName: "   " });
+    expect(blank.replies).toHaveLength(1);
+    expect(t.areas.size).toBe(0);
+  });
+
+  test("the form needs Manage Channels", async () => {
+    const t = setup();
+    const [spec] = (await t.run("create")).modals;
+    await t.submit(spec?.customId ?? "", form, 0n);
+    expect(t.areas.size).toBe(0);
+  });
+
+  test("/party create by prefix keeps the arguments and uses the default template", async () => {
+    const t = setup();
+    await t.run("create", { name: "Impreza" }, MANAGE_CHANNELS, undefined, "prefix");
+    const [stored] = [...t.areas.values()];
+    expect(stored).toMatchObject({ nameTemplate: "🎉 {user}", commandChannel: false });
+    expect(t.categories[0]?.categoryName).toBe("Impreza");
+  });
+
+  describe("/party edit", () => {
+    test("opens the form filled with the current values", async () => {
+      const t = setup();
+      t.areas.set("400", { ...area, nameTemplate: "💥 {user}", commandChannel: true });
+      const answer = await t.run("edit");
+      const fields = Object.fromEntries(
+        answer.modals[0]?.fields.map((f) => [f.customId, f.value]) ?? [],
+      );
+      expect(fields).toEqual({
+        categoryName: "Impreza",
+        joinChannelName: "Wejście",
+        nameTemplate: "💥 {user}",
+        commandChannel: "tak",
+      });
+    });
+
+    test("submit renames the channels and updates the row", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      const [spec] = (await t.run("edit")).modals;
+      const ctx = await t.submit(spec?.customId ?? "", form);
+      expect(t.renamed).toEqual([
+        { categoryId: "300", joinChannelId: "400", categoryName: "Impreza" },
+      ]);
+      expect(t.areas.get("400")).toMatchObject({ nameTemplate: "🔥 {user}", commandChannel: true });
+      expect(replyText(ctx.replies[0])).toContain("zaktualizowana");
+    });
+
+    test("keeps the row when Discord refuses the rename", async () => {
+      const t = setup({ renameFails: true });
+      t.areas.set("400", area);
+      const [spec] = (await t.run("edit")).modals;
+      const ctx = await t.submit(spec?.customId ?? "", form);
+      expect(replyText(ctx.replies[0])).toContain("Nie mogę");
+      expect(t.areas.get("400")).toEqual(area);
+    });
+
+    test("says so when the area was removed meanwhile", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      const [spec] = (await t.run("edit")).modals;
+      t.areas.clear();
+      const ctx = await t.submit(spec?.customId ?? "", form);
+      expect(replyText(ctx.replies[0])).toContain("nie istnieje");
+    });
+
+    test("picks the area with the channel option when there are several", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      t.areas.set("401", { ...area, categoryId: "301", joinChannelId: "401" });
+      expect((await t.run("edit"))[0]).toContain("kilka");
+      const answer = await t.run("edit", { channel: "401" });
+      expect(answer.modals[0]?.customId).toContain(":401");
+    });
+
+    test("by prefix it points to the slash command", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      const answer = await t.run("edit", {}, MANAGE_CHANNELS, undefined, "prefix");
+      expect(answer[0]).toContain("/party edit");
+    });
+
+    test("needs Manage Channels", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      const answer = await t.run("edit", {}, 0n);
+      expect(answer.modals).toHaveLength(0);
+    });
+  });
+});
+
+describe("channel name template", () => {
+  test("replaces {user} and trims to 100 characters", () => {
+    expect(renderChannelName("🎉 {user}", "Ola")).toBe("🎉 Ola");
+    expect(renderChannelName("{user} & {user}", "Ola")).toBe("Ola & Ola");
+    expect([...renderChannelName("🎉 {user}", "x".repeat(200))]).toHaveLength(100);
+    expect([...renderChannelName("{user}", "🎉".repeat(150))]).toHaveLength(100);
+  });
+
+  test("never produces an empty name and ignores $ patterns in names", () => {
+    expect(renderChannelName("{user}", "   ")).toBe("Kanał imprezowy");
+    expect(renderChannelName("{user}", "a$&b")).toBe("a$&b");
+    expect(renderChannelName("x {user}", "A\nB")).toBe("x A B");
+  });
+
+  test("validation wants {user} and a sensible length", () => {
+    expect(() => validateTemplate("🎉 {user}")).not.toThrow();
+    expect(() => validateTemplate("   ")).toThrow("pusty");
+    expect(() => validateTemplate("bez")).toThrow("{user}");
+    expect(() => validateTemplate(`${"a".repeat(85)}{user}`)).toThrow("90");
+  });
+
+  test("a new party channel uses the area template", async () => {
+    const t = setup();
+    t.areas.set("400", { ...area, nameTemplate: "🎉 {user}" });
+    t.discord.set("400", new Set());
+    await t.voice(null, "400");
+    expect(t.created[0]?.name).toBe("🎉 Ola-u1");
+  });
+});
+
 async function failingRepo(): Promise<PartyRepository> {
   const nope = async (): Promise<never> => {
     throw new Error("db down");
   };
   return {
     addArea: nope,
+    updateArea: async () => false,
     listAreas: async () => [],
     listAllAreas: async () => [],
     findAreaByJoinChannel: async () => null,
@@ -342,7 +565,7 @@ describe("/party delete", () => {
   test("with several areas it asks which one", async () => {
     const t = setup();
     t.areas.set("400", area);
-    t.areas.set("401", { guildId, categoryId: "301", joinChannelId: "401" });
+    t.areas.set("401", { ...area, categoryId: "301", joinChannelId: "401" });
     const [reply] = await t.run("delete");
     expect(reply).toContain("<#400>");
     expect(t.areas.size).toBe(2);
@@ -733,7 +956,7 @@ describe("startup reconciliation", () => {
     const t = setup();
     t.areas.set("400", area);
     t.discord.set("300", new Set()); // the join channel 400 was deleted while offline
-    t.areas.set("401", { guildId, categoryId: "301", joinChannelId: "401" });
+    t.areas.set("401", { ...area, categoryId: "301", joinChannelId: "401" });
     t.discord.set("401", new Set());
     t.discord.set("301", new Set()); // this one is intact
     t.owned.set("1", row("1", "a"));

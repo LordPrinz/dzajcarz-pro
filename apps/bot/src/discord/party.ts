@@ -78,7 +78,7 @@ export function createPartyChannels(client: Client): PartyChannels {
       }
     },
 
-    async createCategoryWithJoinChannel(guildId, categoryName) {
+    async createCategoryWithJoinChannel(guildId, categoryName, joinChannelName) {
       const guild = await guildOf(guildId);
       const category = await guild.channels.create({
         name: categoryName,
@@ -87,7 +87,7 @@ export function createPartyChannels(client: Client): PartyChannels {
       });
       try {
         const join = await guild.channels.create({
-          name: "➕ Dołącz, by stworzyć kanał",
+          name: joinChannelName,
           type: ChannelType.GuildVoice,
           parent: category.id,
           reason: "Party area",
@@ -96,6 +96,34 @@ export function createPartyChannels(client: Client): PartyChannels {
       } catch (error) {
         await category.delete("Party area setup failed").catch(() => {});
         throw error;
+      }
+    },
+
+    async areaNames(categoryId, joinChannelId) {
+      const [category, join] = await Promise.all([
+        client.channels.fetch(categoryId).catch(() => null),
+        client.channels.fetch(joinChannelId).catch(() => null),
+      ]);
+      if (category?.type !== ChannelType.GuildCategory || join?.type !== ChannelType.GuildVoice) {
+        return null;
+      }
+      return { categoryName: category.name, joinChannelName: join.name };
+    },
+
+    async renameArea(categoryId, joinChannelId, names) {
+      const [category, join] = await Promise.all([
+        client.channels.fetch(categoryId),
+        client.channels.fetch(joinChannelId),
+      ]);
+      if (category?.type !== ChannelType.GuildCategory || join?.type !== ChannelType.GuildVoice) {
+        throw new Error("Party area channels are missing");
+      }
+      // Discord limits renames per channel, so only touch names that actually changed.
+      if (category.name !== names.categoryName) {
+        await category.setName(names.categoryName, "Party area edited");
+      }
+      if (join.name !== names.joinChannelName) {
+        await join.setName(names.joinChannelName, "Party area edited");
       }
     },
 
