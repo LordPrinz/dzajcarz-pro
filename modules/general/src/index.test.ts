@@ -571,31 +571,3 @@ describe("general module contexts", () => {
     expect(ctx.replies).toEqual(["Pong! 1 ms"]);
   });
 });
-
-describe("general module contexts", () => {
-  test("help and ping are available in DMs, private channels and for user installs", () => {
-    const module = createGeneralModule({
-      commands: () => [],
-      gatewayPing: () => 0,
-      prefixFor: async () => "!",
-    });
-    for (const name of ["ping", "help"]) {
-      const command = module.commands?.find((c) => c.name === name);
-      expect(command?.contexts).toEqual({
-        places: ["guild", "bot-dm", "private-channel"],
-        installs: ["guild", "user"],
-      });
-    }
-  });
-
-  test("ping runs in a DM", async () => {
-    const registry = createRegistry([
-      createGeneralModule({ commands: () => [], gatewayPing: () => 1, prefixFor: async () => "!" }),
-    ]);
-    const command = registry.find("ping");
-    if (!command) throw new Error("no ping");
-    const ctx = createFakeContext({ guildId: null });
-    await executeCommand(command, ctx, silentLogger);
-    expect(ctx.replies).toEqual(["Pong! 1 ms"]);
-  });
-});
