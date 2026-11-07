@@ -113,9 +113,17 @@ export interface PartyChat {
   /** Posts the message and returns its id. */
   post(channelId: string, message: Reply): Promise<string>;
   exists(channelId: string, messageId: string): Promise<boolean>;
-  /** Ids of the most recent messages (up to 100), newest first. */
-  recentMessageIds(channelId: string): Promise<string[]>;
+  /** The most recent messages (up to 100), newest first. */
+  recentMessages(channelId: string): Promise<ChatMessage[]>;
   deleteMessages(channelId: string, messageIds: string[]): Promise<void>;
+}
+
+/** What the cleanup needs to know about a message to decide whether to spare it. */
+export interface ChatMessage {
+  id: string;
+  pinned: boolean;
+  /** Joins, pins, boosts and the like: Discord does not let bots delete some of them. */
+  system: boolean;
 }
 
 /** What `setEveryone` changes: true allows, false denies, null clears the overwrite, undefined leaves it alone. */
@@ -167,8 +175,6 @@ export interface PartyModuleDeps {
   chat: PartyChat;
   /** Delays the cleanup of command channel messages. */
   scheduler: Scheduler;
-  /** Whether the module is on in that channel; the startup sweep leaves areas where it is off alone. */
-  moduleEnabled: (guildId: string, channelId: string, module: string) => Promise<boolean>;
   /** The join lock and the creation cooldown. */
   lock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
   logger: Logger;
@@ -270,6 +276,10 @@ const CREATION_WINDOW_MS = 60_000;
 const RECONCILE_GRACE_MS = 15_000;
 /** Messages in a command channel (the panel excepted) are deleted this long after they appear. */
 const CHAT_CLEANUP_MS = 15_000;
+/** Messages that fall due within this window of each other are deleted in one request. */
+const CLEANUP_BATCH_MS = 1_000;
+/** A panel deleted again within this window is reposted only when it ends: bounds a loop against another bot or automod. */
+const PANEL_REPOST_COOLDOWN_MS = 30_000;
 
 export function createPartyModule({
   repository,
@@ -277,7 +287,6 @@ export function createPartyModule({
   permissions,
   chat,
   scheduler,
-  moduleEnabled,
   lock,
   logger,
 }: PartyModuleDeps): BotModule {
@@ -301,6 +310,7 @@ export function createPartyModule({
    */
   async function dismantleArea(area: PartyArea): Promise<number> {
     const owned = (await repository.deleteArea(area.joinChannelId)) ?? [];
+    commandChannels.delete(area.joinChannelId);
     for (const { channelId } of owned) await deleteQuietly(channelId);
     await deleteQuietly(area.joinChannelId);
     await deleteQuietly(area.categoryId);
@@ -479,6 +489,7 @@ export function createPartyModule({
       ) {
         throw new UserError("Ta strefa już nie istnieje.");
       }
+      trackCommandChannel(area.joinChannelId, settings.commandChannel);
       // The panel follows the flag (posted when turned on, removed when turned off) before any rename.
       const panelProblem = await syncPanel(area.joinChannelId);
       const renamed = await renameAreaChannels(area, settings, guildId);
@@ -684,8 +695,11 @@ export function createPartyModule({
     run: async (ctx) => {
       if (isKey(PANEL_BUTTONS, ctx.state)) return PANEL_BUTTONS[ctx.state].run(ctx);
       if (isKey(PANEL_FORMS, ctx.state)) {
-        // Refuse before the form opens, so nobody types a name only to be told they have no channel.
-        await ownChannel(ctx);
+        // Refuse before the form opens, so nobody types a name only to be told they have no channel. This
+        // runs inside the three seconds Discord gives for the modal (a later one fails with 10062), so it
+        // is one Redis increment, a cached voice state and one row, plus a member lookup only for a
+        // non-owner. The cooldown keeps repeated presses from turning into a stream of those lookups.
+        await controlledChannel(ctx, ctx.state);
         return ctx.showModal(PANEL_FORMS[ctx.state].modal.build(ctx.user.id));
       }
       throw new UserError(PANEL_OUTDATED);
@@ -743,6 +757,17 @@ export function createPartyModule({
    * `party_area.panel_message_id`), everything else is deleted after CHAT_CLEANUP_MS.
    */
 
+  /**
+   * Join channel ids of the areas with a command channel. Every message in the guild reaches the message
+   * handlers, so they ask this set (no database, no gate) before doing anything. Filled at startup and kept
+   * current wherever the flag or the area changes.
+   */
+  const commandChannels = new Set<string>();
+  function trackCommandChannel(joinChannelId: string, on: boolean): void {
+    if (on) commandChannels.add(joinChannelId);
+    else commandChannels.delete(joinChannelId);
+  }
+
   /** Panel work per area runs one at a time, so two triggers (an edit, a deleted panel) never post two. */
   const panelQueue = new Map<string, Promise<unknown>>();
   function serialized<T>(joinChannelId: string, task: () => Promise<T>): Promise<T> {
@@ -765,13 +790,17 @@ export function createPartyModule({
     return serialized(joinChannelId, async () => {
       try {
         const area = await repository.findAreaByJoinChannel(joinChannelId);
-        if (!area) return null;
+        if (!area) {
+          commandChannels.delete(joinChannelId);
+          return null;
+        }
+        trackCommandChannel(joinChannelId, area.commandChannel);
         if (!area.commandChannel) {
           await removePanel(area);
           return null;
         }
         const panelId = await ensurePanel(area);
-        if (sweep) await deleteLeftovers(joinChannelId, panelId);
+        if (sweep && panelId) await deleteLeftovers(joinChannelId, panelId);
         return null;
       } catch (error) {
         logger.warn("Party panel not synced", { joinChannelId, error });
@@ -780,8 +809,8 @@ export function createPartyModule({
     });
   }
 
-  /** The id of the area's panel, posting a new one when there is none or it was deleted. */
-  async function ensurePanel(area: PartyArea): Promise<string> {
+  /** The id of the area's panel, posting a new one when there is none or it was deleted. Null when the area is gone. */
+  async function ensurePanel(area: PartyArea): Promise<string | null> {
     const { joinChannelId, panelMessageId } = area;
     if (panelMessageId && (await chat.exists(joinChannelId, panelMessageId))) return panelMessageId;
     const messageId = await chat.post(joinChannelId, panelMessage());
@@ -793,7 +822,10 @@ export function createPartyModule({
       throw error;
     }
     // The area was removed meanwhile; its chat goes with the channel, but do not leave a panel behind.
-    if (!stored) await chat.deleteMessages(joinChannelId, [messageId]).catch(() => {});
+    if (!stored) {
+      await chat.deleteMessages(joinChannelId, [messageId]).catch(() => {});
+      return null;
+    }
     return messageId;
   }
 
@@ -803,43 +835,81 @@ export function createPartyModule({
     await repository.setPanelMessage(area.joinChannelId, null);
   }
 
+  /** Pinned and system messages are somebody's on purpose (or not ours to delete): the sweep leaves them. */
   async function deleteLeftovers(joinChannelId: string, panelId: string): Promise<void> {
-    const stale = (await chat.recentMessageIds(joinChannelId)).filter((id) => id !== panelId);
+    const stale = (await chat.recentMessages(joinChannelId))
+      .filter((message) => message.id !== panelId && !message.pinned && !message.system)
+      .map((message) => message.id);
     if (stale.length > 0) await chat.deleteMessages(joinChannelId, stale);
   }
 
-  /** Timers waiting to delete a message, so shutdown can cancel them. */
+  /** Timers waiting to delete a message or flush a batch, so shutdown can cancel them. */
   const cleanups = new Set<() => void>();
-
-  function scheduleCleanup(joinChannelId: string, messageId: string): void {
-    const cancel = scheduler.after(CHAT_CLEANUP_MS, () => {
+  function schedule(delayMs: number, task: () => void): void {
+    const cancel = scheduler.after(delayMs, () => {
       cleanups.delete(cancel);
-      void deleteStale(joinChannelId, messageId);
+      task();
     });
     cleanups.add(cancel);
   }
 
-  /** Never throws. Looks again when the timer fires: the flag or the panel may have changed meanwhile. */
-  async function deleteStale(joinChannelId: string, messageId: string): Promise<void> {
+  /** Messages that are due, per join channel, waiting for the flush that deletes them together. */
+  const due = new Map<string, string[]>();
+
+  function scheduleCleanup(joinChannelId: string, messageId: string): void {
+    schedule(CHAT_CLEANUP_MS, () => {
+      const batch = due.get(joinChannelId);
+      if (batch) {
+        batch.push(messageId);
+        return;
+      }
+      due.set(joinChannelId, [messageId]);
+      schedule(CLEANUP_BATCH_MS, () => {
+        const ids = due.get(joinChannelId) ?? [];
+        due.delete(joinChannelId);
+        void deleteStale(joinChannelId, ids);
+      });
+    });
+  }
+
+  /** Channels whose failed cleanup is already in the log, so a missing Manage Messages is one line, not one per message. */
+  const cleanupFailing = new Set<string>();
+
+  /** Never throws. Looks again when the flush runs: the flag or the panel may have changed meanwhile. */
+  async function deleteStale(joinChannelId: string, messageIds: string[]): Promise<void> {
     try {
       const area = await repository.findAreaByJoinChannel(joinChannelId);
-      if (!area?.commandChannel || area.panelMessageId === messageId) return;
-      await chat.deleteMessages(joinChannelId, [messageId]);
+      if (!area?.commandChannel) return;
+      const ids = messageIds.filter((id) => id !== area.panelMessageId);
+      if (ids.length === 0) return;
+      await chat.deleteMessages(joinChannelId, ids);
+      cleanupFailing.delete(joinChannelId);
     } catch (error) {
-      logger.warn("Could not delete a command channel message", {
+      if (cleanupFailing.has(joinChannelId)) return;
+      cleanupFailing.add(joinChannelId);
+      logger.warn("Could not delete command channel messages (logged once until it works again)", {
         joinChannelId,
-        messageId,
         error,
       });
     }
   }
 
+  // Not gated by the module toggle (`alwaysRun`): switching the party module off must not leave a chat
+  // that fills up or a panel that is gone. Only the panel's buttons are gated.
   const chatMessage = defineEvent({
     name: "party-chat-message",
     event: "messageCreate",
-    // Gated like any other party feature: switch the module off in a channel and its chat is left alone.
-    run: async (message: { id: string; channelId: string; guildId: string | null }) => {
-      if (!message.guildId) return;
+    alwaysRun: true,
+    run: async (message: {
+      id: string;
+      channelId: string;
+      guildId: string | null;
+      pinned?: boolean;
+      system?: boolean;
+    }) => {
+      if (!message.guildId || !commandChannels.has(message.channelId)) return;
+      // System messages (joins, pins) are not ours to delete, and a pinned one was kept on purpose.
+      if (message.pinned || message.system) return;
       try {
         const area = await repository.findAreaByJoinChannel(message.channelId);
         if (!area?.commandChannel || message.id === area.panelMessageId) return;
@@ -853,12 +923,33 @@ export function createPartyModule({
     },
   });
 
-  /** Never throws. Reposts the panel when it is among the deleted messages. */
+  /** Join channels whose panel was reposted lately; true means it was deleted again meanwhile. */
+  const repostCooldown = new Map<string, boolean>();
+
+  /** Reposts the panel (if it is gone) and holds further reposts back for the cooldown. */
+  async function repostPanel(joinChannelId: string): Promise<void> {
+    repostCooldown.set(joinChannelId, false);
+    schedule(PANEL_REPOST_COOLDOWN_MS, () => {
+      const deletedAgain = repostCooldown.get(joinChannelId) === true;
+      repostCooldown.delete(joinChannelId);
+      // syncPanel checks that the panel is really gone, so a stale flag costs one request.
+      if (deletedAgain && commandChannels.has(joinChannelId)) void repostPanel(joinChannelId);
+    });
+    await syncPanel(joinChannelId);
+  }
+
+  /**
+   * Never throws. Reposts the panel when it is among the deleted messages, at most once per cooldown: a
+   * panel that keeps getting deleted (another bot, automod) is reposted when the cooldown ends, not at once.
+   */
   async function onMessagesDeleted(channelId: string, messageIds: string[]): Promise<void> {
+    if (!commandChannels.has(channelId)) return;
     try {
       const area = await repository.findAreaByJoinChannel(channelId);
       if (!area?.commandChannel || !area.panelMessageId) return;
-      if (messageIds.includes(area.panelMessageId)) await syncPanel(area.joinChannelId);
+      if (!messageIds.includes(area.panelMessageId)) return;
+      if (repostCooldown.has(channelId)) repostCooldown.set(channelId, true);
+      else await repostPanel(channelId);
     } catch (error) {
       logger.warn("Party panel repost failed", { channelId, error });
     }
@@ -867,6 +958,7 @@ export function createPartyModule({
   const panelDeleted = defineEvent({
     name: "party-panel-deleted",
     event: "messageDelete",
+    alwaysRun: true,
     run: (message: { id: string; channelId: string }) =>
       onMessagesDeleted(message.channelId, [message.id]),
   });
@@ -874,6 +966,7 @@ export function createPartyModule({
   const panelBulkDeleted = defineEvent({
     name: "party-panel-bulk-deleted",
     event: "messageDeleteBulk",
+    alwaysRun: true,
     run: (messages: ReadonlyMap<string, unknown>, channel: { id: string }) =>
       onMessagesDeleted(channel.id, [...messages.keys()]),
   });
@@ -882,19 +975,25 @@ export function createPartyModule({
     name: "party-panels",
     event: "clientReady",
     once: true,
-    // Not alwaysRun for the same reason as the cleanup, but there is no channel on this event to gate by,
-    // so `restorePanels` asks the module gate per area.
+    alwaysRun: true,
     run: (_client: Client<true>) => restorePanels(),
   });
 
-  /** On startup: panels missing or deleted while offline come back, messages left over are deleted. Never throws. */
+  /**
+   * On startup: remembers which areas have a command channel, then brings back panels missing or deleted
+   * while offline and deletes messages left over. Covers every area, whatever the module toggle says.
+   * Never throws.
+   */
   async function restorePanels(): Promise<void> {
     try {
       let restored = 0;
-      for (const { guildId, joinChannelId, commandChannel } of await repository.listAllAreas()) {
+      const areas = await repository.listAllAreas();
+      for (const { joinChannelId, commandChannel } of areas) {
+        trackCommandChannel(joinChannelId, commandChannel);
+      }
+      for (const { joinChannelId, commandChannel } of areas) {
         if (!commandChannel) continue;
         try {
-          if (!(await moduleEnabled(guildId, joinChannelId, "party"))) continue;
           if ((await syncPanel(joinChannelId, true)) === null) restored++;
         } catch (error) {
           logger.warn("Could not restore a party panel", { joinChannelId, error });

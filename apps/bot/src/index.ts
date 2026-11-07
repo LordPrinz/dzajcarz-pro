@@ -59,8 +59,9 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.DirectMessages,
   ],
-  // DM channels are not cached, so without this partial the bot never sees DM messages.
-  partials: [Partials.Channel],
+  // DM channels are not cached, so without Channel the bot never sees DM messages. Without Message, a
+  // deleted message that is not in the cache (the party panel after a restart) never fires messageDelete.
+  partials: [Partials.Channel, Partials.Message],
   allowedMentions: NO_MENTIONS,
 });
 

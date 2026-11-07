@@ -228,6 +228,9 @@ function setup({
   const posted: { channelId: string; message: Reply; id: string }[] = [];
   let nextMessageId = 9000;
   const chatFailures = { post: false, delete: false };
+  /** Message id -> flags a test sets on messages left in a chat. */
+  const messageFlags = new Map<string, { pinned?: boolean; system?: boolean }>();
+  const deleteCalls: string[][] = [];
   const chat: PartyChat = {
     async post(channelId, message) {
       if (chatFailures.post) throw new Error("Missing Access");
@@ -239,10 +242,15 @@ function setup({
     async exists(channelId, messageId) {
       return chats.get(channelId)?.includes(messageId) ?? false;
     },
-    async recentMessageIds(channelId) {
-      return [...(chats.get(channelId) ?? [])].reverse();
+    async recentMessages(channelId) {
+      return [...(chats.get(channelId) ?? [])].reverse().map((id) => ({
+        id,
+        pinned: messageFlags.get(id)?.pinned ?? false,
+        system: messageFlags.get(id)?.system ?? false,
+      }));
     },
     async deleteMessages(channelId, ids) {
+      deleteCalls.push(ids);
       if (chatFailures.delete) throw new Error("Missing Permissions");
       chats.set(
         channelId,
@@ -251,8 +259,6 @@ function setup({
     },
   };
   const scheduler = createFakeScheduler();
-  /** Modules switched off per channel id. */
-  const disabledIn = new Set<string>();
 
   const warnings: { message: string; fields?: LogFields }[] = [];
   const infos: { message: string; fields?: LogFields }[] = [];
@@ -269,7 +275,6 @@ function setup({
     permissions,
     chat,
     scheduler,
-    moduleEnabled: async (_guild, channelId) => !disabledIn.has(channelId),
     lock: store,
     logger,
   });
@@ -316,6 +321,7 @@ function setup({
     ]);
   };
   return {
+    repository,
     run,
     voice,
     eventFor,
@@ -324,8 +330,9 @@ function setup({
     chats,
     posted,
     chatFailures,
+    messageFlags,
+    deleteCalls,
     scheduler,
-    disabledIn,
     nextMessage: () => String(nextMessageId++),
     areas,
     owned,
@@ -406,7 +413,6 @@ describe("/party create", () => {
       permissions: {} as PartyPermissions,
       chat: {} as PartyChat,
       scheduler: createFakeScheduler(),
-      moduleEnabled: async () => true,
       lock: createMemoryStore(),
       logger: silentLogger,
     });
@@ -962,7 +968,15 @@ describe("leaving a party channel", () => {
   test("cleanup handlers run even when the module is switched off", () => {
     const { module } = setup();
     const always = module.events?.filter((e) => e.alwaysRun).map((e) => e.name);
-    expect(always?.sort()).toEqual(["party-channel-delete", "party-leave", "party-reconcile"]);
+    expect(always?.sort()).toEqual([
+      "party-channel-delete",
+      "party-chat-message",
+      "party-leave",
+      "party-panel-bulk-deleted",
+      "party-panel-deleted",
+      "party-panels",
+      "party-reconcile",
+    ]);
     expect(module.events?.find((e) => e.name === "party-join")?.alwaysRun).toBeUndefined();
   });
 });
@@ -1435,15 +1449,23 @@ describe("command channel panel", () => {
       expect(t.chats.get("400")).toEqual([panel]);
     });
 
-    test("startup skips areas without the flag and areas where the module is off", async () => {
+    test("startup skips areas without the flag", async () => {
       const t = setup();
       t.areas.set("400", area);
-      t.areas.set("410", { ...panelArea, joinChannelId: "410", categoryId: "310" });
-      t.disabledIn.add("410");
-      t.chats.set("410", ["1"]);
+      t.chats.set("400", ["1"]);
       await t.eventFor("party-panels").run({} as never);
       expect(t.posted).toHaveLength(0);
-      expect(t.chats.get("410")).toEqual(["1"]);
+      expect(t.chats.get("400")).toEqual(["1"]);
+    });
+
+    test("startup spares pinned and system messages", async () => {
+      const t = await withPanel();
+      const panel = panelId(t) ?? "";
+      t.chats.set("400", ["1", "2", "3", panel, "4"]);
+      t.messageFlags.set("2", { pinned: true });
+      t.messageFlags.set("3", { system: true });
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.chats.get("400")).toEqual(["2", "3", panel]);
     });
 
     test("a failing area does not stop the others", async () => {
@@ -1553,7 +1575,11 @@ describe("command channel panel", () => {
       t.scheduler.advance(14_999);
       await Bun.sleep(0);
       expect(t.chats.get("400")).toContain("5001");
+      // Due at 15 s, then held for the one-second batching window.
       t.scheduler.advance(1);
+      await Bun.sleep(0);
+      expect(t.chats.get("400")).toContain("5001");
+      t.scheduler.advance(1_000);
       await Bun.sleep(0);
       expect(t.chats.get("400")).toEqual([panelId(t) ?? ""]);
     });
@@ -1571,7 +1597,7 @@ describe("command channel panel", () => {
       t.areas.set("400", { ...panelArea, panelMessageId: null });
       await t.eventFor("party-chat-message").run(message(posted));
       t.areas.set("400", { ...panelArea, panelMessageId: posted });
-      t.scheduler.advance(15_000);
+      t.scheduler.advance(16_000);
       await Bun.sleep(0);
       expect(t.chats.get("400")).toContain(posted);
     });
@@ -1582,7 +1608,7 @@ describe("command channel panel", () => {
       await t.eventFor("party-chat-message").run(message("6001"));
       await t.eventFor("party-chat-message").run(message("6002"));
       expect(t.scheduler.pending).toBe(2);
-      t.scheduler.advance(15_000);
+      t.scheduler.advance(16_000);
       await Bun.sleep(0);
       expect(t.chats.get("400")).toEqual([panelId(t) ?? ""]);
     });
@@ -1601,7 +1627,7 @@ describe("command channel panel", () => {
       t.chats.set("400", [...(t.chats.get("400") ?? []), "7001"]);
       await t.eventFor("party-chat-message").run(message("7001"));
       t.areas.set("400", { ...panelArea, commandChannel: false });
-      t.scheduler.advance(15_000);
+      t.scheduler.advance(16_000);
       await Bun.sleep(0);
       expect(t.chats.get("400")).toContain("7001");
     });
@@ -1611,7 +1637,7 @@ describe("command channel panel", () => {
       t.chats.set("400", [...(t.chats.get("400") ?? []), "8001"]);
       await t.eventFor("party-chat-message").run(message("8001"));
       t.chatFailures.delete = true;
-      t.scheduler.advance(15_000);
+      t.scheduler.advance(16_000);
       await Bun.sleep(0);
       expect(t.warnings.some((w) => w.message.includes("command channel message"))).toBe(true);
     });
@@ -1624,11 +1650,143 @@ describe("command channel panel", () => {
       expect(t.scheduler.pending).toBe(0);
     });
 
-    test("cleanup is gated by the module, the startup restore too", () => {
+    test("cleanup, panel repost and the startup sweep ignore the module toggle", () => {
       const t = setup();
-      for (const name of ["party-chat-message", "party-panel-deleted", "party-panels"]) {
-        expect(t.eventFor(name).alwaysRun).toBeUndefined();
+      for (const name of [
+        "party-chat-message",
+        "party-panel-deleted",
+        "party-panel-bulk-deleted",
+        "party-panels",
+      ]) {
+        expect(t.eventFor(name).alwaysRun).toBe(true);
       }
+    });
+
+    test("messages due within a second of each other go out in one delete", async () => {
+      const t = await withPanel();
+      t.chats.set("400", [...(t.chats.get("400") ?? []), "a1", "a2", "a3"]);
+      await t.eventFor("party-chat-message").run(message("a1"));
+      t.scheduler.advance(400);
+      await t.eventFor("party-chat-message").run(message("a2"));
+      t.scheduler.advance(400);
+      await t.eventFor("party-chat-message").run(message("a3"));
+      t.deleteCalls.length = 0;
+      t.scheduler.advance(20_000);
+      await Bun.sleep(0);
+      expect(t.deleteCalls).toEqual([["a1", "a2", "a3"]]);
+    });
+
+    test("a pinned or system message is never scheduled", async () => {
+      const t = await withPanel();
+      await t.eventFor("party-chat-message").run({ ...message("p1"), pinned: true });
+      await t.eventFor("party-chat-message").run({ ...message("s1"), system: true });
+      expect(t.scheduler.pending).toBe(0);
+    });
+
+    test("channels outside the command channel set cost no database lookup", async () => {
+      const t = await withPanel();
+      const finds: string[] = [];
+      const original = t.areas.get.bind(t.areas);
+      t.areas.get = (key) => {
+        finds.push(key);
+        return original(key);
+      };
+      await t.eventFor("party-chat-message").run(message("1", "999"));
+      await t.eventFor("party-panel-deleted").run({ id: "1", channelId: "999" });
+      await t.eventFor("party-panel-bulk-deleted").run(new Map([["1", {}]]), { id: "999" });
+      expect(finds).toEqual([]);
+    });
+
+    test("the set follows the flag: edit turns a channel on, off and delete forgets it", async () => {
+      const t = setup();
+      t.areas.set("400", area);
+      t.chats.set("400", []);
+      await t.eventFor("party-panels").run({} as never);
+      await t.eventFor("party-chat-message").run(message("1"));
+      expect(t.scheduler.pending).toBe(0);
+
+      const [spec] = (await t.run("edit")).modals;
+      await t.submit(spec?.customId ?? "", form);
+      await t.eventFor("party-chat-message").run(message("2"));
+      expect(t.scheduler.pending).toBe(1);
+
+      await t.submit(spec?.customId ?? "", { ...form, commandChannel: "off" });
+      await t.eventFor("party-chat-message").run(message("3"));
+      expect(t.scheduler.pending).toBe(1);
+    });
+
+    test("a deleted area is forgotten", async () => {
+      const t = await withPanel();
+      await t.eventFor("party-channel-delete").run({ id: "400" });
+      await t.eventFor("party-chat-message").run(message("1"));
+      expect(t.scheduler.pending).toBe(0);
+    });
+
+    test("a panel deleted while uncached arrives as a bare id and is reposted", async () => {
+      const t = await withPanel();
+      const old = panelId(t) ?? "";
+      t.chats.set("400", []);
+      // A partial message carries only the ids; nothing else may be needed.
+      await t.eventFor("party-panel-deleted").run({ id: old, channelId: "400", partial: true });
+      expect(t.posted).toHaveLength(2);
+    });
+
+    test("the panel is reposted once per 30 seconds, then again if it was deleted meanwhile", async () => {
+      const t = await withPanel();
+      const del = async () => {
+        const gone = panelId(t) ?? "";
+        t.chats.set("400", []);
+        await t.eventFor("party-panel-deleted").run({ id: gone, channelId: "400" });
+      };
+      await del();
+      expect(t.posted).toHaveLength(2);
+      await del();
+      await del();
+      expect(t.posted).toHaveLength(2);
+      t.scheduler.advance(29_999);
+      await Bun.sleep(0);
+      expect(t.posted).toHaveLength(2);
+      t.scheduler.advance(1);
+      await Bun.sleep(0);
+      expect(t.posted).toHaveLength(3);
+      // Back to normal after a quiet period.
+      t.scheduler.advance(30_000);
+      await Bun.sleep(0);
+      await del();
+      expect(t.posted).toHaveLength(4);
+    });
+
+    test("without Manage Messages the failure is logged once per channel until a delete works", async () => {
+      const t = await withPanel();
+      const failures = () =>
+        t.warnings.filter((w) => w.message.startsWith("Could not delete command channel"));
+      t.chatFailures.delete = true;
+      for (const id of ["f1", "f2", "f3"]) {
+        t.chats.set("400", [...(t.chats.get("400") ?? []), id]);
+        await t.eventFor("party-chat-message").run(message(id));
+        t.scheduler.advance(16_000);
+        await Bun.sleep(0);
+      }
+      expect(failures()).toHaveLength(1);
+
+      t.chatFailures.delete = false;
+      await t.eventFor("party-chat-message").run(message("f4"));
+      t.scheduler.advance(16_000);
+      await Bun.sleep(0);
+      t.chatFailures.delete = true;
+      await t.eventFor("party-chat-message").run(message("f5"));
+      t.scheduler.advance(16_000);
+      await Bun.sleep(0);
+      expect(failures()).toHaveLength(2);
+    });
+
+    test("a panel posted for an area that vanished meanwhile is deleted and the sweep does not run", async () => {
+      const t = setup();
+      t.areas.set("400", panelArea);
+      t.chats.set("400", ["1"]);
+      t.repository.setPanelMessage = async () => false;
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.chats.get("400")).toEqual(["1"]);
     });
   });
 
@@ -1705,6 +1863,14 @@ describe("command channel panel", () => {
         expect(ctx.modals).toHaveLength(0);
         expect(replyText(ctx.replies[0])).toBe("Musisz być na swoim kanale party.");
       }
+    });
+
+    test("opening forms counts against the control cooldown", async () => {
+      const t = await withOwners();
+      for (let i = 0; i < 10; i++) expect((await click(t, "limit", "u1")).modals).toHaveLength(1);
+      const eleventh = await click(t, "limit", "u1");
+      expect(eleventh.modals).toHaveLength(0);
+      expect(replyText(eleventh.replies[0])).toContain("Za dużo zmian");
     });
 
     test("Zmień nazwę opens the rename form, and submitting it renames", async () => {

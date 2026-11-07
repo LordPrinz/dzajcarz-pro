@@ -72,7 +72,6 @@ export function createModules(services: ModuleServices): BotModule[] {
       permissions: services.partyPermissions,
       chat: services.partyChat,
       scheduler: services.scheduler,
-      moduleEnabled: services.moduleEnabled,
       lock: services.partyLock,
       logger: services.logger.child({ module: "party" }),
     }),

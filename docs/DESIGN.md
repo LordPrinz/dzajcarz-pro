@@ -228,32 +228,51 @@ shared: its components are `public`, so anyone may press them, and each press ac
 party channel through the same functions the `/party lock|unlock|hide|show|limit|rename|invite|block`
 subcommands call (`controlledChannel`: in the channel, owner or Manage Channels, control cooldown, audit
 reason). Replies are ephemeral; a member without a party channel is told "Musisz być na swoim kanale party.".
-Limit and Zmień nazwę open a modal (owned by the presser, checked on submit like any modal) after checking
-that the member has a channel at all. The user selects redraw the panel first, which clears the menu's
-choice, then answer with a follow-up.
+Limit and Zmień nazwę open a modal (owned by the presser, checked on submit like any modal) after the same
+checks, cooldown included. That work runs inside the three seconds Discord gives for answering with a modal
+(a later answer fails with 10062), so it stays small: one Redis increment, the cached voice state, one row,
+and a member lookup only for someone who is not the owner. The cooldown also stops repeated presses from
+becoming a stream of those lookups. The user selects redraw the panel first, which clears the menu's choice,
+then answer with a follow-up.
 
 Everything in that chat except the panel is deleted 15 seconds after it appears, the bot's replies to prefix
-commands and slash replies included. A `messageCreate` handler looks the channel up (`party_area` by join
-channel id) and schedules the delete through the `Scheduler` port (`@dzajcarz/core`: `after(ms, task)`,
-`createScheduler()` is `setTimeout`, `createFakeScheduler()` in `@dzajcarz/core/testing` is advanced by hand).
-The timer re-reads the area when it fires, so a message that turns out to be the panel (its creation event can
-beat the write of its id) or a flag switched off meanwhile is left alone. `dispose` cancels pending timers;
-the startup sweep covers what restarts lose.
+commands and slash replies included. A `messageCreate` handler schedules the delete through the `Scheduler`
+port (`@dzajcarz/core`: `after(ms, task)`, `createScheduler()` is `setTimeout`, `createFakeScheduler()` in
+`@dzajcarz/core/testing` is advanced by hand). Messages that fall due within one second of each other are
+deleted in one request per channel, so a burst costs one call (the effective delay is 15 to 16 s). The flush
+re-reads the area, so a message that turns out to be the panel (its creation event can beat the write of its
+id) or a flag switched off meanwhile is left alone. Pinned and system messages are never scheduled; a message
+pinned inside the 15 s window is still deleted. `dispose` cancels pending timers; the startup sweep covers
+what restarts lose.
+
+Every message in the guild reaches the message handlers, so they first ask an in-memory set of the join
+channel ids whose area has the flag on, and return without touching the database for anything else. The set is
+built on `clientReady` and updated by `syncPanel`, `/party edit` and `dismantleArea`. The client enables
+`Partials.Message`, otherwise `messageDelete` is not emitted for a panel that is not in the cache (after a
+restart); the handlers only need the message and channel ids.
 
 The panel is kept in sync by `syncPanel`, one operation per area at a time: it posts a panel when the flag is
 on and there is none or `exists` says it is gone, and removes it when the flag is off. It runs after `/party
 create` and `/party edit` (a failure is reported in the reply, the settings stay saved), when the panel is
 deleted (`messageDelete`, `messageDeleteBulk`) and on `clientReady`, where it also deletes up to 100 leftover
-messages (everything but the panel). Discord access sits behind the `PartyChat` port (`post`, `exists`,
-`recentMessageIds`, `deleteMessages`); the adapter bulk-deletes recent messages and deletes the rest one by one.
+messages (everything but the panel, pinned and system messages). If the area is removed while a panel is
+being posted, that panel is deleted again and nothing is reported as the panel. A deleted panel is reposted at
+most once per 30 s per area: a second deletion inside the window is held until the window ends, which bounds a
+loop against another bot or an automod rule that keeps removing it.
 
-Module gate: the message handlers are gated like the join handler, not `alwaysRun`. Switching the party module
-off in a channel stops the cleanup there (the panel stays, its buttons answer that the module is off), unlike
-the channel cleanup, which must never strand state. The startup sweep has no channel to gate by, so it asks
-`moduleEnabled` per area and skips those where the module is off. The bot needs Send Messages and Embed
-Links in the join channel for the panel and Manage Messages to delete other people's messages (added to the
-install permissions); without Manage Messages the panel works and the chat is not cleaned, each failed delete
-is logged.
+Discord access sits behind the `PartyChat` port (`post`, `exists`, `recentMessages`, `deleteMessages`). The
+adapter splits ids by snowflake age: two or more messages under 14 days old are bulk-deleted (in batches of
+100), the rest one by one. A bulk delete Discord refuses as a whole (10008, 50021, 50034) is retried one by
+one, and a single delete that hits Unknown Message (10008) or a system message (50021) counts as done, so
+nothing is deleted twice and nothing throws for a message that is already gone.
+
+Module gate: the cleanup, the panel repost and the startup sweep are `alwaysRun`, like the channel cleanup:
+switching the party module off in a channel must not leave a chat that fills up or a panel that vanished.
+Only the panel's buttons are gated (they answer that the module is off). The startup sweep covers every area
+with the flag. The bot needs Send Messages, Embed Links and Read Message History in the join channel for the
+panel and Manage Messages to delete other people's messages (added to the install permissions); without
+Manage Messages the panel works and the chat is not cleaned, and the failure is logged once per channel
+until a delete works again, not once per message.
 
 ### Rotating status
 

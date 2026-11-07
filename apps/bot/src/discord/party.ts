@@ -263,10 +263,22 @@ export function createPartyPermissions(client: Client): PartyPermissions {
 }
 
 const UNKNOWN_MESSAGE = RESTJSONErrorCodes.UnknownMessage;
+/** Discord refuses to delete some system messages (joins, pins, boosts). */
+const SYSTEM_MESSAGE = RESTJSONErrorCodes.CannotExecuteActionOnSystemMessage;
+/** Bulk delete rejects a batch that holds a message older than two weeks. */
+const BULK_TOO_OLD = RESTJSONErrorCodes.OneOfTheMessagesProvidedWasTooOldForBulkDelete;
 /** Discord returns at most this many messages per request. */
 const HISTORY_PAGE = 100;
+const BULK_MAX = 100;
+const DISCORD_EPOCH_MS = 1_420_070_400_000;
+/** Bulk delete works up to 14 days; stay a minute inside so a message does not age out in flight. */
+const BULK_MAX_AGE_MS = 14 * 24 * 3_600_000 - 60_000;
 
-export function createPartyChat(client: Client): PartyChat {
+function createdAt(snowflake: string): number {
+  return Number(BigInt(snowflake) >> 22n) + DISCORD_EPOCH_MS;
+}
+
+export function createPartyChat(client: Client, now: () => number = Date.now): PartyChat {
   /** The text chat of a voice channel. */
   async function chatOf(channelId: string) {
     const channel = await client.channels.fetch(channelId);
@@ -299,25 +311,52 @@ export function createPartyChat(client: Client): PartyChat {
       }
     },
 
-    async recentMessageIds(channelId) {
+    async recentMessages(channelId) {
       const channel = await chatOf(channelId);
       const messages = await channel.messages.fetch({ limit: HISTORY_PAGE });
-      return [...messages.keys()];
+      return [...messages.values()].map((message) => ({
+        id: message.id,
+        pinned: message.pinned,
+        system: message.system,
+      }));
     },
 
     async deleteMessages(channelId, messageIds) {
       const channel = await chatOf(channelId);
-      // Bulk delete refuses messages older than 14 days (filtered out here), so those go one by one.
-      const bulk =
-        messageIds.length > 1 && "bulkDelete" in channel
-          ? await channel.bulkDelete(messageIds, true)
-          : undefined;
-      for (const id of messageIds) {
-        if (bulk?.has(id)) continue;
+      // Bulk delete only takes messages under 14 days old, and only pays off for two or more.
+      const cutoff = now() - BULK_MAX_AGE_MS;
+      const recent = messageIds.filter((id) => createdAt(id) > cutoff);
+      const single = new Set(messageIds.filter((id) => !recent.includes(id)));
+      const canBulk = "bulkDelete" in channel;
+
+      for (let start = 0; start < recent.length; start += BULK_MAX) {
+        const batch = recent.slice(start, start + BULK_MAX);
+        if (!canBulk || batch.length < 2) {
+          for (const id of batch) single.add(id);
+          continue;
+        }
+        try {
+          await channel.bulkDelete(batch, false);
+        } catch (error) {
+          // Rejected as a whole (a message vanished, is a system message or aged out): nothing was
+          // deleted, so one by one is safe and each delete tolerates what the batch could not.
+          if (
+            !hasCode(error, UNKNOWN_MESSAGE) &&
+            !hasCode(error, SYSTEM_MESSAGE) &&
+            !hasCode(error, BULK_TOO_OLD)
+          ) {
+            throw error;
+          }
+          for (const id of batch) single.add(id);
+        }
+      }
+
+      for (const id of single) {
         try {
           await channel.messages.delete(id);
         } catch (error) {
-          if (!hasCode(error, UNKNOWN_MESSAGE)) throw error;
+          // Already gone, or a system message Discord does not let anyone delete: nothing left to do.
+          if (!hasCode(error, UNKNOWN_MESSAGE) && !hasCode(error, SYSTEM_MESSAGE)) throw error;
         }
       }
     },
