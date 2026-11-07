@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   ApplicationCommandOptionType,
   type ChatInputCommandInteraction,
+  InteractionContextType,
+  type Message,
   MessageFlags,
 } from "discord.js";
-import { contextFromInteraction, slashArgs } from "./context.ts";
+import { contextFromInteraction, contextFromMessage, placeOf, slashArgs } from "./context.ts";
 
 function fakeInteraction(data: unknown[], subcommand: string | null, deferReply = async () => {}) {
   return {
@@ -60,5 +62,34 @@ describe("slash interactions", () => {
     await contextFromInteraction(interaction).defer({ ephemeral: true });
     await contextFromInteraction(interaction).defer();
     expect(calls).toEqual([{ flags: MessageFlags.Ephemeral }, { flags: undefined }]);
+  });
+});
+
+describe("place", () => {
+  test("follows the interaction context, so a group DM is not the DM with the bot", () => {
+    expect(placeOf(InteractionContextType.Guild, "1")).toBe("guild");
+    expect(placeOf(InteractionContextType.BotDM, null)).toBe("bot-dm");
+    expect(placeOf(InteractionContextType.PrivateChannel, null)).toBe("private-channel");
+  });
+
+  test("without a context a guild id means a server and none a DM with the bot", () => {
+    expect(placeOf(null, "1")).toBe("guild");
+    expect(placeOf(undefined, null)).toBe("bot-dm");
+  });
+
+  test("slash and prefix contexts carry it", () => {
+    const interaction = fakeInteraction([], null);
+    Object.assign(interaction, { context: InteractionContextType.PrivateChannel });
+    expect(contextFromInteraction(interaction).place).toBe("private-channel");
+    const message = (guildId: string | null) =>
+      ({
+        guildId,
+        channelId: "2",
+        author: { id: "1", displayName: "t" },
+        member: null,
+        channel: { isDMBased: () => guildId === null },
+      }) as unknown as Message;
+    expect(contextFromMessage(message("5"), {}).place).toBe("guild");
+    expect(contextFromMessage(message(null), {}).place).toBe("bot-dm");
   });
 });

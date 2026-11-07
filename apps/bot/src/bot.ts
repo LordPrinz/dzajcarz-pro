@@ -30,20 +30,36 @@ export interface BotDeps {
   registry: CommandRegistry;
   prefixes: PrefixResolver;
   gate: ModuleGate;
+  /** Whether the bot is a member of the guild; false for a server reached through a user install. */
+  botInGuild: (guildId: string) => boolean;
   logger: Logger;
 }
 
 const MODULE_DISABLED_REPLY = "Ten moduł jest wyłączony na tym serwerze albo kanale.";
 
+/**
+ * Whether `module` is on where it was used. A guild the bot is not in (user install) has no toggle rows,
+ * so the gate (and its Redis and database reads) is skipped there.
+ */
+async function moduleOn(
+  { gate, botInGuild }: Pick<BotDeps, "gate" | "botInGuild">,
+  module: string,
+  guildId: string | null,
+  channelId: string,
+): Promise<boolean> {
+  if (guildId !== null && !botInGuild(guildId)) return true;
+  return gate.isEnabled(guildId, channelId, module);
+}
+
 /** Whether the module that owns `command` is on where the command was used. */
 async function commandEnabled(
-  { registry, gate }: Pick<BotDeps, "registry" | "gate">,
+  deps: Pick<BotDeps, "registry" | "gate" | "botInGuild">,
   command: AnyCommand,
   guildId: string | null,
   channelId: string,
 ): Promise<boolean> {
-  const module = registry.moduleOf(command);
-  return module === undefined || (await gate.isEnabled(guildId, channelId, module));
+  const module = deps.registry.moduleOf(command);
+  return module === undefined || (await moduleOn(deps, module, guildId, channelId));
 }
 
 /**
@@ -115,8 +131,9 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
  */
 export async function handleComponent(
   interaction: MessageComponentInteraction,
-  { registry, gate, logger }: BotDeps,
+  deps: BotDeps,
 ): Promise<void> {
+  const { registry, logger } = deps;
   const supported = interaction.isButton() || interaction.isStringSelectMenu();
   const resolved = supported ? registry.resolveComponent(interaction.customId) : undefined;
   if (!supported || !resolved) {
@@ -132,7 +149,7 @@ export async function handleComponent(
   }
   const ctx = contextFromComponent(interaction, resolved);
   const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
-  if (!(await gate.isEnabled(ctx.guildId, toggleChannel, resolved.module))) {
+  if (!(await moduleOn(deps, resolved.module, ctx.guildId, toggleChannel))) {
     await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
     return;
   }

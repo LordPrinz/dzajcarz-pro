@@ -7,8 +7,14 @@ import {
   defineEvent,
   silentLogger,
 } from "@dzajcarz/core";
-import type { ButtonInteraction, Message } from "discord.js";
-import { createEventListener, handleComponent, handleMessage, matchInvocation } from "./bot.ts";
+import type { ButtonInteraction, Client, Message } from "discord.js";
+import {
+  attachHandlers,
+  createEventListener,
+  handleComponent,
+  handleMessage,
+  matchInvocation,
+} from "./bot.ts";
 import type { ModuleGate } from "./module-gate.ts";
 
 const BOT = "111111111111111111";
@@ -81,6 +87,7 @@ describe("module toggles in routing", () => {
       registry,
       gate,
       prefixes: { resolve: async () => "!", forget: async () => {} },
+      botInGuild: () => true,
       logger: silentLogger,
     };
     return { ran, replies, message, deps, registry, gate };
@@ -204,6 +211,7 @@ describe("components in routing", () => {
       registry,
       gate,
       prefixes: { resolve: async () => "!", forget: async () => {} },
+      botInGuild: () => true,
       logger: silentLogger,
     };
     return { ran, calls, click, deps, button };
@@ -227,6 +235,25 @@ describe("components in routing", () => {
     Object.assign(interaction, { channel: null });
     await handleComponent(interaction, deps);
     expect(ran).toEqual(["go:4"]);
+  });
+
+  test("a click in a guild the bot is not in skips the module gate", async () => {
+    const { ran, click, deps, button } = setup(["fun"]);
+    let gateReads = 0;
+    const gate: ModuleGate = {
+      isEnabled: async () => {
+        gateReads++;
+        return false;
+      },
+      forget: async () => {},
+    };
+    await handleComponent(click(button.customId(OWNER, "5")), {
+      ...deps,
+      gate,
+      botInGuild: () => false,
+    });
+    expect(ran).toEqual(["go:5"]);
+    expect(gateReads).toBe(0);
   });
 
   test("a click from someone else is refused ephemerally", async () => {
@@ -277,5 +304,74 @@ describe("components in routing", () => {
     const registry = createRegistry([{ name: "fun", components: [quiet] }]);
     await handleComponent(click(quiet.customId(OWNER)), { ...deps, registry });
     expect(calls.map((c) => c.method)).toEqual(["deferUpdate"]);
+  });
+});
+
+describe("slash commands in a guild the bot is not in", () => {
+  const GUILD = "100000000000000001";
+
+  async function runSlash(botInGuild: boolean) {
+    const ran: string[] = [];
+    const ping = defineCommand({
+      name: "ping",
+      description: "x",
+      contexts: { places: ["guild"], installs: ["guild", "user"] },
+      run: async () => {
+        ran.push("command");
+      },
+    });
+    let gateReads = 0;
+    const gate: ModuleGate = {
+      isEnabled: async () => {
+        gateReads++;
+        return false;
+      },
+      forget: async () => {},
+    };
+    const listeners = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const client = {
+      on: (event: string, listener: (...args: unknown[]) => Promise<void>) =>
+        void listeners.set(event, listener),
+      once: () => {},
+      user: { id: BOT },
+    } as unknown as Client;
+    attachHandlers(client, {
+      registry: createRegistry([{ name: "fun", commands: [ping] }]),
+      gate,
+      prefixes: { resolve: async () => "!", forget: async () => {} },
+      botInGuild: () => botInGuild,
+      logger: silentLogger,
+    });
+    const replies: unknown[] = [];
+    const interaction = {
+      id: "1",
+      isMessageComponent: () => false,
+      isChatInputCommand: () => true,
+      commandName: "ping",
+      options: { data: [], getSubcommand: () => null },
+      user: { id: "200000000000000002", displayName: "t" },
+      guildId: GUILD,
+      channelId: "300000000000000003",
+      channel: null,
+      context: 0,
+      inGuild: () => true,
+      memberPermissions: { bitfield: 0n },
+      replied: false,
+      deferred: false,
+      reply: async (payload: unknown) => void replies.push(payload),
+    };
+    await listeners.get("interactionCreate")?.(interaction);
+    return { ran, gateReads, replies };
+  }
+
+  test("the module gate is skipped, so the command runs without a Redis or database read", async () => {
+    expect(await runSlash(false)).toMatchObject({ ran: ["command"], gateReads: 0 });
+  });
+
+  test("where the bot is a member the gate still applies", async () => {
+    const result = await runSlash(true);
+    expect(result.ran).toEqual([]);
+    expect(result.gateReads).toBe(1);
+    expect(result.replies).toHaveLength(1);
   });
 });

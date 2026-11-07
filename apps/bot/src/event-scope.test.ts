@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { eventScope } from "./event-scope.ts";
+import { createModuleEnabled, eventScope } from "./event-scope.ts";
 
 describe("eventScope", () => {
   test("messageCreate uses the message's guild and channel; DMs are not gated", () => {
@@ -62,5 +62,32 @@ describe("eventScope", () => {
   test("unknown events are not gated", () => {
     expect(eventScope("ready", [{}])).toBeNull();
     expect(eventScope("guildCreate", [{ id: "g" }])).toBeNull();
+  });
+});
+
+describe("createModuleEnabled", () => {
+  test("asks the gate about the parent channel of a thread and about a plain channel as is", async () => {
+    const asked: string[][] = [];
+    const channels = new Map([
+      ["thread", { isThread: () => true, parentId: "parent" }],
+      ["text", { isThread: () => false, parentId: null }],
+    ]);
+    const enabled = createModuleEnabled(
+      {
+        isEnabled: async (guildId, channelId, module) => {
+          asked.push([guildId, channelId, module]);
+          return true;
+        },
+      },
+      channels,
+    );
+    await enabled("g", "thread", "music");
+    await enabled("g", "text", "music");
+    await enabled("g", "uncached", "music");
+    expect(asked).toEqual([
+      ["g", "parent", "music"],
+      ["g", "text", "music"],
+      ["g", "uncached", "music"],
+    ]);
   });
 });

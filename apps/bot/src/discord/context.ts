@@ -1,7 +1,8 @@
-import type { CommandContext } from "@dzajcarz/core";
+import type { CommandContext, CommandPlace } from "@dzajcarz/core";
 import {
   ApplicationCommandOptionType,
   type ChatInputCommandInteraction,
+  InteractionContextType,
   type Message,
   MessageFlags,
 } from "discord.js";
@@ -23,6 +24,26 @@ export function slashArgs(interaction: ChatInputCommandInteraction): Record<stri
   return args;
 }
 
+/**
+ * Where an interaction came from, from Discord's `context` field. Without one (older payloads) a guild id
+ * means a server and none means the DM with the bot.
+ */
+export function placeOf(
+  context: InteractionContextType | null | undefined,
+  guildId: string | null,
+): CommandPlace {
+  switch (context) {
+    case InteractionContextType.Guild:
+      return "guild";
+    case InteractionContextType.BotDM:
+      return "bot-dm";
+    case InteractionContextType.PrivateChannel:
+      return "private-channel";
+    default:
+      return guildId === null ? "bot-dm" : "guild";
+  }
+}
+
 export function contextFromInteraction(interaction: ChatInputCommandInteraction): CommandContext {
   return {
     args: slashArgs(interaction),
@@ -30,6 +51,7 @@ export function contextFromInteraction(interaction: ChatInputCommandInteraction)
     subcommand: interaction.options.getSubcommand(false) ?? undefined,
     user: { id: interaction.user.id, displayName: interaction.user.displayName },
     guildId: interaction.guildId,
+    place: placeOf(interaction.context, interaction.guildId),
     channelId: interaction.channelId,
     memberPermissions: interaction.inGuild()
       ? (interaction.memberPermissions?.bitfield ?? 0n)
@@ -70,6 +92,8 @@ export function contextFromMessage(
     subcommand,
     user: { id: message.author.id, displayName: member?.displayName ?? message.author.displayName },
     guildId: message.guildId,
+    // A bot cannot read prefix messages in a group DM, so a message is a server or the DM with the bot.
+    place: message.guildId === null ? "bot-dm" : "guild",
     channelId: message.channelId,
     memberPermissions:
       member && !channel.isDMBased() ? member.permissionsIn(channel).bitfield : null,

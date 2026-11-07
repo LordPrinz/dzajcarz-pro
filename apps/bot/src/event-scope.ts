@@ -17,6 +17,23 @@ export function toggleChannelId(
   return channel?.isThread?.() && channel.parentId ? channel.parentId : channelId;
 }
 
+/** The bot's view of a channel registry, enough to find a thread's parent. */
+interface ChannelCache {
+  get(channelId: string): MaybeThread | undefined;
+}
+
+/**
+ * The `moduleEnabled` dependency of modules: asks the gate about the channel a caller is in, resolving a
+ * thread to its parent channel through the client's channel cache.
+ */
+export function createModuleEnabled(
+  gate: { isEnabled(guildId: string, channelId: string, module: string): Promise<boolean> },
+  channels: ChannelCache,
+): (guildId: string, channelId: string, module: string) => Promise<boolean> {
+  return (guildId, channelId, module) =>
+    gate.isEnabled(guildId, toggleChannelId(channels.get(channelId), channelId), module);
+}
+
 export interface EventScope {
   guildId: string;
   /** null when the event is about the guild as a whole (a member joined). */

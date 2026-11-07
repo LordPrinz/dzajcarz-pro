@@ -1,4 +1,4 @@
-import type { CommandContext, Invocation, Reply } from "../command.ts";
+import type { CommandContext, CommandPlace, Invocation, Reply } from "../command.ts";
 import { type ComponentContext, validateRows } from "../component.ts";
 import { executeComponent, UNKNOWN_COMPONENT } from "../dispatch.ts";
 import { silentLogger } from "../logger.ts";
@@ -17,6 +17,8 @@ export interface FakeContextOptions<A> {
   invocation?: Invocation;
   subcommand?: string;
   guildId?: string | null;
+  /** Defaults to `guild` with a guildId and `bot-dm` without. */
+  place?: CommandPlace;
   memberPermissions?: bigint | null;
   userId?: string;
 }
@@ -27,6 +29,7 @@ export function createFakeContext<A = Record<string, unknown>>({
   invocation = "slash",
   subcommand,
   guildId = "100000000000000001",
+  place = guildId === null ? "bot-dm" : "guild",
   memberPermissions = 0n,
   userId = "200000000000000002",
 }: FakeContextOptions<A> = {}): FakeContext<A> {
@@ -35,6 +38,7 @@ export function createFakeContext<A = Record<string, unknown>>({
     invocation,
     subcommand,
     guildId,
+    place,
     channelId: "300000000000000003",
     memberPermissions: guildId === null ? null : memberPermissions,
     user: { id: userId, displayName: "tester" },
@@ -69,6 +73,8 @@ export interface FakeComponentContextOptions {
   state?: string;
   values?: readonly string[];
   guildId?: string | null;
+  /** Defaults to `guild` with a guildId and `bot-dm` without. */
+  place?: CommandPlace;
   memberPermissions?: bigint | null;
   userId?: string;
 }
@@ -78,6 +84,7 @@ export function createFakeComponentContext({
   state = "",
   values = [],
   guildId = "100000000000000001",
+  place = guildId === null ? "bot-dm" : "guild",
   memberPermissions = 0n,
   userId = "200000000000000002",
 }: FakeComponentContextOptions = {}): FakeComponentContext {
@@ -85,6 +92,7 @@ export function createFakeComponentContext({
     state,
     values,
     guildId,
+    place,
     channelId: "300000000000000003",
     memberPermissions: guildId === null ? null : memberPermissions,
     user: { id: userId, displayName: "tester" },

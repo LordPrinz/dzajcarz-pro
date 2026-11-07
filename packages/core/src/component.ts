@@ -58,7 +58,8 @@ export type ComponentRow = readonly ComponentSpec[];
 export const MAX_CUSTOM_ID = 100;
 const MAX_ROWS = 5;
 const MAX_BUTTONS_PER_ROW = 5;
-const MAX_SELECT_OPTIONS = 25;
+/** Discord: a select menu holds at most 25 options. */
+export const MAX_SELECT_OPTIONS = 25;
 const MAX_LABEL = 80;
 const MAX_OPTION_TEXT = 100;
 const MAX_PLACEHOLDER = 150;
@@ -164,7 +165,7 @@ function validateSelect(select: SelectSpec, at: string): void {
 
 /** What a handler sees. Reuses the identity fields of a command context. */
 export interface ComponentContext
-  extends Pick<CommandContext, "user" | "guildId" | "channelId" | "memberPermissions"> {
+  extends Pick<CommandContext, "user" | "guildId" | "place" | "channelId" | "memberPermissions"> {
   /** The `<data>` part of the custom_id. */
   readonly state: string;
   /** Chosen option values of a select menu; empty for a button. */

@@ -21,6 +21,10 @@ command was registered for the guild install and only `guildOnly` decided whethe
 - `toSlashCommand` maps the field to `integration_types` (0 guild, 1 user) and `contexts` (0 guild, 1 bot DM,
   2 private channel). `general` (`/help`, `/ping`) is available everywhere; `party`, `welcome` and `settings`
   keep the default.
+- Every command and component context carries `place` (`guild`, `bot-dm` or `private-channel`, from the
+  interaction's `context`; a prefix message is `guild` or `bot-dm`). Access checks and `/help` match it
+  exactly, because a group DM and the DM with the bot both have no guild id. In a group DM the bot has no
+  prefix, so help shows slash syntax only.
 - Prefix commands in a DM use the default prefix (no guild lookup) or a mention. A command without a DM
   place answers "Ta komenda działa tylko na serwerze."; `executeCommand` makes the same check for slash.
 - The module gate has nothing to switch without a guild, so DMs are never gated. Components work in DMs

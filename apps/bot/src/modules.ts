@@ -26,6 +26,9 @@ import {
 export interface ModuleServices {
   commands: () => readonly CommandSummary[];
   gatewayPing: () => number;
+  installLinks: { guild: string; user: string };
+  botInGuild: (guildId: string) => boolean;
+  moduleEnabled: (guildId: string, channelId: string, module: string) => Promise<boolean>;
   prefixFor: (guildId: string | null) => Promise<string>;
   prefixSettings: PrefixSettings;
   moduleToggles: ModuleToggles;

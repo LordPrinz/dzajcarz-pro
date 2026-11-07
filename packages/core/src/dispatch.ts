@@ -5,6 +5,8 @@ import type { Logger } from "./logger.ts";
 import { splitInvocation, usage } from "./prefix.ts";
 import type { ResolvedComponent } from "./registry.ts";
 
+type AccessContext = Pick<CommandContext, "guildId" | "place" | "memberPermissions">;
+
 /** PermissionFlagsBits.Administrator: Discord grants every permission to it. */
 const ADMINISTRATOR = 1n << 3n;
 
@@ -102,7 +104,7 @@ export async function executeComponent(
 export function checkPrefixAccess(
   command: AnyCommand,
   rest: string,
-  ctx: Pick<CommandContext, "guildId" | "memberPermissions">,
+  ctx: AccessContext,
 ): string | null {
   const denied = checkCommandAccess(command, ctx);
   if (denied || !command.subcommands) return denied;
@@ -119,16 +121,13 @@ export function checkPrefixAccess(
  * came from (a server, or a direct message with the bot). Discord enforces this for slash commands already;
  * prefix calls rely on this check alone.
  */
-function checkCommandAccess(
-  command: AnyCommand,
-  ctx: Pick<CommandContext, "guildId" | "memberPermissions">,
-): string | null {
+function checkCommandAccess(command: AnyCommand, ctx: AccessContext): string | null {
   const { places } = command.contexts ?? DEFAULT_CONTEXTS;
-  if (ctx.guildId !== null && !places.includes("guild")) {
-    return "Ta komenda działa tylko w prywatnej wiadomości do bota.";
-  }
-  if (ctx.guildId === null && !places.includes("bot-dm")) {
-    return "Ta komenda działa tylko na serwerze.";
+  if (!places.includes(ctx.place)) {
+    if (ctx.place === "guild") return "Ta komenda działa tylko w prywatnej wiadomości do bota.";
+    return places.includes("guild")
+      ? "Ta komenda działa tylko na serwerze."
+      : "Ta komenda nie działa w tym miejscu.";
   }
   return checkAccess({ permissions: command.permissions }, ctx);
 }

@@ -1,7 +1,10 @@
 import type { CommandContext, Embed, Reply } from "./command.ts";
 import { type AnyComponent, type ComponentRow, defineButton } from "./component.ts";
 
-export type Viewer = Pick<CommandContext, "user" | "guildId" | "channelId" | "memberPermissions">;
+export type Viewer = Pick<
+  CommandContext,
+  "user" | "guildId" | "place" | "channelId" | "memberPermissions"
+>;
 
 /** One rendered page; the paginator adds the ◀ ▶ row below `components`. */
 export interface PageView {

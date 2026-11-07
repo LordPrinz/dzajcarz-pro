@@ -1,5 +1,6 @@
 import type { ComponentContext, ResolvedComponent } from "@dzajcarz/core";
 import { type ButtonInteraction, MessageFlags, type StringSelectMenuInteraction } from "discord.js";
+import { placeOf } from "./context.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 /** A click on a button or a choice in a select menu, as a module handler sees it. */
@@ -16,6 +17,7 @@ export function contextFromComponent(
     values: interaction.isStringSelectMenu() ? interaction.values : [],
     user: { id: interaction.user.id, displayName: interaction.user.displayName },
     guildId: interaction.guildId,
+    place: placeOf(interaction.context, interaction.guildId),
     channelId: interaction.channelId,
     memberPermissions: interaction.inGuild()
       ? (interaction.memberPermissions?.bitfield ?? 0n)

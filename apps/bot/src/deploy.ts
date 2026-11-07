@@ -43,63 +43,51 @@ export function buildDeployBody(
   return registry.commands().map((command) => toSlashCommand(command, step.scope));
 }
 
-// Only the definitions are needed; nothing runs, so the services are never called.
-const unused = () => {
-  throw new Error("Module services are not available while deploying commands");
-};
+const NOT_AVAILABLE = "Module services are not available while deploying commands";
+
+/**
+ * A stand-in for a service the deploy never calls: only command definitions are needed, so any call or use
+ * of the value throws. Reading a property gives another stand-in, so `deps.channels.isThread` can be passed
+ * around without a stub per method.
+ */
+export function unusedServices<T>(): T {
+  const fail = (): never => {
+    throw new Error(NOT_AVAILABLE);
+  };
+  const stand = (): unknown =>
+    new Proxy(fail, {
+      get: (_target, key) => {
+        // A promise check (`await`, `Promise.resolve`) probes `then`; answering undefined keeps it a plain value.
+        if (key === "then") return undefined;
+        if (key === Symbol.toPrimitive || key === "toString" || key === "valueOf") return fail;
+        return stand();
+      },
+    });
+  return stand() as T;
+}
+
 export const createDeployRegistry = () =>
   createRegistry(
     createModules({
-      commands: unused,
-      gatewayPing: unused,
-      prefixFor: unused,
-      prefixSettings: { get: unused, set: unused, reset: unused },
-      moduleToggles: { moduleNames: unused, list: unused, disable: unused, enable: unused },
-      channels: { belongsTo: unused, isThread: unused, isTextChannelOf: unused },
+      commands: unusedServices(),
+      gatewayPing: unusedServices(),
+      prefixFor: unusedServices(),
+      installLinks: { guild: "", user: "" },
+      botInGuild: unusedServices(),
+      moduleEnabled: unusedServices(),
+      prefixSettings: unusedServices(),
+      moduleToggles: unusedServices(),
+      channels: unusedServices(),
       defaultPrefix: "",
-      welcomeConfigs: { get: unused, set: unused, delete: unused },
-      welcomeSender: { send: unused },
-      guildLookup: { describe: unused },
-      partyAreas: {
-        addArea: unused,
-        listAreas: unused,
-        listAllAreas: unused,
-        findAreaByJoinChannel: unused,
-        findAreaByCategory: unused,
-        deleteArea: unused,
-        addChannel: unused,
-        findChannel: unused,
-        findChannelByOwner: unused,
-        listChannelsOfArea: unused,
-        listChannels: unused,
-        deleteChannel: unused,
-        transferOwner: unused,
-      },
-      partyChannels: {
-        createVoiceChannel: unused,
-        moveMember: unused,
-        deleteChannel: unused,
-        members: unused,
-        exists: unused,
-        createCategoryWithJoinChannel: unused,
-        voiceChannelOf: unused,
-      },
-      partyPermissions: {
-        setEveryone: unused,
-        inheritedEveryone: unused,
-        allowSelf: unused,
-        allowMember: unused,
-        denyMember: unused,
-        clearMember: unused,
-        setLimit: unused,
-        rename: unused,
-        disconnect: unused,
-        lookupMember: unused,
-        canManage: unused,
-      },
-      partyLock: { setIfAbsent: unused, delIfEquals: unused, increment: unused },
-      presence: { setActivity: unused },
-      clock: { setInterval: unused, clearInterval: unused },
+      welcomeConfigs: unusedServices(),
+      welcomeSender: unusedServices(),
+      guildLookup: unusedServices(),
+      partyAreas: unusedServices(),
+      partyChannels: unusedServices(),
+      partyPermissions: unusedServices(),
+      partyLock: unusedServices(),
+      presence: unusedServices(),
+      clock: unusedServices(),
       logger: silentLogger,
     }),
   );

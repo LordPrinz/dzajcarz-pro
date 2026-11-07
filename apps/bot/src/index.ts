@@ -12,11 +12,13 @@ import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
+import { createInstallLinks } from "./discord/install.ts";
 import { createPartyChannels, createPartyPermissions } from "./discord/party.ts";
 import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
+import { createModuleEnabled } from "./event-scope.ts";
 import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
 import { createModules } from "./modules.ts";
@@ -62,9 +64,14 @@ const client = new Client({
   allowedMentions: NO_MENTIONS,
 });
 
+const botInGuild = (guildId: string) => client.guilds.cache.has(guildId);
+
 const modules = createModules({
   commands: () => registry.summaries(),
   gatewayPing: () => client.ws.ping,
+  installLinks: createInstallLinks(env.DISCORD_CLIENT_ID),
+  botInGuild,
+  moduleEnabled: createModuleEnabled(gate, client.channels.cache),
   prefixFor: (guildId) => prefixes.resolve(guildId),
   prefixSettings: createPrefixSettings(guildSettings, prefixes),
   moduleToggles: createModuleToggles(moduleToggleRepository, gate, () =>
@@ -84,7 +91,7 @@ const modules = createModules({
   logger,
 });
 const registry = createRegistry(modules);
-attachHandlers(client, { registry, prefixes, gate, logger });
+attachHandlers(client, { registry, prefixes, gate, botInGuild, logger });
 
 client.once(Events.ClientReady, (ready) => {
   logger.info("Logged in", {

@@ -19,9 +19,35 @@ describe("createRegistry", () => {
         description: "play command",
         aliases: ["p"],
         module: "music",
+        usage: "play",
+        contexts: { places: ["guild"], installs: ["guild"] },
         subcommands: [],
       },
     ]);
+  });
+
+  test("summaries carry permissions and contexts for filtering", () => {
+    const secret = defineCommand({
+      name: "secret",
+      description: "Secret",
+      permissions: 8n,
+      subcommands: {
+        go: defineSubcommand({ description: "Go", permissions: 16n, run: async () => {} }),
+      },
+    });
+    const everywhere = command("ping", {
+      contexts: { places: ["guild", "bot-dm"], installs: ["guild", "user"] },
+    });
+    const summaries = createRegistry([{ name: "m", commands: [secret, everywhere] }]).summaries();
+    expect(summaries[0]).toMatchObject({
+      permissions: 8n,
+      usage: "secret go",
+      subcommands: [{ name: "go", permissions: 16n }],
+    });
+    expect(summaries[1]?.contexts).toEqual({
+      places: ["guild", "bot-dm"],
+      installs: ["guild", "user"],
+    });
   });
 
   test("collects event handlers from every module", () => {
@@ -244,6 +270,12 @@ describe("contexts", () => {
       ]);
     expect(withSub(["guild", "user"])).toThrow("user install");
     expect(withSub(["guild"])).not.toThrow();
+  });
+
+  test("rejects more modules than one select menu can list", () => {
+    const modules = (count: number) => Array.from({ length: count }, (_, i) => ({ name: `m${i}` }));
+    expect(() => createRegistry(modules(25))).not.toThrow();
+    expect(() => createRegistry(modules(26))).toThrow("At most 25 modules");
   });
 
   test("rejects duplicate places and installs", () => {
