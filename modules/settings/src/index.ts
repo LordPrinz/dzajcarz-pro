@@ -41,8 +41,8 @@ export interface SettingsModuleDeps {
   channels: GuildChannels;
 }
 
-/** Modules that stay on: without them nobody could turn anything back on or ask for help. */
-export const PROTECTED_MODULES: ReadonlySet<string> = new Set(["general", "settings"]);
+/** Modules that stay on: without them nobody could turn anything back on or ask for help. `status` has no per-server behaviour, so a toggle would do nothing. */
+export const PROTECTED_MODULES: ReadonlySet<string> = new Set(["general", "settings", "status"]);
 
 /** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
 const MANAGE_GUILD = 1n << 5n;

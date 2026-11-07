@@ -76,7 +76,7 @@ command runs (slash answers ephemerally, prefix stays silent) and wraps every ev
 outside a guild are never gated. A thread has no toggle of its own and follows its parent channel, both for
 events and for commands. The lookup is bounded to 1.5 s (Discord wants an answer to an interaction within
 3 s); a slower lookup counts as enabled. `/modules` only accepts channels the guild really has, checked
-through the `GuildChannels` port. `general` and `settings` cannot be disabled.
+through the `GuildChannels` port. `general`, `settings` and `status` cannot be disabled (the last has no per-server behaviour to switch).
 
 ### Welcome messages
 
@@ -151,6 +151,14 @@ Cleanup ignores module toggles. Handlers declare `alwaysRun: true` (`EventHandle
 switching the module off never strands empty channels. Only the join handler is gated. The leave handler
 runs before the join handler for the same member, which waits for it, so moving from your own channel into
 the join channel hands over or frees the old channel first.
+
+### Rotating status
+
+`modules/status` cycles the bot's activity through a list (defaults in `DEFAULT_ACTIVITIES`: the old bot's song, one phrase every 15 s;
+both are arguments of `createStatusModule`). The first `clientReady` sets the first activity and starts the
+interval; a repeated `clientReady` (reconnect) does not start another, and `dispose()` clears it. It talks to
+two ports, `Presence` and `Clock`, so the rotation is tested with a fake clock. A failing `setActivity` is
+logged and the next tick tries again. The handler is `alwaysRun`: the status belongs to the bot, not a guild.
 
 ### Mentions
 

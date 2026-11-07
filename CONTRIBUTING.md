@@ -49,7 +49,7 @@ so slash commands show up there at once instead of after the global rollout.
 - **Branch:** `DZAJ-<n>-short-kebab-description`.
 - **Commit / PR title:** `[DZAJ-<n>] <type>(<optional scope>): <Description>`
   - types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`, `ci`, `build`
-  - scopes: `core`, `bot`, `db`, `kv`, `general`, `music`, `party`, `moderation`, `welcome`, `fun`, `infra`
+  - scopes: `core`, `bot`, `db`, `kv`, `general`, `settings`, `music`, `party`, `moderation`, `welcome`, `status`, `fun`, `infra`
   - `!` after the type/scope marks a breaking change.
 - PRs are **squash-merged**; the PR title becomes the commit on `v5`.
 - **Dependabot** keeps its own `dependabot/…` branches; its PRs use the umbrella ticket DZAJ-3

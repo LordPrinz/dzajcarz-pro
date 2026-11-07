@@ -17,6 +17,7 @@
     "@dzajcarz/module-general": "workspace:*",
     "@dzajcarz/module-party": "workspace:*",
     "@dzajcarz/module-settings": "workspace:*",
+    "@dzajcarz/module-status": "workspace:*",
     "@dzajcarz/module-welcome": "workspace:*",
     "discord.js": "14.27.0",
     "zod": "4.6.7"

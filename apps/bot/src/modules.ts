@@ -13,6 +13,7 @@ import {
   type ModuleToggles,
   type PrefixSettings,
 } from "@dzajcarz/module-settings";
+import { type Clock, createStatusModule, type Presence } from "@dzajcarz/module-status";
 import {
   createWelcomeModule,
   type GuildLookup,
@@ -37,6 +38,8 @@ export interface ModuleServices {
   partyChannels: PartyChannels;
   partyPermissions: PartyPermissions;
   partyLock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
+  presence: Presence;
+  clock: Clock;
   logger: Logger;
 }
 
@@ -63,6 +66,11 @@ export function createModules(services: ModuleServices): BotModule[] {
       permissions: services.partyPermissions,
       lock: services.partyLock,
       logger: services.logger.child({ module: "party" }),
+    }),
+    createStatusModule({
+      presence: services.presence,
+      clock: services.clock,
+      logger: services.logger.child({ module: "status" }),
     }),
   ];
 }
