@@ -4,6 +4,7 @@ import {
   checkPrefixAccess,
   executeCommand,
   executeComponent,
+  executeModal,
   type Logger,
   matchPrefix,
   type PrefixInvocation,
@@ -11,6 +12,7 @@ import {
   type RegisteredEvent,
   splitInvocation,
   UNKNOWN_COMPONENT,
+  UNKNOWN_MODAL,
 } from "@dzajcarz/core";
 import {
   type Client,
@@ -18,9 +20,12 @@ import {
   type Message,
   type MessageComponentInteraction,
   MessageFlags,
+  type ModalSubmitInteraction,
 } from "discord.js";
 import { contextFromComponent } from "./discord/component-context.ts";
 import { contextFromInteraction, contextFromMessage } from "./discord/context.ts";
+import { contextFromModal } from "./discord/modal-context.ts";
+import { readModalValues } from "./discord/modals.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { eventScope, toggleChannelId } from "./event-scope.ts";
 import type { ModuleGate } from "./module-gate.ts";
@@ -97,6 +102,10 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
         await handleComponent(interaction, deps);
         return;
       }
+      if (interaction.isModalSubmit()) {
+        await handleModal(interaction, deps);
+        return;
+      }
       if (!interaction.isChatInputCommand()) return;
       const command = registry.find(interaction.commandName);
       if (!command) {
@@ -154,6 +163,34 @@ export async function handleComponent(
     return;
   }
   await executeComponent(resolved, ctx, logger);
+}
+
+/**
+ * A submitted modal: found by custom_id, gated by its module's toggles like a command or a click, then run
+ * through the owner and permission checks and the field validation of `executeModal`.
+ */
+export async function handleModal(
+  interaction: ModalSubmitInteraction,
+  deps: BotDeps,
+): Promise<void> {
+  const { registry, logger } = deps;
+  const resolved = registry.resolveModal(interaction.customId);
+  if (!resolved) {
+    logger.warn("Unknown modal", { customId: interaction.customId });
+    await interaction.reply({
+      content: UNKNOWN_MODAL,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: NO_MENTIONS,
+    });
+    return;
+  }
+  const ctx = contextFromModal(interaction, resolved.state);
+  const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
+  if (!(await moduleOn(deps, resolved.module, ctx.guildId, toggleChannel))) {
+    await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
+    return;
+  }
+  await executeModal(resolved, ctx, readModalValues(resolved.modal, interaction), logger);
 }
 
 export async function handleMessage(

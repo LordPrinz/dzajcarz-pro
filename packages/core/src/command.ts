@@ -4,6 +4,7 @@
  * messages into it.
  */
 import type { ComponentRow } from "./component.ts";
+import type { ModalSpec } from "./modal.ts";
 
 export type OptionType = "string" | "integer" | "number" | "boolean" | "user" | "channel" | "role";
 
@@ -95,6 +96,13 @@ export interface CommandContext<A = Record<string, unknown>> {
    * fixes the visibility of the later reply on slash; prefix ignores it.
    */
   defer(options?: { ephemeral?: boolean }): Promise<void>;
+  /** True for slash invocations; a prefix message has no interaction to answer with a modal. */
+  readonly canShowModal: boolean;
+  /**
+   * Opens a modal (`modal.build(ctx.user.id)`) as the answer to the command; it must be the first answer.
+   * Throws on a prefix invocation, so check `canShowModal` and fall back to the argument form.
+   */
+  showModal(modal: ModalSpec): Promise<void>;
 }
 
 /** Where a command can be used: a server, a direct message with the bot, or another private channel (group DM). */

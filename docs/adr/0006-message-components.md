@@ -49,11 +49,65 @@ the channel click a button on someone else's message.
 - Testing: `createFakeComponentContext` calls a handler directly; `clickComponent({ registry, customId })`
   plays a click through lookup, ownership, permissions and the error policy.
 
+### Modals
+
+Forms use the same model and the same routing.
+
+- `defineModal({ module, name, title, fields, permissions?, guildOnly?, run(ctx) })` declares one; the
+  modal goes to `BotModule.modals`. `fields` is a record (key = field id, order = order on screen) of
+  1 to 5 entries: `short` and `paragraph` text inputs (`label`, `description`, `placeholder`, `required`,
+  `minLength`, `maxLength`, `defaultValue`), a `select` (string select with 1 to 25 `options` of `{ label, value, description? }`, label and value
+  1 to 100 characters, values unique, optional `defaultValue` naming an option), a `channel` select (`channelTypes` filter: `text`, `voice`,
+  `announcement`, `category`, `stage`, `forum`) and a `user` select. Selects take one value. The adapter
+  (`apps/bot/src/discord/modals.ts`) wraps each field in a Discord Label component, which the installed
+  discord.js 14.27 and discord-api-types support for text inputs, string, channel and user selects. Role
+  and mentionable selects, file uploads, checkboxes and radio groups are not modelled yet.
+- Opening: `ctx.showModal(modal.build(owner, data?, defaults?))` on slash command contexts and on component
+  contexts. `build` returns a plain `ModalSpec`; `defaults` replaces `defaultValue` for one opening, `data`
+  comes back as `ctx.state`. A prefix message has no interaction to answer with a modal, so
+  `ctx.canShowModal` is false there and `showModal` throws a clear error; the command keeps its argument
+  form and checks `canShowModal` to choose. The modal is the first answer to the interaction.
+- Routing: the modal's `custom_id` is `<module>:<modal>:<owner>:<data>`, resolved with
+  `registry.resolveModal`. `executeModal` applies the same gates as `executeComponent` (owner, `guildOnly`,
+  `permissions`, error policy) with modal wording ("To nie Twój formularz."), and `apps/bot` checks the
+  module toggle first, skipping it in a guild the bot is not in. Modals and components live in separate
+  namespaces, so a button and a modal may share a name.
+- Values: the payload is untrusted, so validation lives in the modal layer. The adapter
+  (`readModalValues`) passes a value on only when the submitted component has the type the field declares
+  (text input, channel select, user select). A channel id must be among the channels Discord resolved, of
+  one of the field's `channelTypes`, and, in a guild, of that guild; a user id must be among the resolved
+  users. Anything else is replaced by `REJECTED_MODAL_VALUE`. Then `executeModal` validates against the
+  definition: required fields, that a `select` value is one of its option values (a forged value gets the
+  invalid-value reply; the handler's `ctx.values` is typed as the union of the option values), text length after trimming (every text value is trimmed once, so the limits
+  and the handler see the same text), and that select values are snowflakes. A problem is an ephemeral
+  Polish reply ("Pole „Temat” jest wymagane.", "Pole „Kanał” ma nieprawidłową wartość.") and the handler
+  does not run. Otherwise `ctx.values` has one entry per field: a string, or `undefined` for a field with
+  `required: false` left empty. Channel and user fields hold the id. The handler gets an explicit context
+  (identity, `state`, `values`, `canUpdate`, `reply`, `defer`, `update`, `acknowledged`), safe to spread.
+  `update` edits the message of a button or select that opened the modal; `ctx.canUpdate` tells whether
+  that is the case, and `update` throws when it is not (a modal opened from a slash command).
+  A submit the handler left unanswered is closed like a click when the modal came from a message
+  (`deferUpdate`, the message stays as it is); otherwise there is no message to edit, so the bot answers
+  with the ephemeral "Gotowe." (no mentions) instead of leaving a "thinking" state.
+- Access: the submit is a separate interaction and is gated by the modal's own `permissions` and
+  `guildOnly`, not by the command or button that opened it. A modal opened by a privileged command must
+  declare the same `permissions` / `guildOnly`, or anyone who obtains the `custom_id` could submit it.
+  `ctx.state` comes from the `custom_id`, which the client sends back, so treat it as untrusted input and
+  keep nothing in it that a handler would act on without checking (ids, roles, amounts).
+- Startup checks: the registry builds every modal once with a worst-case owner id and rejects more than
+  5 fields, a title over 45, a label over 45, a description or placeholder over 100, text over 4000 or
+  inconsistent `minLength` / `maxLength`, a `custom_id` over 100 characters, and the same name rules as
+  components.
+- Testing: `ctx.modals` on the fake command and component contexts captures what was opened (and runs the
+  Discord limit checks); `submitModal({ registry, customId, values })` from `@dzajcarz/core/testing` plays
+  a submit through lookup, owner, permissions, validation and the error policy. `values` is what the user
+  gave: text for inputs, an array of ids for selects.
+
 ## Consequences
 
 - Modules stay free of discord.js at runtime and component handlers are tested with fakes.
-- Only string selects and buttons exist; user/role/channel selects, modals and the components v2 layout
-  are added to the model when a module needs them.
+- Message components are buttons and string selects; role, mentionable, user and channel selects in
+  messages and the components v2 layout are added to the model when a module needs them. Modals offer text inputs and string, user and channel selects (see above).
 - Components never expire on their own. A stale click either finds expired state (the message above) or
   a handler that was removed (an ephemeral "outdated" message and a warning in the log).
 - State in a `custom_id` is visible to anyone who can read the message's JSON: keep secrets out of it.
