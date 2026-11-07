@@ -15,7 +15,7 @@ tested on a live server, and features reached into each other's files.
   it needs (`createGeneralModule({ commands, gatewayPing, prefixFor })`). `apps/bot/src/modules.ts` is the
   single list of enabled modules; `apps/bot/src/index.ts` creates the real adapters.
 - A command is defined once with `defineCommand`: name, description, typed options, optional aliases,
-  `guildOnly`, `permissions`, and `run(ctx)`. `ctx.args` is typed from the options.
+  `contexts` (ADR 7), `permissions`, and `run(ctx)`. `ctx.args` is typed from the options.
 - `createRegistry` validates every command at startup (Discord name rules, unique names and aliases across
   modules, required options before optional ones, `rest` only on the last string option) so a bad module
   fails the boot, not a user's command.

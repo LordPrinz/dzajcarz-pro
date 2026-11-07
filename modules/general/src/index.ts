@@ -1,4 +1,10 @@
-import { type BotModule, type CommandSummary, defineCommand, type Embed } from "@dzajcarz/core";
+import {
+  type BotModule,
+  type CommandContexts,
+  type CommandSummary,
+  defineCommand,
+  type Embed,
+} from "@dzajcarz/core";
 
 export interface GeneralModuleDeps {
   /** Every registered command; read when /help runs, so it includes modules registered later. */
@@ -11,10 +17,17 @@ export interface GeneralModuleDeps {
 
 const BRAND_COLOR = 0xf5a623;
 
+/** Everywhere: servers, a DM with the bot and other private channels, for both install types. */
+const EVERYWHERE: CommandContexts = {
+  places: ["guild", "bot-dm", "private-channel"],
+  installs: ["guild", "user"],
+};
+
 export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
   const ping = defineCommand({
     name: "ping",
     description: "Sprawdza, czy bot żyje, i pokazuje opóźnienie",
+    contexts: EVERYWHERE,
     run: async (ctx) => {
       const ms = deps.gatewayPing();
       await ctx.reply(ms < 0 ? "Pong!" : `Pong! ${Math.round(ms)} ms`);
@@ -25,6 +38,7 @@ export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
     name: "help",
     description: "Lista komend albo opis jednej z nich",
     aliases: ["pomoc"],
+    contexts: EVERYWHERE,
     options: {
       command: { type: "string", description: "Nazwa komendy" },
     },

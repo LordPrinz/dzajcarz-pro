@@ -1,4 +1,12 @@
-import type { AnyCommand, OptionDef, OptionsDef, OptionType } from "@dzajcarz/core";
+import {
+  type AnyCommand,
+  type CommandPlace,
+  DEFAULT_CONTEXTS,
+  type InstallType,
+  type OptionDef,
+  type OptionsDef,
+  type OptionType,
+} from "@dzajcarz/core";
 import {
   type APIApplicationCommandBasicOption,
   ApplicationCommandOptionType,
@@ -18,13 +26,29 @@ const OPTION_TYPES = {
   role: ApplicationCommandOptionType.Role,
 } as const satisfies Record<OptionType, ApplicationCommandOptionType>;
 
+const INSTALL_TYPES = {
+  guild: ApplicationIntegrationType.GuildInstall,
+  user: ApplicationIntegrationType.UserInstall,
+} as const satisfies Record<InstallType, ApplicationIntegrationType>;
+
+const PLACES = {
+  guild: InteractionContextType.Guild,
+  "bot-dm": InteractionContextType.BotDM,
+  "private-channel": InteractionContextType.PrivateChannel,
+} as const satisfies Record<CommandPlace, InteractionContextType>;
+
 type OptionJSON = NonNullable<RESTPostAPIChatInputApplicationCommandsJSONBody["options"]>[number];
 
-/** The body Discord expects when registering a command as a slash command. */
+/**
+ * The body Discord expects when registering a command as a slash command. A guild-scoped command
+ * (`scope: "guild"`, the dev guild deploy) cannot be used in DMs or installed on a user, so Discord gets
+ * neither `integration_types` nor `contexts` for it.
+ */
 export function toSlashCommand(
   command: AnyCommand,
+  scope: "global" | "guild" = "global",
 ): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  const guildOnly = command.guildOnly || command.permissions !== undefined;
+  const contexts = command.contexts ?? DEFAULT_CONTEXTS;
   return {
     type: ApplicationCommandType.ChatInput,
     name: command.name,
@@ -37,10 +61,10 @@ export function toSlashCommand(
           options: toOptions(subcommand.options) as APIApplicationCommandBasicOption[],
         }))
       : toOptions(command.options),
-    integration_types: [ApplicationIntegrationType.GuildInstall],
-    contexts: guildOnly
-      ? [InteractionContextType.Guild]
-      : [InteractionContextType.Guild, InteractionContextType.BotDM],
+    ...(scope === "global" && {
+      integration_types: contexts.installs.map((install) => INSTALL_TYPES[install]),
+      contexts: contexts.places.map((place) => PLACES[place]),
+    }),
     // Hides the command from members without the permission; executeCommand still checks it.
     default_member_permissions:
       command.permissions === undefined ? undefined : command.permissions.toString(),

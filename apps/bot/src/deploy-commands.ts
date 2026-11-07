@@ -1,6 +1,8 @@
 // Registers slash commands with Discord: in DISCORD_DEV_GUILD_ID when set (instant), otherwise
-// globally (may take a while to show up). Run after adding, renaming or removing a command:
-//   bun run commands:deploy
+// globally (may take a while to show up). Guild commands cannot be used in DMs or installed on a user, so
+// to try those, deploy globally even when a dev guild is set:
+//   bun run commands:deploy                    dev guild if DISCORD_DEV_GUILD_ID is set, else global
+//   DEPLOY_GLOBAL=1 bun run commands:deploy    always global (DMs, user install)
 import { createRegistry, silentLogger } from "@dzajcarz/core";
 import { REST, Routes } from "discord.js";
 import { toSlashCommand } from "./discord/slash.ts";
@@ -68,15 +70,18 @@ const registry = createRegistry(
     logger: silentLogger,
   }),
 );
-const body = registry.commands().map(toSlashCommand);
+const devGuildId = Bun.env.DEPLOY_GLOBAL === "1" ? undefined : env.DISCORD_DEV_GUILD_ID;
+const body = registry
+  .commands()
+  .map((command) => toSlashCommand(command, devGuildId ? "guild" : "global"));
 
 const rest = new REST().setToken(env.DISCORD_TOKEN);
-const route = env.DISCORD_DEV_GUILD_ID
-  ? Routes.applicationGuildCommands(env.DISCORD_CLIENT_ID, env.DISCORD_DEV_GUILD_ID)
+const route = devGuildId
+  ? Routes.applicationGuildCommands(env.DISCORD_CLIENT_ID, devGuildId)
   : Routes.applicationCommands(env.DISCORD_CLIENT_ID);
 
 // PUT replaces the whole set, so commands removed from the code disappear from Discord too.
 await rest.put(route, { body });
 console.info(
-  `Deployed ${body.length} slash commands ${env.DISCORD_DEV_GUILD_ID ? `to guild ${env.DISCORD_DEV_GUILD_ID}` : "globally"}: ${body.map((c) => c.name).join(", ")}`,
+  `Deployed ${body.length} slash commands ${devGuildId ? `to guild ${devGuildId}` : "globally"}: ${body.map((c) => c.name).join(", ")}`,
 );
