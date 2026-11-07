@@ -57,6 +57,19 @@ describe("toSlashCommand", () => {
     expect(body.default_member_permissions).toBeUndefined();
   });
 
+  test("leaves prefix-only options out of the slash command", () => {
+    const command = defineCommand({
+      name: "note",
+      description: "Note",
+      options: {
+        text: { type: "string", description: "Text", required: true, prefixOnly: true },
+        tag: { type: "string", description: "Tag" },
+      },
+      run: noop,
+    });
+    expect(toSlashCommand(command).options?.map((o) => o.name)).toEqual(["tag"]);
+  });
+
   test("sends the declared places and install types", () => {
     const body = toSlashCommand(
       defineCommand({

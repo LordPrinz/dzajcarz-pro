@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { defineCommand, defineSubcommand } from "./command.ts";
-import { matchPrefix, parsePrefixArgs, tokenize, usage } from "./prefix.ts";
+import { matchPrefix, parsePrefixArgs, tokenize, usage, usageLine } from "./prefix.ts";
 
 const noop = async () => {};
 
@@ -238,5 +238,32 @@ describe("parsePrefixArgs with subcommands", () => {
       ok: false,
       error: "Za dużo argumentów. Użycie: `prefix show`",
     });
+  });
+});
+
+describe("prefixOnly options", () => {
+  const command = defineCommand({
+    name: "greet",
+    description: "d",
+    subcommands: {
+      set: defineSubcommand({
+        description: "d",
+        options: {
+          text: { type: "string", description: "t", required: true, prefixOnly: true },
+          tag: { type: "string", description: "t" },
+        },
+        run: async (ctx) => {
+          // A prefix-only option is never guaranteed: a slash invocation does not carry it.
+          // @ts-expect-error `text` may be undefined, so it is not a plain string
+          const text: string = ctx.args.text;
+          void text;
+        },
+      }),
+    },
+  });
+
+  test("the slash usage leaves them out, the prefix usage keeps them", () => {
+    expect(usageLine(command, "set")).toBe("greet set <text> [tag]");
+    expect(usageLine(command, "set", "slash")).toBe("greet set [tag]");
   });
 });
