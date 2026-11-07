@@ -100,8 +100,10 @@ interaction responses only.
 8. Modals (optional, ADR 6): declare a form with `defineModal` (text, channel and user fields), list it in
    `BotModule.modals` and open it with `ctx.showModal(modal.build(ctx.user.id, state))` from a slash command
    or a component handler. Prefix commands cannot open one: check `ctx.canShowModal` and keep an argument
-   form. Test with `ctx.modals` and `submitModal({ registry, customId, values })` from
-   `@dzajcarz/core/testing`.
+   form. `showModal` must be the first answer (no `defer` before it, load defaults fast). The submit is
+   gated separately, so a modal opened by a privileged command declares the same `permissions` /
+   `guildOnly`, and `ctx.state` is untrusted. Test with `ctx.modals` and
+   `submitModal({ registry, customId, values, fromMessage? })` from `@dzajcarz/core/testing`.
 
 ## Git hooks (Husky)
 

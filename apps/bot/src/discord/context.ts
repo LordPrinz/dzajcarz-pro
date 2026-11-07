@@ -9,6 +9,9 @@ import {
 import { toModalPayload } from "./modals.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
+export const MODAL_NOT_FIRST =
+  "showModal() must be the first answer to the interaction, but it was already deferred, replied to or updated";
+
 /** Reads the options a command declared from a slash interaction. */
 export function slashArgs(interaction: ChatInputCommandInteraction): Record<string, unknown> {
   const args: Record<string, unknown> = {};
@@ -79,6 +82,7 @@ export function contextFromInteraction(interaction: ChatInputCommandInteraction)
     },
     canShowModal: true,
     async showModal(modal) {
+      if (interaction.deferred || interaction.replied) throw new Error(MODAL_NOT_FIRST);
       await interaction.showModal(toModalPayload(modal));
     },
   };

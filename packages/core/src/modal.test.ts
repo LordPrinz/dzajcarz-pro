@@ -14,6 +14,7 @@ import {
   clickComponent,
   createFakeComponentContext,
   createFakeContext,
+  createFakeModalContext,
   replyText,
   submitModal,
 } from "./testing/context.ts";
@@ -95,6 +96,30 @@ describe("opening a modal", () => {
     expect(ctx.deferred).toBe(false);
   });
 
+  test("showModal must be the first answer in the fakes", async () => {
+    const spec = setup().feedback.build(OWNER);
+    const deferred = createFakeContext();
+    await deferred.defer();
+    await expect(deferred.showModal(spec)).rejects.toThrow("first answer");
+    const replied = createFakeContext();
+    await replied.reply("x");
+    await expect(replied.showModal(spec)).rejects.toThrow("first answer");
+    const twice = createFakeContext();
+    await twice.showModal(spec);
+    await expect(twice.showModal(spec)).rejects.toThrow("first answer");
+
+    for (const answer of ["defer", "reply", "update"] as const) {
+      const ctx = createFakeComponentContext();
+      if (answer === "defer") await ctx.defer();
+      else if (answer === "reply") await ctx.reply("x");
+      else await ctx.update("x");
+      await expect(ctx.showModal(spec)).rejects.toThrow("first answer");
+    }
+    const first = createFakeComponentContext();
+    await first.showModal(spec);
+    expect(first.modals).toHaveLength(1);
+  });
+
   test("refuses a spec that breaks a Discord limit", async () => {
     const ctx = createFakeComponentContext();
     const spec = setup().feedback.build(OWNER);
@@ -128,7 +153,7 @@ describe("submitting a modal", () => {
     expect(ctx.replies).toEqual(["dzięki"]);
   });
 
-  test("an unanswered submit is deferred", async () => {
+  test("an unanswered submit is deferred when it came from a message, else answered 'Gotowe.'", async () => {
     const quiet = defineModal({
       module: "fun",
       name: "quiet",
@@ -137,12 +162,80 @@ describe("submitting a modal", () => {
       async run() {},
     });
     const registry = createRegistry([{ name: "fun", modals: [quiet] }]);
+    const customId = quiet.build(OWNER).customId;
+    const fromMessage = await submitModal({
+      registry,
+      customId,
+      values: { a: "x" },
+      fromMessage: true,
+    });
+    expect(fromMessage.deferred).toBe(true);
+    expect(fromMessage.replies).toEqual([]);
+    const fromSlash = await submitModal({ registry, customId, values: { a: "x" } });
+    expect(fromSlash.deferred).toBe(false);
+    expect(fromSlash.replies).toEqual([{ content: "Gotowe.", ephemeral: true }]);
+  });
+
+  test("text is trimmed once, before the length checks", async () => {
+    const { registry, seen, feedback } = setup();
+    await submitModal({
+      registry,
+      customId: feedback.build(OWNER).customId,
+      values: { ...valid, topic: "  Pomysł \n", body: "  hej  " },
+    });
+    expect(seen[0]).toMatchObject({ topic: "Pomysł", body: "hej" });
+    expect(() => parseModalValues(feedback.fields, { ...valid, topic: "  ab  " })).toThrow(
+      "od 3 do 20 znaków",
+    );
+    expect(
+      parseModalValues(feedback.fields, { ...valid, topic: ` ${"x".repeat(20)} ` }).topic,
+    ).toBe("x".repeat(20));
+  });
+
+  test("a handler may spread its context; the wrapper keeps working", async () => {
+    const spreading = defineModal({
+      module: "fun",
+      name: "spread",
+      title: "t",
+      fields: { a: { type: "short", label: "A" } },
+      async run(ctx) {
+        const copy = { ...ctx };
+        await copy.reply(`${copy.values.a}:${copy.state}:${ctx.acknowledged}`);
+        await ctx.reply(`${ctx.acknowledged}`);
+      },
+    });
+    const registry = createRegistry([{ name: "fun", modals: [spreading] }]);
     const ctx = await submitModal({
       registry,
-      customId: quiet.build(OWNER).customId,
+      customId: spreading.build(OWNER, "s").customId,
       values: { a: "x" },
     });
-    expect(ctx.deferred).toBe(true);
+    expect(ctx.replies).toEqual(["x:s:false", "true"]);
+  });
+
+  test("update works only for a modal opened from a message", async () => {
+    const updating = defineModal({
+      module: "fun",
+      name: "updating",
+      title: "t",
+      fields: { a: { type: "short", label: "A" } },
+      async run(ctx) {
+        await ctx.update({ content: ctx.canUpdate ? "edited" : "never" });
+      },
+    });
+    const registry = createRegistry([{ name: "fun", modals: [updating] }]);
+    const customId = updating.build(OWNER).customId;
+    const fromMessage = await submitModal({
+      registry,
+      customId,
+      values: { a: "x" },
+      fromMessage: true,
+    });
+    expect(fromMessage.updates).toEqual([{ content: "edited" }]);
+    const fromSlash = await submitModal({ registry, customId, values: { a: "x" } });
+    expect(fromSlash.updates).toEqual([]);
+    expect(replyText(fromSlash.replies[0])).toContain("Coś poszło nie tak");
+    expect(createFakeModalContext().canUpdate).toBe(false);
   });
 
   test("a missing required field is answered in Polish and the handler does not run", async () => {
@@ -166,6 +259,18 @@ describe("submitting a modal", () => {
     expect(parse({ friend: ["1", "2"] })).toThrow("nieprawidłową");
     expect(parse({ friend: [] })).toThrow("wymagane");
     expect(parse({ channel: [CHANNEL] })).not.toThrow();
+  });
+
+  test("default values of selects must be snowflakes", () => {
+    const spec = setup().feedback.build(OWNER);
+    const pick = (type: "channel" | "user", value: string) => {
+      const field = spec.fields.find((f) => f.type === type);
+      if (!field) throw new Error("fixture lost a field");
+      return { ...spec, fields: [{ ...field, value }] };
+    };
+    expect(() => validateModal(pick("channel", "general"))).toThrow("channel or user id");
+    expect(() => validateModal(pick("user", "abc"))).toThrow("channel or user id");
+    expect(() => validateModal(pick("user", CHANNEL))).not.toThrow();
   });
 
   test("an optional text with a max length only says 'do N'", () => {

@@ -89,6 +89,7 @@ export const MODAL_MAX_LABEL = 45;
 export const MODAL_MAX_DESCRIPTION = 100;
 export const MODAL_MAX_PLACEHOLDER = 100;
 export const MODAL_MAX_TEXT = 4000;
+const SNOWFLAKE = /^\d{1,20}$/;
 const CHANNEL_KINDS: readonly ModalChannelKind[] = [
   "text",
   "voice",
@@ -133,9 +134,14 @@ function validateField(field: ModalFieldSpec, at: string): void {
   }
   if (field.type === "short" || field.type === "paragraph") {
     validateTextField(field, at);
-  } else if (field.type === "channel") {
-    for (const kind of field.channelTypes ?? []) {
-      if (!CHANNEL_KINDS.includes(kind)) throw new Error(`${at}: unknown channel type "${kind}"`);
+  } else {
+    if (field.value !== undefined && !SNOWFLAKE.test(field.value)) {
+      throw new Error(`${at}: default value must be a channel or user id, got "${field.value}"`);
+    }
+    if (field.type === "channel") {
+      for (const kind of field.channelTypes ?? []) {
+        if (!CHANNEL_KINDS.includes(kind)) throw new Error(`${at}: unknown channel type "${kind}"`);
+      }
     }
   }
 }
@@ -164,7 +170,12 @@ function validateTextField(field: ModalFieldSpec, at: string): void {
 /** Raw answers of a submit: text for text inputs, a list of ids for selects. */
 export type ModalRawValues = Readonly<Record<string, string | readonly string[] | undefined>>;
 
-const SNOWFLAKE = /^\d{1,20}$/;
+/**
+ * What an adapter puts in a field it refuses (wrong component type, channel or user it did not resolve,
+ * wrong channel type, foreign guild). It is not a snowflake, so `parseModalValues` answers it with the
+ * "invalid value" message.
+ */
+export const REJECTED_MODAL_VALUE = "rejected";
 
 function first(raw: string | readonly string[] | undefined): string | undefined {
   return typeof raw === "string" ? raw : raw?.[0];
@@ -182,14 +193,16 @@ export function parseModalValues<F extends ModalFieldsDef>(
   for (const [key, def] of Object.entries(fields)) {
     const required = def.required ?? true;
     const given = raw[key];
-    const selected = def.type === "short" || def.type === "paragraph" ? given : first(given);
-    const text = typeof selected === "string" ? selected : undefined;
-    if (text === undefined || text.trim() === "") {
+    const isText = def.type === "short" || def.type === "paragraph";
+    const selected = isText ? given : first(given);
+    // Trimmed once here, so the length limits and the handler see the same text.
+    const text = typeof selected === "string" ? selected.trim() : undefined;
+    if (text === undefined || text === "") {
       if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
       values[key] = undefined;
       continue;
     }
-    if (def.type === "short" || def.type === "paragraph") {
+    if (isText) {
       checkTextLength(def, text);
     } else if (!SNOWFLAKE.test(text) || (Array.isArray(given) && given.length > 1)) {
       throw new UserError(`Pole „${def.label}” ma nieprawidłową wartość.`);
@@ -222,6 +235,11 @@ export interface ModalContext<V = Record<string, string | undefined>>
     | "reply"
     | "update"
   > {
+  /**
+   * True when the modal was opened from a message component, so `update` can edit that message. False for a
+   * modal opened by a slash command, where `update` throws.
+   */
+  readonly canUpdate: boolean;
   /** The submitted answers, one per field, already validated against the definition. */
   readonly values: V;
 }

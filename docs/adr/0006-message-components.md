@@ -71,14 +71,27 @@ Forms use the same model and the same routing.
   `permissions`, error policy) with modal wording ("To nie Twój formularz."), and `apps/bot` checks the
   module toggle first, skipping it in a guild the bot is not in. Modals and components live in separate
   namespaces, so a button and a modal may share a name.
-- Values: `executeModal` validates the submit against the definition (Discord checks in the client, but
-  the payload is untrusted): required fields, text length, and that select values are snowflakes. A problem
-  is an ephemeral Polish reply ("Pole „Temat” jest wymagane.") and the handler does not run. Otherwise
-  `ctx.values` has one entry per field: a string, or `undefined` for a field with `required: false` left
-  empty. Channel and user fields hold the id. The channel type filter is enforced by Discord only.
-  The handler context also has `reply`, `defer`, `update` and `acknowledged`; `update` edits the message of a
-  button or select that opened the modal and throws for a modal opened from a slash command.
-  An unanswered submit is deferred like a click.
+- Values: the payload is untrusted, so validation lives in the modal layer. The adapter
+  (`readModalValues`) passes a value on only when the submitted component has the type the field declares
+  (text input, channel select, user select). A channel id must be among the channels Discord resolved, of
+  one of the field's `channelTypes`, and, in a guild, of that guild; a user id must be among the resolved
+  users. Anything else is replaced by `REJECTED_MODAL_VALUE`. Then `executeModal` validates against the
+  definition: required fields, text length after trimming (every text value is trimmed once, so the limits
+  and the handler see the same text), and that select values are snowflakes. A problem is an ephemeral
+  Polish reply ("Pole „Temat” jest wymagane.", "Pole „Kanał” ma nieprawidłową wartość.") and the handler
+  does not run. Otherwise `ctx.values` has one entry per field: a string, or `undefined` for a field with
+  `required: false` left empty. Channel and user fields hold the id. The handler gets an explicit context
+  (identity, `state`, `values`, `canUpdate`, `reply`, `defer`, `update`, `acknowledged`), safe to spread.
+  `update` edits the message of a button or select that opened the modal; `ctx.canUpdate` tells whether
+  that is the case, and `update` throws when it is not (a modal opened from a slash command).
+  A submit the handler left unanswered is closed like a click when the modal came from a message
+  (`deferUpdate`, the message stays as it is); otherwise there is no message to edit, so the bot answers
+  with the ephemeral "Gotowe." (no mentions) instead of leaving a "thinking" state.
+- Access: the submit is a separate interaction and is gated by the modal's own `permissions` and
+  `guildOnly`, not by the command or button that opened it. A modal opened by a privileged command must
+  declare the same `permissions` / `guildOnly`, or anyone who obtains the `custom_id` could submit it.
+  `ctx.state` comes from the `custom_id`, which the client sends back, so treat it as untrusted input and
+  keep nothing in it that a handler would act on without checking (ids, roles, amounts).
 - Startup checks: the registry builds every modal once with a worst-case owner id and rejects more than
   5 fields, a title over 45, a label over 45, a description or placeholder over 100, text over 4000 or
   inconsistent `minLength` / `maxLength`, a `custom_id` over 100 characters, and the same name rules as
