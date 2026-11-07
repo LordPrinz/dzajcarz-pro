@@ -65,12 +65,20 @@ export function createFakeContext<A = Record<string, unknown>>({
     async showModal(modal) {
       if (!ctx.canShowModal)
         throw new Error("A prefix command cannot open a modal; check ctx.canShowModal");
+      if (ctx.deferred || ctx.replies.length > 0 || ctx.modals.length > 0) {
+        throw new Error(NOT_FIRST_ANSWER);
+      }
       validateModal(modal);
       ctx.modals.push(modal);
     },
   };
   return ctx;
 }
+
+const NOT_FIRST_ANSWER =
+  "showModal() must be the first answer to the interaction, but it was already deferred, replied to or updated";
+
+export const NO_MODAL_UPDATE = "update() works only on a modal opened from a message component";
 
 function checkComponents(reply: Reply): void {
   if (typeof reply !== "string" && reply.components) validateRows(reply.components);
@@ -124,6 +132,7 @@ export function createFakeComponentContext({
       );
     },
     async showModal(modal) {
+      if (ctx.acknowledged) throw new Error(NOT_FIRST_ANSWER);
       validateModal(modal);
       ctx.modals.push(modal);
     },
@@ -182,6 +191,8 @@ export interface FakeModalContext extends ModalBaseContext {
 
 export interface FakeModalContextOptions {
   state?: string;
+  /** The modal was opened from a message component, so `update` works. Default false (opened by a slash command). */
+  fromMessage?: boolean;
   guildId?: string | null;
   /** Defaults to `guild` with a guildId and `bot-dm` without. */
   place?: CommandPlace;
@@ -192,6 +203,7 @@ export interface FakeModalContextOptions {
 /** An in-memory modal context; `submitModal` adds the parsed `values` for the handler. */
 export function createFakeModalContext({
   state = "",
+  fromMessage = false,
   guildId = "100000000000000001",
   place = guildId === null ? "bot-dm" : "guild",
   memberPermissions = 0n,
@@ -204,6 +216,7 @@ export function createFakeModalContext({
     channelId: "300000000000000003",
     memberPermissions: guildId === null ? null : memberPermissions,
     user: { id: userId, displayName: "tester" },
+    canUpdate: fromMessage,
     updates: [],
     replies: [],
     deferred: false,
@@ -211,6 +224,7 @@ export function createFakeModalContext({
       return ctx.deferred || ctx.updates.length > 0 || ctx.replies.length > 0;
     },
     async update(reply) {
+      if (!ctx.canUpdate) throw new Error(NO_MODAL_UPDATE);
       checkComponents(reply);
       ctx.updates.push(reply);
     },

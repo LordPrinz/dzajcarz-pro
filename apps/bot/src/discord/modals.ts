@@ -1,8 +1,10 @@
 import type { AnyModal, ModalRawValues } from "@dzajcarz/core";
 import {
+  type ChannelFieldDef,
   type ModalChannelKind,
   type ModalFieldSpec,
   type ModalSpec,
+  REJECTED_MODAL_VALUE,
   validateModal,
 } from "@dzajcarz/core";
 import {
@@ -12,6 +14,7 @@ import {
   ComponentType,
   type ModalSubmitInteraction,
   SelectMenuDefaultValueType,
+  type SelectMenuModalData,
   TextInputStyle,
 } from "discord.js";
 
@@ -56,6 +59,19 @@ function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
         max_length: field.maxLength,
         value: field.value,
       };
+    case "select":
+      return {
+        ...base,
+        type: ComponentType.StringSelect,
+        min_values: field.required ? 1 : 0,
+        max_values: 1,
+        options: (field.options ?? []).map((option) => ({
+          label: option.label,
+          value: option.value,
+          description: option.description,
+          default: option.value === field.value,
+        })),
+      };
     case "channel":
       return {
         ...base,
@@ -80,16 +96,51 @@ function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
   }
 }
 
-/** The raw answers of a submit, keyed by the modal's field ids; core validates and types them. */
+/**
+ * The raw answers of a submit, keyed by the modal's field ids; core validates and types them. The payload is
+ * untrusted, so a value is passed on only when the submitted component is of the type the field declares and,
+ * for selects, the id is among the entities Discord resolved (a channel also of an allowed type and, in a
+ * guild, of that guild). Anything else becomes `REJECTED_MODAL_VALUE`.
+ */
 export function readModalValues(
   modal: AnyModal,
   interaction: ModalSubmitInteraction,
 ): ModalRawValues {
   const raw: Record<string, string | readonly string[] | undefined> = {};
-  for (const key of Object.keys(modal.fields)) {
+  for (const [key, def] of Object.entries(modal.fields)) {
     const field = interaction.fields.fields.get(key);
-    if (field && "value" in field && typeof field.value === "string") raw[key] = field.value;
-    else if (field && "values" in field) raw[key] = field.values;
+    if (!field) continue;
+    if (def.type === "short" || def.type === "paragraph") {
+      if (field.type !== ComponentType.TextInput) raw[key] = REJECTED_MODAL_VALUE;
+      else if (typeof field.value === "string") raw[key] = field.value;
+    } else if (def.type === "select") {
+      if (field.type !== ComponentType.StringSelect) raw[key] = REJECTED_MODAL_VALUE;
+      else raw[key] = field.values;
+    } else if (def.type === "channel") {
+      if (field.type !== ComponentType.ChannelSelect) raw[key] = REJECTED_MODAL_VALUE;
+      else raw[key] = field.values.map((id) => acceptChannel(def, field, id, interaction));
+    } else if (field.type !== ComponentType.UserSelect) {
+      raw[key] = REJECTED_MODAL_VALUE;
+    } else {
+      raw[key] = field.values.map((id) => (field.users?.has(id) ? id : REJECTED_MODAL_VALUE));
+    }
   }
   return raw;
+}
+
+function acceptChannel(
+  def: ChannelFieldDef,
+  field: SelectMenuModalData,
+  id: string,
+  interaction: ModalSubmitInteraction,
+): string {
+  const channel = field.channels?.get(id);
+  if (!channel) return REJECTED_MODAL_VALUE;
+  const allowed: ChannelType[] | undefined = def.channelTypes?.map((kind) => CHANNEL_TYPES[kind]);
+  if (allowed && !allowed.includes(channel.type)) return REJECTED_MODAL_VALUE;
+  const channelGuild = "guildId" in channel ? channel.guildId : null;
+  if (interaction.guildId && channelGuild && channelGuild !== interaction.guildId) {
+    return REJECTED_MODAL_VALUE;
+  }
+  return id;
 }
