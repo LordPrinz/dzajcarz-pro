@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { createRegistry, defineCommand, defineEvent, silentLogger } from "@dzajcarz/core";
-import type { Message } from "discord.js";
-import { createEventListener, handleMessage, matchInvocation } from "./bot.ts";
+import {
+  createRegistry,
+  defineButton,
+  defineCommand,
+  defineEvent,
+  silentLogger,
+} from "@dzajcarz/core";
+import type { ButtonInteraction, Message } from "discord.js";
+import { createEventListener, handleComponent, handleMessage, matchInvocation } from "./bot.ts";
 import type { ModuleGate } from "./module-gate.ts";
 
 const BOT = "111111111111111111";
@@ -121,5 +127,84 @@ describe("module toggles in routing", () => {
     if (!entry) throw new Error("event missing");
     await createEventListener(entry, gate, silentLogger)({ ...message, guildId: null });
     expect(ran).toEqual(["event"]);
+  });
+});
+
+describe("components in routing", () => {
+  const GUILD = "100000000000000001";
+  const OWNER = "200000000000000002";
+
+  function setup(disabled: string[]) {
+    const ran: string[] = [];
+    const button = defineButton({
+      module: "fun",
+      name: "go",
+      run: async (ctx) => {
+        ran.push(`go:${ctx.state}`);
+      },
+    });
+    const registry = createRegistry([{ name: "fun", components: [button] }]);
+    const gate: ModuleGate = {
+      isEnabled: async (_guild, _channel, module) => !disabled.includes(module),
+      forget: async () => {},
+    };
+    const calls: { method: string; payload: unknown }[] = [];
+    const record = (method: string) => async (payload: unknown) => {
+      calls.push({ method, payload });
+    };
+    const click = (customId: string, userId = OWNER) =>
+      ({
+        customId,
+        user: { id: userId, displayName: "t" },
+        guildId: GUILD,
+        channelId: "300000000000000003",
+        channel: { isThread: () => false },
+        inGuild: () => true,
+        memberPermissions: { bitfield: 0n },
+        isStringSelectMenu: () => false,
+        replied: false,
+        deferred: false,
+        update: record("update"),
+        reply: record("reply"),
+        editReply: record("editReply"),
+        followUp: record("followUp"),
+      }) as unknown as ButtonInteraction;
+    const deps = {
+      registry,
+      gate,
+      prefixes: { resolve: async () => "!", forget: async () => {} },
+      logger: silentLogger,
+    };
+    return { ran, calls, click, deps, button };
+  }
+
+  test("a click from the owner runs the handler", async () => {
+    const { ran, click, deps, button } = setup([]);
+    await handleComponent(click(button.customId(OWNER, "7")), deps);
+    expect(ran).toEqual(["go:7"]);
+  });
+
+  test("a click from someone else is refused ephemerally", async () => {
+    const { ran, calls, click, deps, button } = setup([]);
+    await handleComponent(click(button.customId(OWNER), "999999999999999999"), deps);
+    expect(ran).toEqual([]);
+    expect(calls[0]).toMatchObject({ method: "reply", payload: { content: "To nie Twoje menu." } });
+  });
+
+  test("a click on a component of a disabled module is refused ephemerally", async () => {
+    const { ran, calls, click, deps, button } = setup(["fun"]);
+    await handleComponent(click(button.customId(OWNER)), deps);
+    expect(ran).toEqual([]);
+    expect(calls[0]).toMatchObject({
+      method: "reply",
+      payload: { content: "Ten moduł jest wyłączony na tym serwerze albo kanale." },
+    });
+  });
+
+  test("an unknown custom_id gets an ephemeral notice", async () => {
+    const { ran, calls, click, deps } = setup([]);
+    await handleComponent(click(`gone:thing:${OWNER}:`), deps);
+    expect(ran).toEqual([]);
+    expect(calls[0]).toMatchObject({ method: "reply" });
   });
 });

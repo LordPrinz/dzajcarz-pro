@@ -1,7 +1,9 @@
 import type { AnyCommand, CommandContext } from "./command.ts";
+import type { ComponentContext } from "./component.ts";
 import { UserError } from "./errors.ts";
 import type { Logger } from "./logger.ts";
 import { splitInvocation, usage } from "./prefix.ts";
+import type { ResolvedComponent } from "./registry.ts";
 
 /** PermissionFlagsBits.Administrator: Discord grants every permission to it. */
 const ADMINISTRATOR = 1n << 3n;
@@ -48,6 +50,40 @@ export async function executeCommand(
     } catch (replyError) {
       // The interaction may have expired or the channel may be gone; nothing left to tell the user.
       log.warn("Could not report a command error to the caller", { error: replyError });
+    }
+  }
+}
+
+export const NOT_YOUR_MENU = "To nie Twoje menu.";
+export const UNKNOWN_COMPONENT = "To menu jest nieaktualne. Wywołaj komendę jeszcze raz.";
+
+/**
+ * Runs a component handler after the checks every click shares: only the member the component was made
+ * for may use it, then the component's own guild/permission rules. Errors follow the command policy
+ * (UserError shown, anything else logged), always as an ephemeral reply.
+ */
+export async function executeComponent(
+  { component, owner }: ResolvedComponent,
+  ctx: ComponentContext,
+  logger: Logger,
+): Promise<void> {
+  const log = logger.child({
+    component: `${component.module}:${component.name}`,
+    guildId: ctx.guildId,
+    userId: ctx.user.id,
+  });
+  try {
+    if (ctx.user.id !== owner) throw new UserError(NOT_YOUR_MENU);
+    const denied = checkAccess(component, ctx);
+    if (denied) throw new UserError(denied);
+    await component.run(ctx);
+  } catch (error) {
+    const userFacing = error instanceof UserError;
+    if (!userFacing) log.error("Component failed", { error });
+    try {
+      await ctx.reply({ content: userFacing ? error.message : GENERIC_ERROR, ephemeral: true });
+    } catch (replyError) {
+      log.warn("Could not report a component error to the user", { error: replyError });
     }
   }
 }

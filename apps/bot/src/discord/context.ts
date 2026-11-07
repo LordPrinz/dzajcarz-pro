@@ -35,8 +35,8 @@ export function contextFromInteraction(interaction: ChatInputCommandInteraction)
       ? (interaction.memberPermissions?.bitfield ?? 0n)
       : null,
     async reply(reply) {
-      const { content, embeds, ephemeral } = toReplyPayload(reply);
-      const payload = { content, embeds, allowedMentions: NO_MENTIONS };
+      const { content, embeds, components, ephemeral } = toReplyPayload(reply);
+      const payload = { content, embeds, components, allowedMentions: NO_MENTIONS };
       const flags = ephemeral ? MessageFlags.Ephemeral : undefined;
       if (interaction.replied) {
         await interaction.followUp({ ...payload, flags });
@@ -74,8 +74,8 @@ export function contextFromMessage(
     memberPermissions:
       member && !channel.isDMBased() ? member.permissionsIn(channel).bitfield : null,
     async reply(reply) {
-      const { content, embeds } = toReplyPayload(reply);
-      await message.reply({ content, embeds, allowedMentions: NO_MENTIONS });
+      const { content, embeds, components } = toReplyPayload(reply);
+      await message.reply({ content, embeds, components, allowedMentions: NO_MENTIONS });
     },
     async defer() {
       if (channel.isSendable()) await channel.sendTyping();

@@ -3,6 +3,7 @@
  * Modules see only `CommandContext`; the Discord adapters in apps/bot translate interactions and
  * messages into it.
  */
+import type { ComponentRow } from "./component.ts";
 
 export type OptionType = "string" | "integer" | "number" | "boolean" | "user" | "channel" | "role";
 
@@ -64,6 +65,8 @@ export type Reply =
   | {
       content?: string;
       embeds?: Embed[];
+      /** Buttons and select menus under the message; their clicks reach `BotModule.components`. */
+      components?: ComponentRow[];
       /** Slash: only the caller sees it. Prefix: ignored (messages cannot be ephemeral). */
       ephemeral?: boolean;
     };
