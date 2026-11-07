@@ -21,7 +21,13 @@ beforeEach(async () => {
 describe.skipIf(!sql)("party repository", () => {
   const repo = () => createPartyRepository(sql as SQL);
   const guildId = "1234567890123456789";
-  const area = { guildId, categoryId: "301", joinChannelId: "401" };
+  const area = {
+    guildId,
+    categoryId: "301",
+    joinChannelId: "401",
+    nameTemplate: "Kanał {user}",
+    commandChannel: false,
+  };
   const channel = { channelId: "501", guildId, ownerId: "601", joinChannelId: "401" };
 
   test("an area is found by join channel and by category", async () => {
@@ -32,6 +38,31 @@ describe.skipIf(!sql)("party repository", () => {
     expect(await repo().listAreas(guildId)).toEqual([area]);
     expect(await repo().listAreas("5555555555555555555")).toEqual([]);
     expect(await repo().listAllAreas()).toEqual([area]);
+  });
+
+  test("an area can be created with a template and updated", async () => {
+    await repo().addArea({ ...area, nameTemplate: "🔥 {user}", commandChannel: true });
+    expect(await repo().findAreaByJoinChannel("401")).toMatchObject({
+      nameTemplate: "🔥 {user}",
+      commandChannel: true,
+    });
+    expect(
+      await repo().updateArea("401", { nameTemplate: "{user} chill", commandChannel: false }),
+    ).toBe(true);
+    expect(await repo().findAreaByJoinChannel("401")).toMatchObject({
+      nameTemplate: "{user} chill",
+      commandChannel: false,
+    });
+    expect(
+      await repo().updateArea("999", { nameTemplate: "x {user}", commandChannel: false }),
+    ).toBe(false);
+  });
+
+  test("a row written without the form columns gets the defaults", async () => {
+    await (sql as SQL)`
+      INSERT INTO party_area (join_channel_id, guild_id, category_id) VALUES ('401', ${guildId}, '301')
+    `;
+    expect(await repo().findAreaByJoinChannel("401")).toEqual(area);
   });
 
   test("a category holds only one area", async () => {
@@ -55,7 +86,7 @@ describe.skipIf(!sql)("party repository", () => {
     await repo().addArea(area);
     await repo().addChannel(channel);
     await expect(repo().addChannel({ ...channel, channelId: "502" })).rejects.toThrow();
-    await repo().addArea({ guildId: "7", categoryId: "311", joinChannelId: "411" });
+    await repo().addArea({ ...area, guildId: "7", categoryId: "311", joinChannelId: "411" });
     await repo().addChannel({
       channelId: "503",
       guildId: "7",
@@ -75,7 +106,7 @@ describe.skipIf(!sql)("party repository", () => {
 
   test("deleting an area removes its channels and leaves other areas alone", async () => {
     await repo().addArea(area);
-    await repo().addArea({ guildId, categoryId: "302", joinChannelId: "402" });
+    await repo().addArea({ ...area, categoryId: "302", joinChannelId: "402" });
     await repo().addChannel(channel);
     await repo().addChannel({ ...channel, channelId: "502", ownerId: "602", joinChannelId: "402" });
     const removed = await repo().deleteArea("401");

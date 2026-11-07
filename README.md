@@ -37,7 +37,7 @@ modules/
   general/          ping, help (interactive menu: categories, pages, install links)
   settings/         prefix (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set through a form, off, test), greets new members
-  party/            party (create, delete, lock, unlock, limit, rename, invite, block, hide, show), a voice channel per member who joins the party area
+  party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, block, hide, show), a voice channel per member who joins the party area
   status/           rotates the bot's activity (the old bot's song)
   …                 music, moderation, fun (see the board)
 infra/              docker-compose: Postgres, Redis, Lavalink (profile "music")

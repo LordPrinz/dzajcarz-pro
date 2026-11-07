@@ -3,6 +3,7 @@ import {
   type CommandContext,
   defineCommand,
   defineEvent,
+  defineModal,
   defineSubcommand,
   type Logger,
   UserError,
@@ -14,6 +15,10 @@ export interface PartyArea {
   guildId: string;
   categoryId: string;
   joinChannelId: string;
+  /** Name of the area's new channels; `{user}` becomes the member's display name. */
+  nameTemplate: string;
+  /** Whether the area wants a command channel. Only stored here; the panel is a separate feature. */
+  commandChannel: boolean;
 }
 
 export interface PartyChannel {
@@ -28,6 +33,11 @@ export interface PartyChannel {
 /** Where areas and owned channels are stored. */
 export interface PartyRepository {
   addArea(area: PartyArea): Promise<void>;
+  /** Changes the settings of an area; false when the area is gone. */
+  updateArea(
+    joinChannelId: string,
+    settings: Pick<PartyArea, "nameTemplate" | "commandChannel">,
+  ): Promise<boolean>;
   listAreas(guildId: string): Promise<PartyArea[]>;
   listAllAreas(): Promise<PartyArea[]>;
   findAreaByJoinChannel(joinChannelId: string): Promise<PartyArea | null>;
@@ -69,7 +79,19 @@ export interface PartyChannels {
   createCategoryWithJoinChannel(
     guildId: string,
     categoryName: string,
+    joinChannelName: string,
   ): Promise<{ categoryId: string; joinChannelId: string }>;
+  /** Current names of an area's two channels; null when either is gone. */
+  areaNames(
+    categoryId: string,
+    joinChannelId: string,
+  ): Promise<{ categoryName: string; joinChannelName: string } | null>;
+  /** Renames the category and the join channel (a name that already matches is left alone). */
+  renameArea(
+    categoryId: string,
+    joinChannelId: string,
+    names: { categoryName: string; joinChannelName: string },
+  ): Promise<void>;
   /** The voice channel the member is in right now, or null when they are in none. */
   voiceChannelOf(guildId: string, userId: string): Promise<string | null>;
 }
@@ -135,6 +157,74 @@ const MAX_CONTROLS = 10;
 const CONTROL_WINDOW_MS = 60_000;
 /** Discord's limit for channel and category names. */
 const MAX_NAME_LENGTH = 100;
+/** Longest template: leaves room for a display name before the 100 character cut. */
+const MAX_TEMPLATE_LENGTH = 90;
+const USER_PLACEHOLDER = "{user}";
+const DEFAULT_TEMPLATE = `Kanał ${USER_PLACEHOLDER}`;
+const DEFAULT_JOIN_CHANNEL_NAME = "➕ Dołącz, by stworzyć kanał";
+/** Zero-width and other invisible format characters (\\p{Cf}); they would make a name look empty. */
+const INVISIBLE = /\p{Cf}/gu;
+/** Used when a template and display name leave nothing to name the channel with. */
+const FALLBACK_CHANNEL_NAME = "Kanał imprezowy";
+
+/** Modal state of a form that creates a new area (an edit carries the area's join channel id instead). */
+const NEW_AREA = "new";
+
+const characters = (text: string): number => [...text].length;
+
+/**
+ * The name of a member's new channel: `{user}` replaced by their display name (whitespace collapsed),
+ * cut to Discord's 100 characters, never empty.
+ */
+export function renderChannelName(template: string, displayName: string): string {
+  const user = displayName.replace(INVISIBLE, "").replace(/\s+/g, " ").trim();
+  const rendered = template
+    .replaceAll(USER_PLACEHOLDER, () => user)
+    .replace(INVISIBLE, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const cut = [...rendered].slice(0, MAX_NAME_LENGTH).join("").trim();
+  return cut === "" ? FALLBACK_CHANNEL_NAME : cut;
+}
+
+/** Throws a UserError with a Polish message when the template cannot be used. */
+export function validateTemplate(template: string): void {
+  if (template.trim() === "") throw new UserError("Szablon nazwy nie może być pusty.");
+  if (characters(template) > MAX_TEMPLATE_LENGTH) {
+    throw new UserError(`Szablon nazwy może mieć najwyżej ${MAX_TEMPLATE_LENGTH} znaków.`);
+  }
+  if (!template.includes(USER_PLACEHOLDER)) {
+    throw new UserError(
+      `Szablon nazwy musi zawierać ${USER_PLACEHOLDER}, np. „${DEFAULT_TEMPLATE}”.`,
+    );
+  }
+}
+
+function validateName(label: string, name: string): string {
+  const trimmed = name.trim();
+  if (trimmed === "") throw new UserError(`Podaj ${label}.`);
+  if (characters(trimmed) > MAX_NAME_LENGTH) {
+    throw new UserError(`Nazwa może mieć najwyżej ${MAX_NAME_LENGTH} znaków.`);
+  }
+  return trimmed;
+}
+
+/**
+ * Longest prefix of `text` that fits `max` UTF-16 units (what the modal layer and Discord count) without
+ * splitting a surrogate pair.
+ */
+function fitModalText(text: string, max: number): string {
+  let out = "";
+  for (const char of text) {
+    if (out.length + char.length > max) break;
+    out += char;
+  }
+  return out;
+}
+
+const COMMAND_CHANNEL_ON = "on";
+const COMMAND_CHANNEL_OFF = "off";
+
 /** Discord's user limit for a voice channel is 99; 0 removes it. */
 const MAX_USER_LIMIT = 99;
 /** Long enough to create a channel and move the member, short enough that a crash frees the lock fast. */
@@ -178,6 +268,181 @@ export function createPartyModule({
     return owned.length;
   }
 
+  /** Creates the category and join channel and stores the area; leaves nothing behind on failure. */
+  async function createArea(
+    guildId: string,
+    settings: {
+      categoryName: string;
+      joinChannelName: string;
+      nameTemplate: string;
+      commandChannel: boolean;
+    },
+  ): Promise<string> {
+    let created: { categoryId: string; joinChannelId: string };
+    try {
+      created = await channels.createCategoryWithJoinChannel(
+        guildId,
+        settings.categoryName,
+        settings.joinChannelName,
+      );
+    } catch (error) {
+      logger.warn("Party area not created on Discord", { guildId, error });
+      throw new UserError(
+        "Nie mogę utworzyć kanałów. Sprawdź, czy bot ma uprawnienia „Zarządzanie kanałami”, „Przenoszenie członków” i „Zarządzanie rolami” (nadpisania uprawnień).",
+      );
+    }
+    try {
+      await repository.addArea({
+        guildId,
+        ...created,
+        nameTemplate: settings.nameTemplate,
+        commandChannel: settings.commandChannel,
+      });
+    } catch (error) {
+      await deleteQuietly(created.joinChannelId);
+      await deleteQuietly(created.categoryId);
+      throw error;
+    }
+    return created.joinChannelId;
+  }
+
+  /** Renames what changed, within the rename limit, and says precisely what happened. */
+  async function renameAreaChannels(
+    area: PartyArea,
+    wanted: { categoryName: string; joinChannelName: string },
+    guildId: string,
+  ): Promise<string> {
+    const saved = "Strefa imprezowa zaktualizowana.";
+    const current = await channels.areaNames(area.categoryId, area.joinChannelId);
+    if (!current) {
+      return "Ustawienia zapisane, ale nie mogę odczytać kanałów tej strefy, więc ich nazw nie zmieniono.";
+    }
+    const changes = [
+      {
+        id: area.categoryId,
+        changed: current.categoryName !== wanted.categoryName,
+        done: "nazwę kategorii",
+        notDone: "nazwy kategorii",
+      },
+      {
+        id: area.joinChannelId,
+        changed: current.joinChannelName !== wanted.joinChannelName,
+        done: "nazwę kanału wejściowego",
+        notDone: "nazwy kanału wejściowego",
+      },
+    ].filter((change) => change.changed);
+    if (changes.length === 0) return saved;
+    // Counted before touching Discord, so a refused rename never stalls on the API rate limit.
+    const allowed: typeof changes = [];
+    const limited: typeof changes = [];
+    for (const change of changes) {
+      if (await overRenameLimit(change.id)) limited.push(change);
+      else allowed.push(change);
+    }
+    const names = (list: typeof changes, form: "done" | "notDone") =>
+      list.map((change) => change[form]).join(" i ");
+    let renamed: string | undefined;
+    const problems: string[] = [];
+    if (allowed.length > 0) {
+      const renamesCategory = allowed.some((change) => change.id === area.categoryId);
+      const renamesJoin = allowed.some((change) => change.id === area.joinChannelId);
+      try {
+        await channels.renameArea(area.categoryId, area.joinChannelId, {
+          categoryName: renamesCategory ? wanted.categoryName : current.categoryName,
+          joinChannelName: renamesJoin ? wanted.joinChannelName : current.joinChannelName,
+        });
+        renamed = names(allowed, "done");
+      } catch (error) {
+        logger.warn("Party area not renamed on Discord", { guildId, error });
+        problems.push(
+          `nie udało się zmienić ${names(allowed, "notDone")} (sprawdź uprawnienie „Zarządzanie kanałami”)`,
+        );
+      }
+    }
+    if (limited.length > 0) {
+      problems.push(
+        `${names(limited, "notDone")} nie zmieniono: Discord pozwala zmienić nazwę ${MAX_RENAMES} razy na 10 minut`,
+      );
+    }
+    if (problems.length === 0) return saved;
+    const done = renamed ? `, zmieniono ${renamed}` : "";
+    return `Ustawienia zapisane${done}, ale ${problems.join("; ")}.`;
+  }
+
+  const createdMessage = (joinChannelId: string): string =>
+    `Strefa imprezowa gotowa. Wejdź na <#${joinChannelId}>, a dostaniesz własny kanał głosowy.`;
+
+  /** The form behind `/party create` (state `NEW_AREA`) and `/party edit` (state = the area's join channel). */
+  const areaModal = defineModal({
+    module: "party",
+    name: "area",
+    title: "Strefa imprezowa",
+    permissions: MANAGE_CHANNELS,
+    fields: {
+      categoryName: {
+        type: "short",
+        label: "Nazwa kategorii",
+        maxLength: MAX_NAME_LENGTH,
+        placeholder: "Impreza",
+      },
+      joinChannelName: {
+        type: "short",
+        label: "Nazwa kanału wejściowego",
+        maxLength: MAX_NAME_LENGTH,
+        defaultValue: DEFAULT_JOIN_CHANNEL_NAME,
+      },
+      nameTemplate: {
+        type: "short",
+        label: "Szablon nazwy kanału",
+        description: "{user} zamieni się w nazwę osoby, która wchodzi",
+        maxLength: MAX_TEMPLATE_LENGTH,
+        defaultValue: DEFAULT_TEMPLATE,
+      },
+      commandChannel: {
+        type: "select",
+        label: "Kanał komend",
+        options: [
+          { label: "Włączony", value: COMMAND_CHANNEL_ON },
+          { label: "Wyłączony", value: COMMAND_CHANNEL_OFF },
+        ],
+        defaultValue: COMMAND_CHANNEL_OFF,
+      },
+    },
+    run: async (ctx) => {
+      const guildId = guildOf(ctx.guildId);
+      const settings = {
+        categoryName: validateName("nazwę kategorii", ctx.values.categoryName),
+        joinChannelName: validateName("nazwę kanału wejściowego", ctx.values.joinChannelName),
+        nameTemplate: ctx.values.nameTemplate,
+        commandChannel: ctx.values.commandChannel === COMMAND_CHANNEL_ON,
+      };
+      validateTemplate(settings.nameTemplate);
+      await ctx.defer();
+      if (ctx.state === NEW_AREA) {
+        const joinChannelId = await createArea(guildId, settings);
+        await ctx.reply({ content: createdMessage(joinChannelId), ephemeral: true });
+        return;
+      }
+      const area = await repository.findAreaByJoinChannel(ctx.state);
+      if (!area || area.guildId !== guildId) {
+        throw new UserError("Ta strefa już nie istnieje.");
+      }
+      // Settings first: a refused rename must not lose what the member just typed.
+      if (
+        !(await repository.updateArea(area.joinChannelId, {
+          nameTemplate: settings.nameTemplate,
+          commandChannel: settings.commandChannel,
+        }))
+      ) {
+        throw new UserError("Ta strefa już nie istnieje.");
+      }
+      await ctx.reply({
+        content: await renameAreaChannels(area, settings, guildId),
+        ephemeral: true,
+      });
+    },
+  });
+
   const party = defineCommand({
     name: "party",
     description: "Strefa imprezowa: kanały głosowe tworzone na życzenie",
@@ -190,38 +455,57 @@ export function createPartyModule({
           name: {
             type: "string",
             description: "Nazwa kategorii",
-            required: true,
+            required: false,
             rest: true,
           },
         },
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
-          const name = ctx.args.name.trim();
-          if (name.length === 0) throw new UserError("Podaj nazwę kategorii.");
-          if (name.length > MAX_NAME_LENGTH) {
-            throw new UserError(`Nazwa może mieć najwyżej ${MAX_NAME_LENGTH} znaków.`);
+          if (ctx.canShowModal) {
+            // The slash command is a form; a name typed into the option only prefills it.
+            const categoryName = ctx.args.name?.trim().slice(0, MAX_NAME_LENGTH) || undefined;
+            await ctx.showModal(areaModal.build(ctx.user.id, NEW_AREA, { categoryName }));
+            return;
           }
+          const categoryName = validateName("nazwę kategorii", ctx.args.name ?? "");
           await ctx.defer();
-          let created: { categoryId: string; joinChannelId: string };
-          try {
-            created = await channels.createCategoryWithJoinChannel(guildId, name);
-          } catch (error) {
-            logger.warn("Party area not created on Discord", { guildId, error });
-            throw new UserError(
-              "Nie mogę utworzyć kanałów. Sprawdź, czy bot ma uprawnienia „Zarządzanie kanałami”, „Przenoszenie członków” i „Zarządzanie rolami” (nadpisania uprawnień).",
-            );
-          }
-          try {
-            await repository.addArea({ guildId, ...created });
-          } catch (error) {
-            await deleteQuietly(created.joinChannelId);
-            await deleteQuietly(created.categoryId);
-            throw error;
-          }
-          await ctx.reply({
-            content: `Strefa imprezowa gotowa. Wejdź na <#${created.joinChannelId}>, a dostaniesz własny kanał głosowy.`,
-            ephemeral: true,
+          const joinChannelId = await createArea(guildId, {
+            categoryName,
+            joinChannelName: DEFAULT_JOIN_CHANNEL_NAME,
+            nameTemplate: DEFAULT_TEMPLATE,
+            commandChannel: false,
           });
+          await ctx.reply({ content: createdMessage(joinChannelId), ephemeral: true });
+        },
+      }),
+      edit: defineSubcommand({
+        description: "Zmienia nazwy i ustawienia strefy imprezowej w formularzu",
+        permissions: MANAGE_CHANNELS,
+        options: {
+          channel: {
+            type: "channel",
+            description: "Kanał wejściowy strefy (gdy jest ich kilka)",
+          },
+        },
+        run: async (ctx) => {
+          const guildId = guildOf(ctx.guildId);
+          if (!ctx.canShowModal) {
+            throw new UserError("Edycja strefy wymaga komendy ukośnikowej: użyj /party edit.");
+          }
+          const area = await pickArea(guildId, ctx.args.channel, "do edycji");
+          const names = await channels.areaNames(area.categoryId, area.joinChannelId);
+          if (!names)
+            throw new UserError(
+              "Nie mogę odczytać kanałów tej strefy. Sprawdź, czy nie zostały usunięte.",
+            );
+          await ctx.showModal(
+            areaModal.build(ctx.user.id, area.joinChannelId, {
+              categoryName: fitModalText(names.categoryName, MAX_NAME_LENGTH),
+              joinChannelName: fitModalText(names.joinChannelName, MAX_NAME_LENGTH),
+              nameTemplate: fitModalText(area.nameTemplate, MAX_TEMPLATE_LENGTH),
+              commandChannel: area.commandChannel ? COMMAND_CHANNEL_ON : COMMAND_CHANNEL_OFF,
+            }),
+          );
         },
       }),
       delete: defineSubcommand({
@@ -236,7 +520,7 @@ export function createPartyModule({
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
           await ctx.defer({ ephemeral: true });
-          const area = await pickArea(guildId, ctx.args.channel);
+          const area = await pickArea(guildId, ctx.args.channel, "do usunięcia");
           await dismantleArea(area);
           await ctx.reply({ content: "Strefa imprezowa usunięta.", ephemeral: true });
         },
@@ -428,7 +712,11 @@ export function createPartyModule({
     await ctx.reply({ content, ephemeral: true });
   }
 
-  async function pickArea(guildId: string, joinChannelId: string | undefined): Promise<PartyArea> {
+  async function pickArea(
+    guildId: string,
+    joinChannelId: string | undefined,
+    purpose: string,
+  ): Promise<PartyArea> {
     if (joinChannelId !== undefined) {
       const area = await repository.findAreaByJoinChannel(joinChannelId);
       if (!area || area.guildId !== guildId) {
@@ -441,7 +729,7 @@ export function createPartyModule({
     if (!only) throw new UserError("Na tym serwerze nie ma strefy imprezowej.");
     if (areas.length > 1) {
       const list = areas.map((a) => `<#${a.joinChannelId}>`).join(", ");
-      throw new UserError(`Jest kilka stref (${list}). Wskaż kanał wejściowy tej do usunięcia.`);
+      throw new UserError(`Jest kilka stref (${list}). Wskaż kanał wejściowy strefy ${purpose}.`);
     }
     return only;
   }
@@ -467,7 +755,7 @@ export function createPartyModule({
       });
       return null;
     }
-    const name = `Kanał ${displayName}`.slice(0, MAX_NAME_LENGTH);
+    const name = renderChannelName(area.nameTemplate, displayName);
     const channelId = await channels.createVoiceChannel(
       area.guildId,
       area.categoryId,
@@ -754,5 +1042,10 @@ export function createPartyModule({
     return dropped;
   }
 
-  return { name: "party", commands: [party], events: [leave, join, removed, reconcile] };
+  return {
+    name: "party",
+    commands: [party],
+    modals: [areaModal],
+    events: [leave, join, removed, reconcile],
+  };
 }

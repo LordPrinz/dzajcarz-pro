@@ -139,13 +139,24 @@ warning. It needs the privileged `GuildMembers` intent. The welcome sender is th
 
 ### Party areas
 
-`/party create <name>` makes a category and a join voice channel and stores them in `party_area`
-(`join_channel_id` is the key, `category_id` is unique). Joining the join channel creates a voice channel
-named "Kanał {name}" in that category, stores it in `party_channel` and moves the member into it. The bot
+`/party create` opens a form (a modal, see Modals) with the category name, the join channel name, a channel
+name template and whether the area wants a command channel (a select with "Włączony" / "Wyłączony"). Submitting makes a category and a
+join voice channel and stores them in `party_area` (`join_channel_id` is the key, `category_id` is unique, plus
+`name_template`, default `Kanał {user}`, and `command_channel`, default false; the flag is only stored, the panel
+is a separate feature). `/party edit [channel]` opens the same form filled with the area's current values
+(`PartyChannels.areaNames`); submitting saves the template and the flag first, then renames only the channels whose name changed
+(`renameArea`), each checked against the rename limit (2 per 10 minutes) before Discord is called, and the
+reply says exactly what was and was not renamed. The `channel` option picks the
+area when a server has several. The prefix forms keep arguments: `party create <name>` uses the default
+template and no command channel, `party edit` answers that editing needs the slash command. The template must
+contain `{user}` and be at most 90 characters; names are at most 100. Joining the join channel creates a voice
+channel in that category named by the template, with `{user}` replaced by the member's display name
+(whitespace collapsed, cut to 100 characters, never empty), stores it in `party_channel` and moves the member
+into it. The bot
 needs Manage Channels (create and delete channels), Move Members (put the member into their channel) and
 Manage Roles (permission overwrites on the channels it makes); `/party create` says so when Discord refuses. A member owns **one party channel per server**, across all
 areas (`UNIQUE (guild_id, owner_id)`): joining again moves them back to it. A composite foreign key keeps
-a channel's `guild_id` equal to its area's. `create` and `delete` need Manage Channels for the caller. That check is on the subcommands, not on `/party`
+a channel's `guild_id` equal to its area's. `create`, `edit` and `delete` need Manage Channels for the caller. That check is on the subcommands, not on `/party`
 itself, because a command-level permission would hide the owner controls from regular members.
 
 Owner controls are further subcommands: `lock`, `unlock`, `limit <0-99>`, `rename <name>`, `invite <user>`,

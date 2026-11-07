@@ -5,6 +5,10 @@ export interface PartyArea {
   guildId: string;
   categoryId: string;
   joinChannelId: string;
+  /** Name of new party channels; `{user}` becomes the member's display name. */
+  nameTemplate: string;
+  /** Whether the area wants a command channel (stored only, see the party module). */
+  commandChannel: boolean;
 }
 
 export interface PartyChannel {
@@ -18,6 +22,11 @@ export interface PartyChannel {
 
 export interface PartyRepository {
   addArea(area: PartyArea): Promise<void>;
+  /** Changes the settings of an area; false when the area is gone. */
+  updateArea(
+    joinChannelId: string,
+    settings: Pick<PartyArea, "nameTemplate" | "commandChannel">,
+  ): Promise<boolean>;
   listAreas(guildId: string): Promise<PartyArea[]>;
   /** Every guild's areas, for startup reconciliation. */
   listAllAreas(): Promise<PartyArea[]>;
@@ -44,6 +53,8 @@ const toArea = (row: PartyAreaRow): PartyArea => ({
   guildId: row.guild_id,
   categoryId: row.category_id,
   joinChannelId: row.join_channel_id,
+  nameTemplate: row.name_template,
+  commandChannel: row.command_channel,
 });
 
 const toChannel = (row: PartyChannelRow): PartyChannel => ({
@@ -56,11 +67,20 @@ const toChannel = (row: PartyChannelRow): PartyChannel => ({
 
 export function createPartyRepository(sql: SQL): PartyRepository {
   return {
-    async addArea({ guildId, categoryId, joinChannelId }) {
+    async addArea({ guildId, categoryId, joinChannelId, nameTemplate, commandChannel }) {
       await sql`
-        INSERT INTO party_area (join_channel_id, guild_id, category_id)
-        VALUES (${joinChannelId}, ${guildId}, ${categoryId})
+        INSERT INTO party_area (join_channel_id, guild_id, category_id, name_template, command_channel)
+        VALUES (${joinChannelId}, ${guildId}, ${categoryId}, ${nameTemplate}, ${commandChannel})
       `;
+    },
+
+    async updateArea(joinChannelId, { nameTemplate, commandChannel }) {
+      const updated = await sql<PartyAreaRow[]>`
+        UPDATE party_area SET name_template = ${nameTemplate}, command_channel = ${commandChannel}
+        WHERE join_channel_id = ${joinChannelId}
+        RETURNING *
+      `;
+      return updated.length > 0;
     },
 
     async listAreas(guildId) {
