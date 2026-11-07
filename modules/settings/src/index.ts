@@ -86,7 +86,8 @@ export function createSettingsModule({
   modules,
   channels,
 }: SettingsModuleDeps): BotModule {
-  // Guild-only is implied by `permissions`, so guildId is set when these run.
+  // These commands keep the default `contexts` (servers only), so guildId is set when they run; the check
+  // below narrows the type and guards a future change of contexts.
   const guildOf = (guildId: string | null): string => {
     if (guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
     return guildId;

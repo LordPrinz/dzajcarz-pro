@@ -42,8 +42,10 @@ Test new commands on a private test server: set `DISCORD_DEV_GUILD_ID` and run `
 so slash commands show up there at once instead of after the global rollout.
 
 Guild commands cannot be used in DMs or as a user-installed app. To try those, deploy globally with
-`DEPLOY_GLOBAL=1 bun run commands:deploy` (the rollout can take a while, and the dev guild keeps its own
-copies until you redeploy there with an empty set or remove them, so commands may appear twice).
+`DEPLOY_GLOBAL=1 bun run commands:deploy`. With a dev guild set, this also empties the dev guild so the
+commands do not show up twice (the global rollout can take a while). To go back to dev-guild mode, run
+`DEPLOY_CLEAR=1 bun run commands:deploy` (empties the global set), then a plain `bun run commands:deploy`.
+Both flags accept `1` or `true`.
 
 ## Installing the bot
 

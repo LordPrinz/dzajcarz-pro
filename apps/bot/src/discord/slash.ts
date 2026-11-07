@@ -65,7 +65,9 @@ export function toSlashCommand(
       integration_types: contexts.installs.map((install) => INSTALL_TYPES[install]),
       contexts: contexts.places.map((place) => PLACES[place]),
     }),
-    // Hides the command from members without the permission; executeCommand still checks it.
+    // Discord applies this only to commands used in servers (it hides them from members without the
+    // permission); the registry keeps permissioned commands out of DMs and the user install, and
+    // executeCommand checks the permission anyway.
     default_member_permissions:
       command.permissions === undefined ? undefined : command.permissions.toString(),
   };

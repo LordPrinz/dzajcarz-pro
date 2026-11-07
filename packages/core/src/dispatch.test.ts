@@ -82,6 +82,33 @@ describe("executeCommand", () => {
     expect(ctx.replies).toEqual([]);
   });
 
+  test("refuses a DM-only command in a guild and a guild-only command in a DM, with matching texts", async () => {
+    const make = (places: ("guild" | "bot-dm")[]) =>
+      defineCommand({
+        name: "x",
+        description: "X",
+        contexts: { places, installs: ["guild"] },
+        run: async () => {},
+      });
+    expect(
+      checkPrefixAccess(make(["bot-dm"]), "", {
+        guildId: "100000000000000001",
+        memberPermissions: 0n,
+      }),
+    ).toBe("Ta komenda działa tylko w prywatnej wiadomości do bota.");
+    expect(checkPrefixAccess(make(["guild"]), "", { guildId: null, memberPermissions: null })).toBe(
+      "Ta komenda działa tylko na serwerze.",
+    );
+    expect(
+      checkPrefixAccess(make(["bot-dm"]), "", { guildId: null, memberPermissions: null }),
+    ).toBeNull();
+    const ctx = createFakeContext({ guildId: "100000000000000001" });
+    await executeCommand(make(["bot-dm"]), ctx, silentLogger);
+    expect(replyText(ctx.replies[0])).toBe(
+      "Ta komenda działa tylko w prywatnej wiadomości do bota.",
+    );
+  });
+
   test("checks member permissions, which matters for prefix commands", async () => {
     let runs = 0;
     const command = defineCommand({

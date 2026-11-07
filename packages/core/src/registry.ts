@@ -1,11 +1,4 @@
-import {
-  type AnyCommand,
-  type CommandPlace,
-  type InstallType,
-  type OptionDef,
-  type OptionsDef,
-  runsOutsideGuilds,
-} from "./command.ts";
+import type { AnyCommand, CommandPlace, InstallType, OptionDef, OptionsDef } from "./command.ts";
 import { type AnyComponent, MAX_COMPONENT_PREFIX, parseCustomId } from "./component.ts";
 import type { AnyEventHandler, BotModule } from "./module.ts";
 import { usageLine } from "./prefix.ts";
@@ -187,6 +180,12 @@ function validateContexts(command: AnyCommand, where: string): void {
   if (contexts.places.length < 1 || contexts.installs.length < 1) {
     throw new Error(`${where}: "contexts" needs at least one place and one install type`);
   }
+  if (new Set(contexts.places).size !== contexts.places.length) {
+    throw new Error(`${where}: duplicate place in contexts`);
+  }
+  if (new Set(contexts.installs).size !== contexts.installs.length) {
+    throw new Error(`${where}: duplicate install type in contexts`);
+  }
   for (const place of contexts.places) {
     if (!PLACES.includes(place)) throw new Error(`${where}: unknown place "${place}" in contexts`);
   }
@@ -198,9 +197,17 @@ function validateContexts(command: AnyCommand, where: string): void {
   if (contexts.places.includes("private-channel") && !contexts.installs.includes("user")) {
     throw new Error(`${where}: the "private-channel" place needs the "user" install`);
   }
-  if (command.permissions !== undefined && runsOutsideGuilds(command)) {
+  if (command.permissions !== undefined && contexts.places.some((place) => place !== "guild")) {
     throw new Error(
       `${where}: "permissions" cannot be checked outside a server; keep it guild-only`,
+    );
+  }
+  const permissioned =
+    command.permissions !== undefined ||
+    Object.values(command.subcommands ?? {}).some((sub) => sub.permissions !== undefined);
+  if (permissioned && contexts.installs.includes("user")) {
+    throw new Error(
+      `${where}: "permissions" cannot be checked for a user install; keep it guild-install only`,
     );
   }
 }

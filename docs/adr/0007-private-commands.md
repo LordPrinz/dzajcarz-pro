@@ -30,8 +30,9 @@ command was registered for the guild install and only `guildOnly` decided whethe
   (`reply`, `editReply`, `followUp`, `update`) and never `channel.send`.
 - **Dev deploy:** Discord ignores `contexts` and `integration_types` on guild commands, so a deploy to
   `DISCORD_DEV_GUILD_ID` omits them. `DEPLOY_GLOBAL=1 bun run commands:deploy` deploys globally even when a
-  dev guild is set, which is the only way to try DMs and the user install. Remove the guild copies first
-  (deploy with an empty set or unset the dev guild once) or the commands show up twice in the test server.
+  dev guild is set, which is the only way to try DMs and the user install; it also PUTs an empty set to the
+  dev guild so the commands do not show up twice. `DEPLOY_CLEAR=1 bun run commands:deploy` empties the
+  global set, to return to dev-guild mode.
 
 ## Consequences
 

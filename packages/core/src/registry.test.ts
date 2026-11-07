@@ -218,4 +218,40 @@ describe("contexts", () => {
     ).toThrow("guild-only");
     expect(build({ permissions: 8n })).not.toThrow();
   });
+
+  test("permissions cannot be combined with the user install", () => {
+    expect(
+      build({ permissions: 8n, contexts: { places: ["guild"], installs: ["guild", "user"] } }),
+    ).toThrow("user install");
+  });
+
+  test("a subcommand with permissions cannot be offered to the user install", () => {
+    const withSub = (installs: readonly ("guild" | "user")[]) => () =>
+      createRegistry([
+        {
+          name: "m",
+          commands: [
+            defineCommand({
+              name: "g",
+              description: "g",
+              contexts: { places: ["guild"], installs },
+              subcommands: {
+                a: defineSubcommand({ description: "a", permissions: 8n, run: async () => {} }),
+              },
+            }),
+          ],
+        },
+      ]);
+    expect(withSub(["guild", "user"])).toThrow("user install");
+    expect(withSub(["guild"])).not.toThrow();
+  });
+
+  test("rejects duplicate places and installs", () => {
+    expect(build({ contexts: { places: ["guild", "guild"], installs: ["guild"] } })).toThrow(
+      "duplicate place",
+    );
+    expect(build({ contexts: { places: ["guild"], installs: ["user", "user"] } })).toThrow(
+      "duplicate install",
+    );
+  });
 });

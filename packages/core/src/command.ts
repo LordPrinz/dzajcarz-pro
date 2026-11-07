@@ -173,8 +173,3 @@ export function defineSubcommand<const O extends OptionsDef = Record<never, Opti
 ): AnySubcommand {
   return subcommand as unknown as AnySubcommand;
 }
-
-/** Whether the command may run outside a server (a prefix command in a DM is checked against this). */
-export function runsOutsideGuilds(command: { contexts?: CommandContexts }): boolean {
-  return (command.contexts ?? DEFAULT_CONTEXTS).places.some((place) => place !== "guild");
-}
