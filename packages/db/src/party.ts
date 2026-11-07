@@ -33,8 +33,11 @@ export interface PartyRepository {
   listChannels(): Promise<PartyChannel[]>;
   /** False when the row was already gone. */
   deleteChannel(channelId: string): Promise<boolean>;
-  /** Makes `newOwnerId` the owner. False when the channel is gone or the member already owns another channel in the guild. */
-  transferOwner(channelId: string, newOwnerId: string): Promise<boolean>;
+  /**
+   * Makes `newOwnerId` the owner while `expectedOwnerId` still is. False when the owner changed, the channel is
+   * gone or the member already owns another channel in the guild.
+   */
+  transferOwner(channelId: string, expectedOwnerId: string, newOwnerId: string): Promise<boolean>;
 }
 
 const toArea = (row: PartyAreaRow): PartyArea => ({
@@ -138,10 +141,11 @@ export function createPartyRepository(sql: SQL): PartyRepository {
       return deleted.length > 0;
     },
 
-    async transferOwner(channelId, newOwnerId) {
+    async transferOwner(channelId, expectedOwnerId, newOwnerId) {
       const updated = await sql<PartyChannelRow[]>`
         UPDATE party_channel SET owner_id = ${newOwnerId}
         WHERE channel_id = ${channelId}
+          AND owner_id = ${expectedOwnerId}
           AND NOT EXISTS (
             SELECT 1 FROM party_channel other
             WHERE other.guild_id = party_channel.guild_id AND other.owner_id = ${newOwnerId}

@@ -92,13 +92,36 @@ warning. It needs the privileged `GuildMembers` intent. The welcome sender is th
 `/party create <name>` makes a category and a join voice channel and stores them in `party_area`
 (`join_channel_id` is the key, `category_id` is unique). Joining the join channel creates a voice channel
 named "Kanał {name}" in that category, stores it in `party_channel` and moves the member into it. The bot
-needs Manage Channels (create and delete channels) and Move Members (put the member into their channel);
-`/party create` says so when Discord refuses. A member owns **one party channel per server**, across all
+needs Manage Channels (create and delete channels), Move Members (put the member into their channel) and
+Manage Roles (permission overwrites on the channels it makes); `/party create` says so when Discord refuses. A member owns **one party channel per server**, across all
 areas (`UNIQUE (guild_id, owner_id)`): joining again moves them back to it. A composite foreign key keeps
-a channel's `guild_id` equal to its area's. Both commands need Manage Channels for the caller, and `/party`
-is a command with subcommands so more actions can be added next to `create` and `delete`.
+a channel's `guild_id` equal to its area's. `create` and `delete` need Manage Channels for the caller. That check is on the subcommands, not on `/party`
+itself, because a command-level permission would hide the owner controls from regular members.
 
-`/party delete` defers first (it makes several Discord calls). `deleteArea` removes the area and its channel
+Owner controls are further subcommands: `lock`, `unlock`, `limit <0-99>`, `rename <name>`, `invite <user>`,
+`block <user>`, `hide`, `show`. The caller must be in a party channel (their current voice channel, from
+`PartyChannels.voiceChannelOf`) and own it or have Manage Channels; otherwise a `UserError`. The module
+changes Discord only through the `PartyPermissions` port: `lock`/`unlock` set `Connect` on `@everyone` to
+deny or clear, `hide`/`show` do the same with `ViewChannel`, `invite` and `block` write a member overwrite
+(allow or deny both), and `block` also disconnects the member when they are inside. `invite` and `block`
+refuse the caller, the bot and non-members, and `block` also refuses the owner and anyone who can moderate
+(Administrator, Manage Channels or Move Members in the guild), and only disconnects the member while they are
+still in that channel. `unlock` and `show` restore what the category says about `@everyone` (deny, allow or
+nothing) instead of clearing the overwrite, so a private area stays private. A new party channel gets an
+allow overwrite for the bot itself (View, Connect, Manage Channels, Move Members) and one for its owner, so
+locking or hiding never shuts either out; both are best effort: a failure is logged and the channel is kept.
+On ownership transfer the new owner gets an overwrite and the old owner's is removed; the database update is
+a compare-and-swap on the previous owner. Manage Channels as an override is checked on the party channel
+itself (`PartyPermissions.canManage`), not on the channel where the command was typed.
+
+Names are counted in code points (1-100). Discord allows two renames per ten minutes per channel, so the
+module counts them in Redis (`party-rename:{channel}`, 2 per 600 s) and refuses with a Polish message before
+calling Discord; if Redis is down the rename goes through. Every control command is limited to 10 per
+member per minute (`party-ctl:{guild}:{user}`, fail open). Each Discord edit carries the audit-log reason
+`Party: <action> by <userId>`, and each successful control action is logged at info level with actor,
+action and channel. `/party` is guild-only.
+
+`/party delete` defers first, ephemerally (it makes several Discord calls). `deleteArea` removes the area and its channel
 rows in one transaction and returns them; the module then deletes those Discord channels, the join channel
 and the category.
 

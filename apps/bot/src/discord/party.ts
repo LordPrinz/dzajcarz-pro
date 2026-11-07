@@ -1,5 +1,11 @@
-import type { PartyChannels } from "@dzajcarz/module-party";
-import { type Channel, ChannelType, type Client, RESTJSONErrorCodes } from "discord.js";
+import type { EveryoneAccess, PartyChannels, PartyPermissions } from "@dzajcarz/module-party";
+import {
+  type Channel,
+  ChannelType,
+  type Client,
+  PermissionFlagsBits,
+  RESTJSONErrorCodes,
+} from "discord.js";
 
 const UNKNOWN_CHANNEL = RESTJSONErrorCodes.UnknownChannel;
 
@@ -7,6 +13,12 @@ function isUnknownChannel(error: unknown): boolean {
   return (
     typeof error === "object" && error !== null && "code" in error && error.code === UNKNOWN_CHANNEL
   );
+}
+
+const UNKNOWN_MEMBER = RESTJSONErrorCodes.UnknownMember;
+
+function hasCode(error: unknown, code: number): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
 export function createPartyChannels(client: Client): PartyChannels {
@@ -85,6 +97,133 @@ export function createPartyChannels(client: Client): PartyChannels {
         await category.delete("Party area setup failed").catch(() => {});
         throw error;
       }
+    },
+
+    async voiceChannelOf(guildId, userId) {
+      const guild = await guildOf(guildId);
+      return guild.voiceStates.cache.get(userId)?.channelId ?? null;
+    },
+  };
+}
+
+export function createPartyPermissions(client: Client): PartyPermissions {
+  async function voiceChannel(channelId: string) {
+    const channel = await client.channels.fetch(channelId);
+    if (channel?.type !== ChannelType.GuildVoice)
+      throw new Error(`Not a voice channel: ${channelId}`);
+    return channel;
+  }
+
+  const bits = (access: EveryoneAccess) => ({
+    ...(access.connect !== undefined && { Connect: access.connect }),
+    ...(access.view !== undefined && { ViewChannel: access.view }),
+  });
+
+  async function memberOf(guildId: string, userId: string) {
+    const guild = await client.guilds.fetch(guildId);
+    return guild.members.fetch(userId);
+  }
+
+  return {
+    async setEveryone(channelId, access, reason) {
+      const channel = await voiceChannel(channelId);
+      await channel.permissionOverwrites.edit(channel.guild.roles.everyone, bits(access), {
+        reason,
+      });
+    },
+
+    async inheritedEveryone(channelId) {
+      const channel = await voiceChannel(channelId);
+      const overwrite = channel.parent?.permissionOverwrites.cache.get(
+        channel.guild.roles.everyone.id,
+      );
+      const state = (flag: bigint) =>
+        overwrite?.deny.has(flag) ? false : overwrite?.allow.has(flag) ? true : null;
+      return {
+        connect: state(PermissionFlagsBits.Connect),
+        view: state(PermissionFlagsBits.ViewChannel),
+      };
+    },
+
+    async allowSelf(channelId, reason) {
+      const channel = await voiceChannel(channelId);
+      const me = channel.guild.members.me ?? (await channel.guild.members.fetchMe());
+      await channel.permissionOverwrites.edit(
+        me,
+        { ViewChannel: true, Connect: true, ManageChannels: true, MoveMembers: true },
+        { reason },
+      );
+    },
+
+    async allowMember(channelId, userId, reason) {
+      const channel = await voiceChannel(channelId);
+      const member = await memberOf(channel.guildId, userId);
+      await channel.permissionOverwrites.edit(
+        member,
+        { Connect: true, ViewChannel: true },
+        { reason },
+      );
+    },
+
+    async denyMember(channelId, userId, reason) {
+      const channel = await voiceChannel(channelId);
+      const member = await memberOf(channel.guildId, userId);
+      await channel.permissionOverwrites.edit(
+        member,
+        { Connect: false, ViewChannel: false },
+        { reason },
+      );
+    },
+
+    async clearMember(channelId, userId, reason) {
+      const channel = await voiceChannel(channelId);
+      await channel.permissionOverwrites.delete(userId, reason);
+    },
+
+    async setLimit(channelId, limit, reason) {
+      const channel = await voiceChannel(channelId);
+      await channel.setUserLimit(limit, reason);
+    },
+
+    async rename(channelId, name, reason) {
+      const channel = await voiceChannel(channelId);
+      await channel.setName(name, reason);
+    },
+
+    async disconnect(guildId, userId, channelId, reason) {
+      try {
+        const member = await memberOf(guildId, userId);
+        // The member may have moved on since the check; never pull them out of another channel.
+        if (member.voice.channelId === channelId) await member.voice.disconnect(reason);
+      } catch (error) {
+        if (!hasCode(error, UNKNOWN_MEMBER)) throw error;
+      }
+    },
+
+    async lookupMember(guildId, userId) {
+      let member: Awaited<ReturnType<typeof memberOf>>;
+      try {
+        member = await memberOf(guildId, userId);
+      } catch (error) {
+        if (hasCode(error, UNKNOWN_MEMBER) || hasCode(error, RESTJSONErrorCodes.UnknownUser)) {
+          return null;
+        }
+        throw error;
+      }
+      return {
+        self: userId === client.user?.id,
+        moderator: member.permissions.any([
+          PermissionFlagsBits.Administrator,
+          PermissionFlagsBits.ManageChannels,
+          PermissionFlagsBits.MoveMembers,
+        ]),
+      };
+    },
+
+    async canManage(guildId, userId, channelId) {
+      const channel = await voiceChannel(channelId);
+      const member = await memberOf(guildId, userId);
+      return channel.permissionsFor(member).has(PermissionFlagsBits.ManageChannels);
     },
   };
 }
