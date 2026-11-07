@@ -12,6 +12,7 @@ import {
   type ModalFile,
   PUBLIC_OWNER,
   type Reply,
+  type ReplyFile,
   type Scheduler,
   UserError,
 } from "@dzajcarz/core";
@@ -174,11 +175,25 @@ export interface PartyPermissions {
   canManage(guildId: string, userId: string, channelId: string): Promise<boolean>;
 }
 
-/** Direct messages for special invites. Both methods reject on a Discord failure other than closed DMs. */
+/** What the invite shows about its sender and place. */
+export interface InviteDescription {
+  channelName: string;
+  guildName: string;
+  /** The sender's account name (without the @) and avatar picture. */
+  inviterUsername: string;
+  inviterAvatarUrl: string;
+}
+
+/** Direct messages for special invites. The methods reject on a Discord failure other than closed DMs. */
 export interface PartyInvites {
-  /** Names the invite shows. */
-  describe(channelId: string): Promise<{ channelName: string; guildName: string }>;
-  /** Sends the message in a DM; false when the member's DMs are closed to the bot. */
+  /** Names and avatar the invite shows. */
+  describe(channelId: string, inviterId: string): Promise<InviteDescription>;
+  /**
+   * Downloads an uploaded file once, to attach it to every invite. Only Discord's own CDN is contacted, the
+   * download is cut off at `maxBytes` and after a timeout. Null when it did not work.
+   */
+  downloadFile(url: string, maxBytes: number): Promise<Uint8Array | null>;
+  /** Sends the message (with its `files`) in a DM; false when the member's DMs are closed to the bot. */
   sendDirect(userId: string, message: Reply): Promise<boolean>;
 }
 
@@ -191,7 +206,7 @@ export interface PartyModuleDeps {
   /** Delays the cleanup of command channel messages. */
   scheduler: Scheduler;
   /** The join lock and the creation cooldown. */
-  lock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
+  lock: Pick<KeyValueStore, "get" | "setIfAbsent" | "delIfEquals" | "increment">;
   logger: Logger;
 }
 
@@ -203,14 +218,23 @@ const RENAME_WINDOW_MS = 600_000;
 /** Owner controls per member: every one is a Discord call, so a flood is cut off here. */
 const MAX_CONTROLS = 10;
 const CONTROL_WINDOW_MS = 60_000;
-/** One special invite per owner per window: each one is a DM to up to ten people. */
-const SPECIAL_WINDOW_MS = 60_000;
+/** Each special invite is a DM to up to ten people: per owner 1 a minute and 5 an hour, and per recipient 3 an hour. */
+const SPECIAL_MINUTE_MS = 60_000;
+const SPECIAL_HOUR_MS = 3_600_000;
+const SPECIAL_OWNER_PER_MINUTE = 1;
+const SPECIAL_OWNER_PER_HOUR = 5;
+const SPECIAL_RECIPIENT_PER_HOUR = 3;
+const SPECIAL_MINUTE_MESSAGE =
+  "Specjalne zaproszenie możesz wysłać raz na minutę. Spróbuj za chwilę.";
+const SPECIAL_HOUR_MESSAGE = `Specjalne zaproszenia możesz wysłać najwyżej ${SPECIAL_OWNER_PER_HOUR} razy na godzinę.`;
+const SPECIAL_UNAVAILABLE = "Specjalne zaproszenia są chwilowo niedostępne.";
 const SPECIAL_MAX_MEMBERS = 10;
 const SPECIAL_TITLE_MAX = 256;
 /** Discord allows 4096 characters in an embed description; a modal text input stops at 4000. */
 const SPECIAL_MESSAGE_MAX = Math.min(4096, MODAL_MAX_TEXT);
 const SPECIAL_FILE_MAX_BYTES = 10 * 1_048_576;
-/** Formats Discord shows inline in an embed; any other file is linked instead. */
+const SPECIAL_FILE_TYPES = ["image/*", "video/*", "application/pdf"];
+/** Formats Discord shows inline in an embed; any other file is attached under the embed. */
 const EMBED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const SPECIAL_DEFAULT_COLOUR = "blue";
 /** Colour of the invite embed by the option value of the form's select. */
@@ -760,8 +784,10 @@ export function createPartyModule({
       attachment: {
         type: "file",
         label: "Załącznik",
-        description: "Obraz pokaże się w zaproszeniu, inny plik trafi jako link.",
+        description:
+          "Obraz, film lub PDF. Obraz pokaże się w zaproszeniu, reszta dojdzie jako plik.",
         required: false,
+        contentTypes: SPECIAL_FILE_TYPES,
         maxBytes: SPECIAL_FILE_MAX_BYTES,
       },
     },
@@ -802,7 +828,7 @@ export function createPartyModule({
         // is one Redis increment, a cached voice state and one row, plus a member lookup only for a
         // non-owner. The cooldown keeps repeated presses from turning into a stream of those lookups.
         const { channel } = await controlledChannel(ctx, ctx.state);
-        if (ctx.state === "special") requireOwner(ctx, channel);
+        if (ctx.state === "special") await checkSpecialAllowed(ctx, channel);
         return ctx.showModal(PANEL_FORMS[ctx.state].modal.build(ctx.user.id));
       }
       throw new UserError(PANEL_OUTDATED);
@@ -1183,10 +1209,20 @@ export function createPartyModule({
     }
   }
 
-  /** Refuses early (no channel, not the owner, cooldown) and opens the invite form. */
+  /** Refuses before the form opens, so nobody fills it in for nothing: not the owner, or over the owner limits. */
+  async function checkSpecialAllowed(ctx: ControlContext, channel: PartyChannel): Promise<void> {
+    requireOwner(ctx, channel);
+    const guildId = guildOf(ctx.guildId);
+    const minute = await specialCount(`party-special:min:${guildId}:${ctx.user.id}`);
+    const hour = await specialCount(`party-special:hour:${guildId}:${ctx.user.id}`);
+    if (minute >= SPECIAL_OWNER_PER_MINUTE) throw new UserError(SPECIAL_MINUTE_MESSAGE);
+    if (hour >= SPECIAL_OWNER_PER_HOUR) throw new UserError(SPECIAL_HOUR_MESSAGE);
+  }
+
+  /** Refuses early (no channel, not the owner, limits) and opens the invite form. */
   async function openSpecialInvite(ctx: CommandContext): Promise<void> {
     const { channel } = await controlledChannel(ctx, "invite-special");
-    requireOwner(ctx, channel);
+    await checkSpecialAllowed(ctx, channel);
     await ctx.showModal(specialInviteModal.build(ctx.user.id));
   }
 
@@ -1203,24 +1239,26 @@ export function createPartyModule({
   type Skipped = { userId: string; reason: string };
 
   async function sendSpecialInvites(
-    ctx: ControlContext & { defer(): Promise<void> },
+    ctx: ControlContext & { defer(options?: { ephemeral?: boolean }): Promise<void> },
     form: SpecialInviteForm,
   ): Promise<void> {
     const guildId = guildOf(ctx.guildId);
     const channel = await ownChannel(ctx);
     requireOwner(ctx, channel);
-    await enforceSpecialCooldown(guildId, ctx.user.id);
-    // Granting access and one DM per person takes longer than the three seconds Discord gives for a first answer.
-    await ctx.defer();
+    await takeSpecialAllowance(guildId, ctx.user.id);
+    // Granting access and one DM per person takes longer than the three seconds Discord gives for a first
+    // answer. Private, so a form opened from the panel shows its progress without touching the panel message.
+    await ctx.defer({ ephemeral: true });
 
     const reason = `Party: invite-special by ${ctx.user.id}`;
-    const message = await specialInviteMessage(ctx, channel, form);
+    const { message, attachmentLost } = await specialInviteMessage(ctx, channel, form);
     const delivered: string[] = [];
     const dmFailed: string[] = [];
     const skipped: Skipped[] = [];
 
     for (const userId of new Set(form.members)) {
-      const skip = await specialSkipReason(ctx, channel, userId);
+      const skip =
+        (await specialSkipReason(ctx, channel, userId)) ?? (await recipientLimit(guildId, userId));
       if (skip) {
         skipped.push({ userId, reason: skip });
         continue;
@@ -1254,7 +1292,7 @@ export function createPartyModule({
       skipped: skipped.length,
     });
     await ctx.reply({
-      content: specialSummary(delivered, dmFailed, skipped),
+      content: specialSummary(delivered, dmFailed, skipped, attachmentLost),
       ephemeral: true,
     });
   }
@@ -1268,10 +1306,10 @@ export function createPartyModule({
     if (userId === ctx.user.id) return "to ty";
     try {
       const member = await permissions.lookupMember(guildOf(ctx.guildId), userId);
-      if (!member) return "nie ma jej na serwerze";
-      if (member.self || member.bot) return "bot";
+      if (!member) return "nie ma na serwerze";
+      if (member.self || member.bot) return "to bot";
       if (await permissions.isBlocked(channel.channelId, userId)) {
-        return "zablokowana na kanale";
+        return "zablokowano na kanale";
       }
     } catch (error) {
       logger.warn("Special invite member check failed", {
@@ -1284,7 +1322,12 @@ export function createPartyModule({
     return null;
   }
 
-  function specialSummary(delivered: string[], dmFailed: string[], skipped: Skipped[]): string {
+  function specialSummary(
+    delivered: string[],
+    dmFailed: string[],
+    skipped: Skipped[],
+    attachmentLost: boolean,
+  ): string {
     const mentions = (ids: string[]) => ids.map((id) => `<@${id}>`).join(", ");
     const lines: string[] = [];
     if (delivered.length > 0) {
@@ -1293,79 +1336,146 @@ export function createPartyModule({
     if (dmFailed.length > 0) {
       lines.push(
         `Wiadomość prywatna nie doszła (${dmFailed.length}): ${mentions(dmFailed)}. ` +
-          "Mają dostęp do kanału, ale zaproszenia nie dostały.",
+          "Mimo to mogą wejść na kanał (dostęp zostaje), ale zaproszenia nie dostały: daj im znać sam.",
       );
     }
     if (skipped.length > 0) {
       const list = skipped.map(({ userId, reason }) => `<@${userId}> (${reason})`).join(", ");
       lines.push(`Pominięte (${skipped.length}): ${list}`);
     }
+    if (attachmentLost) {
+      lines.push("Załącznika nie udało się pobrać, zaproszenia poszły bez niego.");
+    }
     return lines.join("\n");
   }
 
-  /** The DM: an embed with the inviter, channel, server and the owner's text, and a button to the channel. */
+  /** The DM: the owner's text under an author line naming the sender, with a button to the channel. */
   async function specialInviteMessage(
     ctx: ControlContext,
     channel: PartyChannel,
     form: SpecialInviteForm,
-  ): Promise<Reply> {
-    let names = { channelName: "kanał party", guildName: "serwer" };
+  ): Promise<{ message: Reply; attachmentLost: boolean }> {
+    let described: InviteDescription | null = null;
     try {
-      names = await invites.describe(channel.channelId);
+      described = await invites.describe(channel.channelId, ctx.user.id);
     } catch (error) {
       logger.warn("Special invite could not read channel names", {
         channelId: channel.channelId,
         error,
       });
     }
+    const byline = described
+      ? `Zaproszenie od ${ctx.user.displayName} (@${described.inviterUsername}) z serwera ${described.guildName}`
+      : `Zaproszenie od ${ctx.user.displayName}`;
+
     const { attachment } = form;
-    const isImage =
-      attachment !== undefined &&
-      EMBED_IMAGE_TYPES.includes(
-        (attachment.contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "",
-      );
-    const fields = [
-      { name: "Zaprasza", value: `<@${ctx.user.id}>`, inline: true },
-      { name: "Kanał", value: names.channelName.slice(0, 100), inline: true },
-      { name: "Serwer", value: names.guildName.slice(0, 100), inline: true },
-    ];
-    if (attachment && !isImage) {
-      const label = attachment.name.replace(/[[\]()]/g, "").slice(0, 100) || "plik";
-      fields.push({ name: "Załącznik", value: `[${label}](${attachment.url})`, inline: false });
-    }
+    const file = attachment ? await specialFile(channel, attachment) : null;
+    const isImage = file !== null && isEmbedImage(attachment?.contentType ?? null);
     return {
-      embeds: [
-        {
-          title: form.title ?? "Zaproszenie na imprezę",
-          description: form.message ?? `${ctx.user.displayName} zaprasza cię na swój kanał.`,
-          color: SPECIAL_COLOURS[form.colour ?? SPECIAL_DEFAULT_COLOUR] ?? SPECIAL_COLOURS.blue,
-          fields,
-          image: isImage ? attachment.url : undefined,
-        },
-      ],
-      components: [
-        [
+      attachmentLost: attachment !== undefined && file === null,
+      message: {
+        embeds: [
           {
-            type: "link",
-            label: "Dołącz",
-            url: `https://discord.com/channels/${channel.guildId}/${channel.channelId}`,
+            author: {
+              name: byline.slice(0, 256),
+              iconUrl: described?.inviterAvatarUrl,
+            },
+            title: form.title ?? "Zaproszenie na imprezę",
+            description: form.message ?? `${ctx.user.displayName} zaprasza cię na swój kanał.`,
+            color: SPECIAL_COLOURS[form.colour ?? SPECIAL_DEFAULT_COLOUR] ?? SPECIAL_COLOURS.blue,
+            fields: [
+              {
+                name: "Kanał",
+                value: (described?.channelName ?? "kanał party").slice(0, 100),
+                inline: true,
+              },
+            ],
+            footer: "Treść napisał zapraszający, nie bot.",
+            image: isImage ? `attachment://${file.name}` : undefined,
           },
         ],
-      ],
+        files: file ? [file] : undefined,
+        components: [
+          [
+            {
+              type: "link",
+              label: "Dołącz",
+              url: `https://discord.com/channels/${channel.guildId}/${channel.channelId}`,
+            },
+          ],
+        ],
+      },
     };
   }
 
-  /** Counts a special invite; fails open when Redis is down. */
-  async function enforceSpecialCooldown(guildId: string, userId: string): Promise<void> {
-    let count: number;
+  function isEmbedImage(contentType: string | null): boolean {
+    return EMBED_IMAGE_TYPES.includes(
+      (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "",
+    );
+  }
+
+  /** Downloads the owner's file once for all the invites; null (logged) when that fails. */
+  async function specialFile(
+    channel: PartyChannel,
+    attachment: ModalFile,
+  ): Promise<ReplyFile | null> {
     try {
-      ({ count } = await lock.increment(`party-special:${guildId}:${userId}`, SPECIAL_WINDOW_MS));
+      const data = await invites.downloadFile(attachment.url, SPECIAL_FILE_MAX_BYTES);
+      if (!data) return null;
+      // The name ends up in `attachment://<name>`, so only plain characters survive.
+      const name = attachment.name.replace(/[^A-Za-z0-9._-]/g, "_").slice(-100) || "plik";
+      return { name, data };
     } catch (error) {
-      logger.warn("Party special invite cooldown unavailable", { guildId, userId, error });
-      return;
+      logger.warn("Special invite attachment download failed", {
+        channelId: channel.channelId,
+        error,
+      });
+      return null;
     }
-    if (count > 1) {
-      throw new UserError("Specjalne zaproszenie możesz wysłać raz na minutę. Spróbuj za chwilę.");
+  }
+
+  /** The value of a limit counter without counting; Redis down refuses, as the invites cannot be limited. */
+  async function specialCount(key: string): Promise<number> {
+    try {
+      return Number(await lock.get(key)) || 0;
+    } catch (error) {
+      logger.warn("Party special invite limit unavailable", { key, error });
+      throw new UserError(SPECIAL_UNAVAILABLE);
+    }
+  }
+
+  /** Counts one use of a limit; Redis down refuses. */
+  async function specialIncrement(key: string, windowMs: number): Promise<number> {
+    try {
+      return (await lock.increment(key, windowMs)).count;
+    } catch (error) {
+      logger.warn("Party special invite limit unavailable", { key, error });
+      throw new UserError(SPECIAL_UNAVAILABLE);
+    }
+  }
+
+  /** Counts a special invite against the owner's limits (1 a minute, 5 an hour). */
+  async function takeSpecialAllowance(guildId: string, userId: string): Promise<void> {
+    const minute = await specialIncrement(
+      `party-special:min:${guildId}:${userId}`,
+      SPECIAL_MINUTE_MS,
+    );
+    if (minute > SPECIAL_OWNER_PER_MINUTE) throw new UserError(SPECIAL_MINUTE_MESSAGE);
+    const hour = await specialIncrement(`party-special:hour:${guildId}:${userId}`, SPECIAL_HOUR_MS);
+    if (hour > SPECIAL_OWNER_PER_HOUR) throw new UserError(SPECIAL_HOUR_MESSAGE);
+  }
+
+  /** Counts an invite to one person; a reason to skip them when they already got 3 in the last hour. */
+  async function recipientLimit(guildId: string, userId: string): Promise<string | null> {
+    try {
+      const { count } = await lock.increment(
+        `party-special-to:${guildId}:${userId}`,
+        SPECIAL_HOUR_MS,
+      );
+      return count > SPECIAL_RECIPIENT_PER_HOUR ? "limit zaproszeń dla tej osoby" : null;
+    } catch (error) {
+      logger.warn("Party special invite recipient limit unavailable", { guildId, userId, error });
+      return "nie udało się sprawdzić limitu";
     }
   }
 

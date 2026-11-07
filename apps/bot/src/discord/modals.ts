@@ -13,6 +13,7 @@ import {
   type APIModalInteractionResponseCallbackData,
   ChannelType,
   ComponentType,
+  type FileUploadType,
   type ModalData,
   type ModalSubmitInteraction,
   SelectMenuDefaultValueType,
@@ -89,7 +90,9 @@ function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
       return {
         ...base,
         type: ComponentType.UserSelect,
-        min_values: field.minValues ?? (field.required ? 1 : 0),
+        // An optional select may always be left empty, whatever `minValues` says (core still enforces it
+        // when something is picked), so the client never asks for a pick the field does not require.
+        min_values: field.required ? Math.max(field.minValues ?? 1, 1) : 0,
         max_values: field.maxValues ?? 1,
         default_values: field.value
           ? [{ id: field.value, type: SelectMenuDefaultValueType.User }]
@@ -102,8 +105,33 @@ function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
         required: field.required,
         min_values: field.required ? 1 : 0,
         max_values: 1,
+        file_types: toFileTypes(field.contentTypes),
       };
   }
+}
+
+/** Extensions for the exact types Discord's filter names by extension only. */
+const FILE_TYPE_EXTENSIONS: Record<string, FileUploadType> = { "application/pdf": ".pdf" };
+const FILE_TYPE_FAMILIES = ["image", "video", "audio"];
+const MAX_FILE_TYPES = 10;
+
+/**
+ * The picker's file-type filter for a field's `contentTypes`: `image/*` becomes `image`, `application/pdf`
+ * becomes `.pdf`. A type with no equivalent would make the filter stricter than the field, so then no
+ * filter is sent and the check on submit is the only one.
+ */
+function toFileTypes(contentTypes: readonly string[] | undefined): FileUploadType[] | undefined {
+  if (!contentTypes) return undefined;
+  const types = new Set<FileUploadType>();
+  for (const raw of contentTypes) {
+    const type = raw.toLowerCase();
+    const family = type.endsWith("/*") ? type.slice(0, -2) : null;
+    const known = family !== null && FILE_TYPE_FAMILIES.includes(family) ? family : null;
+    const mapped = known ? (known as FileUploadType) : FILE_TYPE_EXTENSIONS[type];
+    if (!mapped) return undefined;
+    types.add(mapped);
+  }
+  return types.size <= MAX_FILE_TYPES ? [...types] : undefined;
 }
 
 /**

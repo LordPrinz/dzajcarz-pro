@@ -8,13 +8,14 @@ export const NO_MENTIONS: MessageMentionOptions = { parse: [], repliedUser: fals
 export interface ReplyPayload {
   content?: string;
   embeds: APIEmbed[];
+  files: { attachment: Buffer; name: string }[];
   components: ComponentRows;
   ephemeral: boolean;
 }
 
 export function toReplyPayload(reply: Reply): ReplyPayload {
   if (typeof reply === "string")
-    return { content: reply, embeds: [], components: [], ephemeral: false };
+    return { content: reply, embeds: [], files: [], components: [], ephemeral: false };
   return {
     content: reply.content,
     embeds: (reply.embeds ?? []).map((embed) => ({
@@ -23,7 +24,14 @@ export function toReplyPayload(reply: Reply): ReplyPayload {
       color: embed.color,
       fields: embed.fields,
       footer: embed.footer ? { text: embed.footer } : undefined,
+      author: embed.author
+        ? { name: embed.author.name, icon_url: embed.author.iconUrl }
+        : undefined,
       image: embed.image ? { url: embed.image } : undefined,
+    })),
+    files: (reply.files ?? []).map((file) => ({
+      attachment: Buffer.from(file.data),
+      name: file.name,
     })),
     components: toComponentRows(reply.components),
     ephemeral: reply.ephemeral ?? false,

@@ -593,3 +593,44 @@ describe("registry validation of modals", () => {
     expect(() => register(long, "m".repeat(30))).toThrow("too long");
   });
 });
+
+describe("file field definitions", () => {
+  const fileModal = (field: { contentTypes?: string[]; maxBytes?: number }) =>
+    defineModal({
+      module: "fun",
+      name: "file",
+      title: "t",
+      fields: { f: { type: "file", label: "Plik", ...field } },
+      async run() {},
+    });
+
+  test("a valid definition builds and its limits reach the spec", () => {
+    const spec = fileModal({ contentTypes: ["image/*", "application/pdf"], maxBytes: 1024 }).build(
+      "1",
+    );
+    expect(spec.fields[0]).toMatchObject({
+      contentTypes: ["image/*", "application/pdf"],
+      maxBytes: 1024,
+    });
+  });
+
+  test.each([0, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "maxBytes %p is refused",
+    (maxBytes) => {
+      expect(() => fileModal({ maxBytes }).build("1")).toThrow(
+        "maxBytes must be a positive integer",
+      );
+    },
+  );
+
+  test("an empty contentTypes list is refused", () => {
+    expect(() => fileModal({ contentTypes: [] }).build("1")).toThrow("at least one type");
+  });
+
+  test.each(["pdf", "image", "image/", "/png", "image/*; charset=x", "image /png", "*/*x", ""])(
+    "contentTypes entry %p is refused",
+    (type) => {
+      expect(() => fileModal({ contentTypes: [type] }).build("1")).toThrow("is not a content type");
+    },
+  );
+});

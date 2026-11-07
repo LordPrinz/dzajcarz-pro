@@ -69,8 +69,17 @@ export interface Embed {
   color?: number;
   fields?: EmbedField[];
   footer?: string;
-  /** https URL of a picture shown under the text. */
+  /** Small line above the title: a name with an optional avatar, e.g. who the message comes from. */
+  author?: { name: string; iconUrl?: string };
+  /** https URL of a picture shown under the text, or `attachment://<name>` of one of the reply's `files`. */
   image?: string;
+}
+
+/** A file sent with a message. The adapter uploads the bytes; nothing is fetched from a URL. */
+export interface ReplyFile {
+  /** File name; an embed refers to it as `attachment://<name>`, so keep it to letters, digits, `.`, `_` and `-`. */
+  name: string;
+  data: Uint8Array;
 }
 
 export type Reply =
@@ -78,6 +87,8 @@ export type Reply =
   | {
       content?: string;
       embeds?: Embed[];
+      /** Files uploaded with the message. Only adapters that send new messages (direct messages) attach them. */
+      files?: ReplyFile[];
       /** Buttons and select menus under the message; their clicks reach `BotModule.components`. */
       components?: ComponentRow[];
       /** Slash: only the caller sees it. Prefix: ignored (messages cannot be ephemeral). */

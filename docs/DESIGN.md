@@ -195,18 +195,26 @@ action and channel. `/party` is guild-only.
 
 `/party invite-special` and the panel's Specjalne zaproszenie button open the same form: members (user select,
 1 to 10), title (optional, up to 256), message (optional paragraph, a default invite text when empty), colour
-(string select, fixed palette with Polish names, default blue) and an optional attachment. Only the **owner**
-of the party channel the caller is in may open or submit it (Manage Channels is not enough, the DM goes out in
-the owner's name); the prefix form answers that it needs the slash command. On submit the module defers
-(access changes and DMs take longer than three seconds), then per distinct member: skips the caller, bots, people
-who are not on the server and members blocked on the channel (`PartyPermissions.isBlocked`), grants access with
-the same `allowMember` call as `/party invite`, and sends a DM through the `PartyInvites` port (the module never
-imports discord.js). The DM is an embed (inviter, channel, server, title, message) with a link button "Dołącz"
-to the voice channel. An image attachment (png, jpeg, gif, webp) is shown in the embed; any other file is linked
-in a field. Closed DMs (the port answers false) and failed ones are collected, not thrown, and the owner gets an
-ephemeral summary: delivered, DMs closed, skipped with the reason. A member whose DM failed keeps their access.
-Cooldown: one special invite per owner per minute (`party-special:{guild}:{user}`, fail open); all output uses
-NO_MENTIONS.
+(string select, fixed palette with Polish names, default blue) and an optional attachment (image, video or PDF,
+up to 10 MB). Only the **owner** of the party channel the caller is in may open or submit it (Manage Channels is not
+enough, the DM goes out in the owner's name); the prefix form answers that it needs the slash command. On submit
+the module defers with a private reply (also when the form came from the panel, whose message stays untouched; access
+changes and DMs take longer than three seconds), downloads the attachment once through the `PartyInvites` port
+(Discord CDN only, size and time limited; if that fails the invites go out without it and the summary says so),
+then per distinct member: skips the caller, bots, people who are not on the server, members blocked on the channel
+(`PartyPermissions.isBlocked`) and people over their limit, grants access with the same `allowMember` call as
+`/party invite`, and sends a DM through the port (the module never imports discord.js). The DM is an embed whose author
+line carries the sender's avatar and "Zaproszenie od <display name> (@username) z serwera <server>", then the title,
+the owner's message, the channel, and the footer "Treść napisał zapraszający, nie bot." A link button "Dołącz" leads
+to the voice channel. The file is a real DM attachment; an image (png, jpeg, gif, webp) is also shown in the embed
+through `attachment://<name>`. Closed DMs (the port answers false) and failed ones are collected, not thrown, and
+the owner gets an ephemeral summary: delivered, DMs failed, skipped with a neutral reason. A member whose DM failed
+**keeps their access** and the summary says so, so the owner can tell them.
+Limits (Redis, `party-special:min|hour:{guild}:{user}`, `party-special-to:{guild}:{recipient}`): per owner 1 a minute
+and 5 an hour, per recipient 3 an hour from one server. The form refuses to open while the owner is over a limit
+(read without counting); the send counts. This action **fails closed**: with Redis down it answers "Specjalne
+zaproszenia są chwilowo niedostępne.", unlike the control cooldown, because each use is a DM to up to ten people. All
+output uses NO_MENTIONS.
 
 `/party delete` defers first, ephemerally (it makes several Discord calls). `deleteArea` removes the area and its channel
 rows in one transaction and returns them; the module then deletes those Discord channels, the join channel

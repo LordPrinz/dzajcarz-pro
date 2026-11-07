@@ -276,9 +276,22 @@ function setup({
   /** Members whose DMs are closed (the port answers false) and those whose DM call fails outright. */
   const dmClosed = new Set<string>();
   const dmBroken = new Set<string>();
+  /** Download requests, and whether the next ones fail. */
+  const downloads: { url: string; maxBytes: number }[] = [];
+  const downloadState = { fails: false, throws: false };
   const invites: PartyInvites = {
     async describe() {
-      return { channelName: "Kanał Ola", guildName: "Ekipa" };
+      return {
+        channelName: "Kanał Ola",
+        guildName: "Ekipa",
+        inviterUsername: "tester_ola",
+        inviterAvatarUrl: "https://cdn.discordapp.com/avatars/1/a.png",
+      };
+    },
+    async downloadFile(url, maxBytes) {
+      downloads.push({ url, maxBytes });
+      if (downloadState.throws) throw new Error("boom");
+      return downloadState.fails ? null : new Uint8Array([1, 2, 3]);
     },
     async sendDirect(userId, message) {
       if (dmBroken.has(userId)) throw new Error("Internal error");
@@ -382,6 +395,8 @@ function setup({
     dms,
     dmClosed,
     dmBroken,
+    downloads,
+    downloadState,
     warnings,
     infos,
     lock: store,
@@ -2151,13 +2166,18 @@ describe("command channel panel", () => {
         title: "Wieczór gier",
         description: "Wpadaj o 20.",
         color: 0x57f287,
-        image: png.url,
+        image: "attachment://mapa.png",
+        footer: "Treść napisał zapraszający, nie bot.",
+        author: {
+          name: "Zaproszenie od tester (@tester_ola) z serwera Ekipa",
+          iconUrl: "https://cdn.discordapp.com/avatars/1/a.png",
+        },
       });
-      expect(dm.embeds?.[0]?.fields).toEqual([
-        { name: "Zaprasza", value: `<@${OWNER}>`, inline: true },
-        { name: "Kanał", value: "Kanał Ola", inline: true },
-        { name: "Serwer", value: "Ekipa", inline: true },
-      ]);
+      expect(dm.embeds?.[0]?.fields).toEqual([{ name: "Kanał", value: "Kanał Ola", inline: true }]);
+      // One download for both recipients, and the bytes travel with the DM.
+      expect(t.downloads).toEqual([{ url: png.url, maxBytes: 10 * 1_048_576 }]);
+      expect(dm.files).toEqual([{ name: "mapa.png", data: new Uint8Array([1, 2, 3]) }]);
+      expect(t.dms[1]?.message).toEqual(dm);
       expect(dm.components).toEqual([
         [
           {
@@ -2186,18 +2206,55 @@ describe("command channel panel", () => {
       expect(dm.embeds?.[0]?.image).toBeUndefined();
     });
 
-    test("an image is shown in the embed, any other file is linked", async () => {
+    test("an image is shown in the embed, any other file is attached", async () => {
       const t = await withOwners();
       await sendForm(t, { members: [FRIEND], attachment: [pdf] });
       const dm = t.dms[0]?.message;
       if (!dm || typeof dm === "string") throw new Error("expected an embed message");
-      const embed = dm.embeds?.[0];
-      expect(embed?.image).toBeUndefined();
-      expect(embed?.fields).toContainEqual({
-        name: "Załącznik",
-        value: `[regulamin.pdf](${pdf.url})`,
-        inline: false,
+      expect(dm.embeds?.[0]?.image).toBeUndefined();
+      expect(dm.files?.map((f) => f.name)).toEqual(["regulamin.pdf"]);
+    });
+
+    test("the file name is reduced to plain characters for the attachment:// link", async () => {
+      const t = await withOwners();
+      await sendForm(t, {
+        members: [FRIEND],
+        attachment: [{ ...png, name: "moja mapa (1) ąę.png" }],
       });
+      const dm = t.dms[0]?.message;
+      if (!dm || typeof dm === "string") throw new Error("expected an embed message");
+      expect(dm.files?.[0]?.name).toBe("moja_mapa__1____.png");
+      expect(dm.embeds?.[0]?.image).toBe("attachment://moja_mapa__1____.png");
+    });
+
+    test("a failed download sends the invites without the file and says so", async () => {
+      for (const mode of ["fails", "throws"] as const) {
+        const t = await withOwners();
+        t.downloadState[mode] = true;
+        const submitted = await sendForm(t, { members: [FRIEND], attachment: [png] });
+        const dm = t.dms[0]?.message;
+        if (!dm || typeof dm === "string") throw new Error("expected an embed message");
+        expect(dm.files).toBeUndefined();
+        expect(dm.embeds?.[0]?.image).toBeUndefined();
+        expect(replyText(submitted.replies[0])).toContain("Załącznika nie udało się pobrać");
+      }
+    });
+
+    test("the form only takes images, video and PDF", async () => {
+      const t = await withOwners();
+      const spec = (await click(t, "special", OWNER)).modals[0];
+      expect(spec?.fields.find((f) => f.type === "file")).toMatchObject({
+        contentTypes: ["image/*", "video/*", "application/pdf"],
+        maxBytes: 10 * 1_048_576,
+      });
+      const zip = { ...pdf, name: "a.zip", contentType: "application/zip" };
+      const refused = await sendForm(t, { members: [FRIEND], attachment: [zip] });
+      expect(replyText(refused.replies[0])).toContain("niedozwolony typ");
+      for (const ok of [{ ...png, contentType: "video/mp4", name: "a.mp4" }, pdf, png]) {
+        const t2 = await withOwners();
+        await sendForm(t2, { members: [FRIEND], attachment: [ok] });
+        expect(t2.dms).toHaveLength(1);
+      }
     });
 
     test("skips the caller, bots, people who left and blocked members, and says why", async () => {
@@ -2210,10 +2267,10 @@ describe("command channel panel", () => {
       expect(t.dms.map((d) => d.userId)).toEqual([FRIEND]);
       const summary = replyText(submitted.replies[0]) ?? "";
       expect(summary).toContain(`<@${OWNER}> (to ty)`);
-      expect(summary).toContain(`<@${SELF}> (bot)`);
-      expect(summary).toContain(`<@${BOT}> (bot)`);
-      expect(summary).toContain(`<@${NOBODY}> (nie ma jej na serwerze)`);
-      expect(summary).toContain(`<@${U3}> (zablokowana na kanale)`);
+      expect(summary).toContain(`<@${SELF}> (to bot)`);
+      expect(summary).toContain(`<@${BOT}> (to bot)`);
+      expect(summary).toContain(`<@${NOBODY}> (nie ma na serwerze)`);
+      expect(summary).toContain(`<@${U3}> (zablokowano na kanale)`);
       expect(summary).toContain("Pominięte (5)");
     });
 
@@ -2226,6 +2283,7 @@ describe("command channel panel", () => {
       const summary = replyText(submitted.replies[0]) ?? "";
       expect(summary).toContain(`dostarczone (1): <@${OWNER2}>`);
       expect(summary).toContain(`nie doszła (2): <@${FRIEND}>, <@${U3}>`);
+      expect(summary).toContain("dostęp zostaje");
       expect(t.warnings.some((w) => w.message === "Special invite DM failed")).toBe(true);
     });
 
@@ -2259,23 +2317,88 @@ describe("command channel panel", () => {
       expect(replyText(other.replies[0])).toContain("dostarczone (1)");
     });
 
-    test("with Redis down the cooldown does not block", async () => {
+    test("an owner may send 5 an hour, and the form refuses to open for the 6th", async () => {
+      let now = 1_000_000;
+      const t = await withOwners({ lock: createMemoryStore(() => now) });
+      for (let i = 0; i < 5; i++) {
+        const done = await sendForm(t, { members: [String(500000000000000000n + BigInt(i))] });
+        expect(replyText(done.replies[0])).not.toContain("najwyżej");
+        now += 61_000;
+      }
+      const slash = await t.run("invite-special", {}, 0n, OWNER);
+      expect(slash[0]).toContain("najwyżej 5 razy na godzinę");
+      expect(slash.modals).toHaveLength(0);
+      const panel = await click(t, "special", OWNER);
+      expect(replyText(panel.replies[0])).toContain("najwyżej 5 razy na godzinę");
+      expect(panel.modals).toHaveLength(0);
+      now += 3_600_000;
+      expect((await click(t, "special", OWNER)).modals).toHaveLength(1);
+    });
+
+    test("opening the form during the cooldown is refused, and opening does not use the allowance", async () => {
+      const t = await withOwners();
+      // Opening twice costs nothing...
+      expect((await click(t, "special", OWNER)).modals).toHaveLength(1);
+      expect((await t.run("invite-special", {}, 0n, OWNER)).modals).toHaveLength(1);
+      await sendForm(t, { members: [FRIEND] });
+      // ...but after a send both entry points refuse until the minute is over.
+      const slash = await t.run("invite-special", {}, 0n, OWNER);
+      expect(slash[0]).toContain("raz na minutę");
+      expect(slash.modals).toHaveLength(0);
+      const panel = await click(t, "special", OWNER);
+      expect(replyText(panel.replies[0])).toContain("raz na minutę");
+      expect(panel.modals).toHaveLength(0);
+    });
+
+    test("a person gets at most 3 special invites an hour from one server", async () => {
+      let now = 1_000_000;
+      const t = await withOwners({ lock: createMemoryStore(() => now) });
+      t.addMember("1000", U3);
+      const outcomes: string[] = [];
+      for (const owner of [OWNER, OWNER2, OWNER, OWNER2]) {
+        const done = await sendForm(t, { members: [FRIEND] }, owner);
+        outcomes.push(replyText(done.replies[0]) ?? "");
+        now += 61_000;
+      }
+      expect(outcomes.slice(0, 3).every((text) => text.includes("dostarczone (1)"))).toBe(true);
+      expect(outcomes[3]).toContain(`<@${FRIEND}> (limit zaproszeń dla tej osoby)`);
+      expect(t.dms).toHaveLength(3);
+      // The skipped person did not get access either: three grants for three invites.
+      expect(t.calls.filter((c) => c.startsWith("allow") && c.endsWith(FRIEND))).toHaveLength(3);
+    });
+
+    test("with Redis down special invites are unavailable, at the form and at the send", async () => {
       const lock = createMemoryStore();
-      lock.increment = async () => {
-        throw new Error("redis down");
-      };
       const t = await withOwners({ lock });
       const opened = await click(t, "special", OWNER);
       const customId = opened.modals[0]?.customId ?? "";
-      for (let i = 0; i < 2; i++) {
-        await submitModal({
-          registry: t.registry,
-          customId,
-          values: { members: [FRIEND] },
-          guildId,
-        });
-      }
-      expect(t.dms).toHaveLength(2);
+      const down = async () => {
+        throw new Error("redis down");
+      };
+      lock.get = down;
+      lock.increment = down;
+      const refusedOpen = await t.run("invite-special", {}, 0n, OWNER);
+      expect(refusedOpen[0]).toBe("Specjalne zaproszenia są chwilowo niedostępne.");
+      expect(refusedOpen.modals).toHaveLength(0);
+      const submitted = await submitModal({
+        registry: t.registry,
+        customId,
+        values: { members: [FRIEND] },
+        guildId,
+      });
+      expect(replyText(submitted.replies[0])).toBe(
+        "Specjalne zaproszenia są chwilowo niedostępne.",
+      );
+      expect(t.dms).toEqual([]);
+      expect(t.calls.filter((c) => c.startsWith("allow"))).toEqual([]);
+    });
+
+    test("a form opened from the panel is answered with a private deferred reply", async () => {
+      const t = await withOwners();
+      const submitted = await sendForm(t, { members: [FRIEND] });
+      expect(submitted.deferred).toBe(true);
+      expect(submitted.deferOptions).toEqual({ ephemeral: true });
+      expect(submitted.updates).toEqual([]);
     });
 
     test("a forged member list or file is refused before anything is sent", async () => {

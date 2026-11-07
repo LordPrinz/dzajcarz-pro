@@ -186,6 +186,8 @@ export interface FakeModalContext extends ModalBaseContext {
   readonly updates: Reply[];
   /** True after `defer()`, explicit or by `executeModal` when the handler said nothing. */
   deferred: boolean;
+  /** The options of the last defer() call. */
+  deferOptions?: { ephemeral?: boolean };
   /** Every `reply()`, in order. */
   readonly replies: Reply[];
 }
@@ -229,8 +231,9 @@ export function createFakeModalContext({
       checkComponents(reply);
       ctx.updates.push(reply);
     },
-    async defer() {
+    async defer(options) {
       ctx.deferred = true;
+      ctx.deferOptions = options;
     },
     async reply(reply) {
       checkComponents(reply);

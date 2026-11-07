@@ -45,7 +45,7 @@ export interface ModuleServices {
   partyChat: PartyChat;
   partyInvites: PartyInvites;
   scheduler: Scheduler;
-  partyLock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
+  partyLock: Pick<KeyValueStore, "get" | "setIfAbsent" | "delIfEquals" | "increment">;
   presence: Presence;
   clock: Clock;
   logger: Logger;

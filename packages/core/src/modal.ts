@@ -68,12 +68,16 @@ export interface ModalFile {
   size: number;
 }
 
-/** A single file upload. Discord does not filter by type or size in the client, so both are checked on submit. */
+/**
+ * A single file upload. The adapter hands `contentTypes` to Discord as the picker's file-type filter where it
+ * can (images, video, audio and listed extensions), but the payload is untrusted and Discord has no size
+ * limit per field, so type and size are checked again on submit.
+ */
 export interface FileFieldDef extends FieldBase {
   type: "file";
   /** Allowed MIME types: exact (`application/pdf`) or a family (`image/*`). Every type when omitted. */
   contentTypes?: readonly string[];
-  /** Largest file in bytes. No limit of its own when omitted (Discord's upload limit still applies). */
+  /** Largest file in bytes, a positive integer. No limit of its own when omitted (Discord's upload limit still applies). */
   maxBytes?: number;
 }
 
@@ -147,6 +151,10 @@ export interface ModalFieldSpec {
   maxValues?: number;
   channelTypes?: readonly ModalChannelKind[];
   options?: readonly ModalSelectOption[];
+  /** File upload only: allowed MIME types (exact or `family/*`). */
+  contentTypes?: readonly string[];
+  /** File upload only: largest file in bytes. */
+  maxBytes?: number;
 }
 
 /** What `ctx.showModal` takes. */
@@ -213,7 +221,7 @@ function validateField(field: ModalFieldSpec, at: string): void {
   } else if (field.type === "select") {
     validateSelectField(field, at);
   } else if (field.type === "file") {
-    // Nothing to check: the definition's own limits are enforced on submit.
+    validateFileField(field, at);
   } else {
     if (field.type === "user") validateValueCount(field, at);
     if (field.value !== undefined && !SNOWFLAKE.test(field.value)) {
@@ -223,6 +231,27 @@ function validateField(field: ModalFieldSpec, at: string): void {
       for (const kind of field.channelTypes ?? []) {
         if (!CHANNEL_KINDS.includes(kind)) throw new Error(`${at}: unknown channel type "${kind}"`);
       }
+    }
+  }
+}
+
+/** A MIME type (`application/pdf`) or a family (`image/*`): no spaces, no parameters. */
+const MIME_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]*)$/i;
+
+function validateFileField(field: ModalFieldSpec, at: string): void {
+  const { contentTypes, maxBytes } = field;
+  if (maxBytes !== undefined && (!Number.isInteger(maxBytes) || maxBytes <= 0)) {
+    throw new Error(`${at}: maxBytes must be a positive integer, got ${maxBytes}`);
+  }
+  if (contentTypes === undefined) return;
+  if (contentTypes.length === 0) {
+    throw new Error(
+      `${at}: contentTypes must list at least one type (omit it to allow every file)`,
+    );
+  }
+  for (const type of contentTypes) {
+    if (!MIME_PATTERN.test(type)) {
+      throw new Error(`${at}: "${type}" is not a content type like "application/pdf" or "image/*"`);
     }
   }
 }
@@ -467,10 +496,15 @@ export interface ModalContext<V = Record<string, string | undefined>>
     | "memberPermissions"
     | "state"
     | "acknowledged"
-    | "defer"
     | "reply"
     | "update"
   > {
+  /**
+   * Answers the submit with "thinking" so the handler has more than three seconds. On a modal opened from a
+   * message it keeps that message as it is when it is deferred or answered in place; with `ephemeral: true`
+   * it instead starts a private reply that only the submitter sees, and the message stays untouched.
+   */
+  defer(options?: { ephemeral?: boolean }): Promise<void>;
   /**
    * True when the modal was opened from a message component, so `update` can edit that message. False for a
    * modal opened by a slash command, where `update` throws.
@@ -538,6 +572,8 @@ export function defineModal<const F extends ModalFieldsDef>(
           maxValues: def.type === "user" ? def.maxValues : undefined,
           channelTypes: def.type === "channel" ? def.channelTypes : undefined,
           options: def.type === "select" ? def.options : undefined,
+          contentTypes: def.type === "file" ? def.contentTypes : undefined,
+          maxBytes: def.type === "file" ? def.maxBytes : undefined,
         })),
       };
       validateModal(spec);

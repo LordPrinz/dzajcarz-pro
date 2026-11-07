@@ -140,16 +140,66 @@ describe("party invites adapter", () => {
           guild: { name: "Ekipa" },
         }),
       },
-      users: { fetch: async () => ({ send }) },
+      users: {
+        fetch: async () => ({
+          send,
+          username: "ola_k",
+          displayAvatarURL: () => "https://cdn.discordapp.com/avatars/1/a.png",
+        }),
+      },
     } as unknown as Client;
   }
 
-  test("describe names the channel and the server", async () => {
+  test("describe names the channel, the server and the sender", async () => {
     const invites = createPartyInvites(clientWithUser(async () => {}));
-    expect(await invites.describe(CHANNEL)).toEqual({
+    expect(await invites.describe(CHANNEL, "5")).toEqual({
       channelName: "Kanał Ola",
       guildName: "Ekipa",
+      inviterUsername: "ola_k",
+      inviterAvatarUrl: "https://cdn.discordapp.com/avatars/1/a.png",
     });
+  });
+
+  test("sendDirect uploads the files and maps the author", async () => {
+    const sent: unknown[] = [];
+    const invites = createPartyInvites(clientWithUser(async (payload) => void sent.push(payload)));
+    await invites.sendDirect("5", {
+      embeds: [
+        {
+          author: { name: "Zaproszenie od Ola", iconUrl: "https://cdn.discordapp.com/a.png" },
+          footer: "stopka",
+          image: "attachment://mapa.png",
+        },
+      ],
+      files: [{ name: "mapa.png", data: new Uint8Array([1, 2]) }],
+    });
+    expect(sent[0]).toMatchObject({
+      embeds: [
+        {
+          author: { name: "Zaproszenie od Ola", icon_url: "https://cdn.discordapp.com/a.png" },
+          footer: { text: "stopka" },
+          image: { url: "attachment://mapa.png" },
+        },
+      ],
+      files: [{ attachment: Buffer.from([1, 2]), name: "mapa.png" }],
+    });
+  });
+
+  test("downloadFile goes through the Discord-only downloader", async () => {
+    const asked: string[] = [];
+    const fetchFile = (async (url: string) => {
+      asked.push(url);
+      return new Response(new Uint8Array([7]));
+    }) as unknown as typeof fetch;
+    const invites = createPartyInvites(
+      clientWithUser(async () => {}),
+      fetchFile,
+    );
+    expect(await invites.downloadFile("https://cdn.discordapp.com/a.png", 5)).toEqual(
+      new Uint8Array([7]),
+    );
+    expect(await invites.downloadFile("https://evil.example/a.png", 5)).toBeNull();
+    expect(asked).toEqual(["https://cdn.discordapp.com/a.png"]);
   });
 
   test("sendDirect sends the embed and link button without mentions", async () => {

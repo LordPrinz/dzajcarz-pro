@@ -86,14 +86,20 @@ Forms use the same model and the same routing.
   invalid-value reply; the handler's `ctx.values` is typed as the union of the option values), text length after trimming (every text value is trimmed once, so the limits
   and the handler see the same text), that select values are snowflakes, that a multi-user select has between `minValues` and `maxValues` distinct
   ids, and that a file is an https attachment of an allowed type (parameters after `;` ignored, case ignored; a
-  missing type fails a type restriction) within `maxBytes`. Discord enforces neither in the client, so both are
-  checked on every submit. A problem is an ephemeral
+  missing type fails a type restriction) within `maxBytes`. The adapter also sends `contentTypes` as the picker's
+  `file_types` filter where Discord has an equivalent (`image/*` becomes `image`, `video/*` `video`, `audio/*`
+  `audio`, `application/pdf` `.pdf`; a list with any other entry sends no filter, because the filter would be
+  stricter than the field). Discord has no size limit per field and the payload is untrusted, so type and size
+  are checked on every submit regardless. A field definition is validated at startup: `maxBytes` a positive integer,
+  `contentTypes` non-empty with well-formed `type/subtype` or `family/*` entries. A problem is an ephemeral
   Polish reply ("Pole „Temat” jest wymagane.", "Pole „Kanał” ma nieprawidłową wartość.") and the handler
   does not run. Otherwise `ctx.values` has one entry per field: a string, or `undefined` for a field with
   `required: false` left empty. Channel and user fields hold the id. The handler gets an explicit context
   (identity, `state`, `values`, `canUpdate`, `reply`, `defer`, `update`, `acknowledged`), safe to spread.
   `update` edits the message of a button or select that opened the modal; `ctx.canUpdate` tells whether
   that is the case, and `update` throws when it is not (a modal opened from a slash command).
+  `defer({ ephemeral: true })` starts a private "thinking" reply even for a modal opened from a message, so a
+  long handler can show progress and answer with `reply` while the clicked message stays as it is.
   A submit the handler left unanswered is closed like a click when the modal came from a message
   (`deferUpdate`, the message stays as it is); otherwise there is no message to edit, so the bot answers
   with the ephemeral "Gotowe." (no mentions) instead of leaving a "thinking" state.

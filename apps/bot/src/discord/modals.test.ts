@@ -156,7 +156,8 @@ describe("multi-user select and file upload", () => {
     const inner = payload.components.map((c) => ("component" in c ? c.component : null));
     expect(inner[0]).toMatchObject({
       type: ComponentType.UserSelect,
-      min_values: 1,
+      // The field is optional, so the client may leave it empty even though minValues is 1.
+      min_values: 0,
       max_values: 10,
     });
     expect(inner[1]).toMatchObject({
@@ -166,6 +167,52 @@ describe("multi-user select and file upload", () => {
       min_values: 0,
       max_values: 1,
     });
+  });
+
+  test("the file filter follows contentTypes where Discord has an equivalent", () => {
+    const fileTypes = (contentTypes?: string[]) => {
+      const m = defineModal({
+        module: "fun",
+        name: "ft",
+        title: "t",
+        fields: { f: { type: "file", label: "Plik", contentTypes } },
+        async run() {},
+      });
+      const field = toModalPayload(m.build("1")).components[0];
+      return field && "component" in field && "file_types" in field.component
+        ? field.component.file_types
+        : "missing";
+    };
+    expect(fileTypes(["image/*", "video/*", "application/pdf"])).toEqual([
+      "image",
+      "video",
+      ".pdf",
+    ]);
+    expect(fileTypes(["IMAGE/*"])).toEqual(["image"]);
+    // A type with no equivalent would make the picker stricter than the field: no filter at all.
+    expect(fileTypes(["image/*", "application/zip"])).toBeUndefined();
+    expect(fileTypes(["image/png"])).toBeUndefined();
+    expect(fileTypes(undefined)).toBeUndefined();
+  });
+
+  test("an optional user select always allows an empty pick, a required one asks for at least one", () => {
+    const users = (required: boolean, minValues?: number) => {
+      const m = defineModal({
+        module: "fun",
+        name: "us",
+        title: "t",
+        fields: { u: { type: "user", label: "Kto", required, minValues, maxValues: 5 } },
+        async run() {},
+      });
+      const field = toModalPayload(m.build("1")).components[0];
+      return field && "component" in field && "min_values" in field.component
+        ? field.component.min_values
+        : "missing";
+    };
+    expect(users(false)).toBe(0);
+    expect(users(false, 2)).toBe(0);
+    expect(users(true)).toBe(1);
+    expect(users(true, 3)).toBe(3);
   });
 
   test("a required upload asks for one file", () => {
@@ -302,6 +349,15 @@ describe("contextFromModal", () => {
     expect(fromSlash.calls.map((c) => c.method)).toEqual(["deferReply"]);
     expect(b.canUpdate).toBe(false);
     await expect(b.update({ content: "x" })).rejects.toThrow("message component");
+  });
+
+  test("an ephemeral defer on a modal from a message starts a private reply and leaves the message", async () => {
+    const fromMessage = submit({}, true);
+    const ctx = contextFromModal(fromMessage.interaction, "");
+    await ctx.defer({ ephemeral: true });
+    await ctx.reply({ content: "gotowe" });
+    expect(fromMessage.calls.map((c) => c.method)).toEqual(["deferReply", "followUp"]);
+    expect(fromMessage.calls[0]?.payload).toMatchObject({ flags: 64 });
   });
 });
 

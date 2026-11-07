@@ -12,6 +12,7 @@ import {
   PermissionFlagsBits,
   RESTJSONErrorCodes,
 } from "discord.js";
+import { downloadDiscordFile } from "./download.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 const UNKNOWN_CHANNEL = RESTJSONErrorCodes.UnknownChannel;
@@ -272,20 +273,28 @@ export function createPartyPermissions(client: Client): PartyPermissions {
   };
 }
 
-export function createPartyInvites(client: Client): PartyInvites {
+export function createPartyInvites(client: Client, fetchFile: typeof fetch = fetch): PartyInvites {
   return {
-    async describe(channelId) {
+    async describe(channelId, inviterId) {
       const channel = await client.channels.fetch(channelId);
       if (channel?.type !== ChannelType.GuildVoice)
         throw new Error(`Not a voice channel: ${channelId}`);
-      return { channelName: channel.name, guildName: channel.guild.name };
+      const inviter = await client.users.fetch(inviterId);
+      return {
+        channelName: channel.name,
+        guildName: channel.guild.name,
+        inviterUsername: inviter.username,
+        inviterAvatarUrl: inviter.displayAvatarURL({ extension: "png", size: 128 }),
+      };
     },
 
+    downloadFile: (url, maxBytes) => downloadDiscordFile(url, maxBytes, fetchFile),
+
     async sendDirect(userId, message) {
-      const { content, embeds, components } = toReplyPayload(message);
+      const { content, embeds, files, components } = toReplyPayload(message);
       try {
         const user = await client.users.fetch(userId);
-        await user.send({ content, embeds, components, allowedMentions: NO_MENTIONS });
+        await user.send({ content, embeds, files, components, allowedMentions: NO_MENTIONS });
         return true;
       } catch (error) {
         if (hasCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
