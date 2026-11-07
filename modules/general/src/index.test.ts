@@ -143,6 +143,36 @@ describe("general module", () => {
     ]);
   });
 
+  test("help shows prefix-only options in the prefix form only", async () => {
+    const only: BotModule = {
+      name: "only",
+      commands: [
+        defineCommand({
+          name: "greet",
+          description: "Powitanie",
+          subcommands: {
+            set: defineSubcommand({
+              description: "Ustawia",
+              options: {
+                text: { type: "string", description: "Tekst", required: true, prefixOnly: true },
+                tag: { type: "string", description: "Znacznik" },
+              },
+              run: async () => {},
+            }),
+          },
+        }),
+      ],
+    };
+    const registry = registryWith({ prefixFor: async () => "?" }, only);
+    const help = registry.find("help");
+    if (!help) throw new Error("no help command");
+    const ctx = createFakeContext({ args: { command: "greet" } });
+    await executeCommand(help, ctx, silentLogger);
+    expect(embed(ctx.replies[0])?.fields?.[0]?.value).toStartWith(
+      "`/greet set [tag]` · `?greet set <text> [tag]`",
+    );
+  });
+
   test("a command with many long subcommands stays within the embed field limits", () => {
     const summary = (count: number): Parameters<typeof describeCommand>[0] => ({
       name: "big",
@@ -150,12 +180,14 @@ describe("general module", () => {
       aliases: ["b"],
       module: "x",
       usage: "big",
+      slashUsage: "big",
       permissions: undefined,
       contexts: { places: ["guild"], installs: ["guild"] },
       subcommands: Array.from({ length: count }, (_, i) => ({
         name: `sub${i}`,
         description: "d".repeat(100),
         usage: `big sub${i} <${"a".repeat(60)}>`,
+        slashUsage: `big sub${i} <${"a".repeat(60)}>`,
         permissions: undefined,
       })),
     });

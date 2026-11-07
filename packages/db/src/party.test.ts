@@ -76,6 +76,31 @@ describe.skipIf(!sql)("party repository", () => {
     expect(await repo().findAreaByJoinChannel("401")).toEqual(stored);
   });
 
+  test("an area can be created with a template and updated", async () => {
+    await repo().addArea({ ...area, nameTemplate: "🔥 {user}", commandChannel: true });
+    expect(await repo().findAreaByJoinChannel("401")).toMatchObject({
+      nameTemplate: "🔥 {user}",
+      commandChannel: true,
+    });
+    expect(
+      await repo().updateArea("401", { nameTemplate: "{user} chill", commandChannel: false }),
+    ).toBe(true);
+    expect(await repo().findAreaByJoinChannel("401")).toMatchObject({
+      nameTemplate: "{user} chill",
+      commandChannel: false,
+    });
+    expect(
+      await repo().updateArea("999", { nameTemplate: "x {user}", commandChannel: false }),
+    ).toBe(false);
+  });
+
+  test("a row written without the form columns gets the defaults", async () => {
+    await (sql as SQL)`
+      INSERT INTO party_area (join_channel_id, guild_id, category_id) VALUES ('401', ${guildId}, '301')
+    `;
+    expect(await repo().findAreaByJoinChannel("401")).toEqual(stored);
+  });
+
   test("a category holds only one area", async () => {
     await repo().addArea(area);
     await expect(repo().addArea({ ...area, joinChannelId: "402" })).rejects.toThrow();

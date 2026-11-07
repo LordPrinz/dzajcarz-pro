@@ -74,7 +74,9 @@ export function toSlashCommand(
 }
 
 function toOptions(options: OptionsDef = {}) {
-  return Object.entries(options).map(([name, option]) => toOption(name, option));
+  return Object.entries(options)
+    .filter(([, option]) => !option.prefixOnly)
+    .map(([name, option]) => toOption(name, option));
 }
 
 function toOption(name: string, option: OptionDef): OptionJSON {

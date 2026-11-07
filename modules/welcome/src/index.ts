@@ -2,6 +2,7 @@ import {
   type BotModule,
   defineCommand,
   defineEvent,
+  defineModal,
   defineSubcommand,
   type Logger,
   UserError,
@@ -53,6 +54,20 @@ export interface WelcomeModuleDeps {
   logger: Logger;
 }
 
+/** Discord caps a message at 2000 characters; the fences and a margin leave room for the text. */
+const CHUNK_SIZE = 1900;
+
+/** The text as ephemeral-sized code blocks; a run of backticks gets a zero-width space so it cannot close one. */
+function codeBlocks(text: string): string[] {
+  const safe = text.replaceAll("`", "`\u200b");
+  const characters = [...safe];
+  const blocks: string[] = [];
+  for (let start = 0; start < characters.length; start += CHUNK_SIZE) {
+    blocks.push(`\`\`\`\n${characters.slice(start, start + CHUNK_SIZE).join("")}\n\`\`\``);
+  }
+  return blocks;
+}
+
 /** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
 const MANAGE_GUILD = 1n << 5n;
 
@@ -68,6 +83,57 @@ export function createWelcomeModule({
     return guildId;
   };
 
+  const tooLong = `Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`;
+
+  /** Shared by the prefix form and the modal, so both refuse the same input. */
+  async function saveWelcome(guildId: string, channelId: string, message: string): Promise<string> {
+    const template = message.trim();
+    if (template.length === 0) throw new UserError("Treść powitania nie może być pusta.");
+    if ([...template].length > MAX_MESSAGE_LENGTH) {
+      throw new UserError(tooLong);
+    }
+    if (!(await channels.isTextChannelOf(guildId, channelId))) {
+      throw new UserError("Wybierz kanał tekstowy z tego serwera.");
+    }
+    await store.set(guildId, { channelId, template });
+    return `Nowi członkowie będą witani na <#${channelId}>. Sprawdź wygląd przez \`welcome test\`.`;
+  }
+
+  const setForm = defineModal({
+    module: "welcome",
+    name: "set",
+    title: "Powitanie nowych członków",
+    permissions: MANAGE_GUILD,
+    fields: {
+      channel: {
+        type: "channel",
+        label: "Kanał",
+        description: "Tu pojawi się powitanie.",
+        channelTypes: ["text", "announcement"],
+      },
+      message: {
+        type: "paragraph",
+        label: "Treść powitania",
+        description: `Zmienne: {user}, {username}, {server}, {memberCount}. Do ${MAX_MESSAGE_LENGTH} znaków.`,
+        // Left optional so an empty answer gets the same wording as the prefix form.
+        required: false,
+        placeholder: "Witaj {user} na {server}! Jesteś {memberCount}. osobą.",
+      },
+    },
+    run: async (ctx) => {
+      const message = ctx.values.message ?? "";
+      if ([...message.trim()].length > MAX_MESSAGE_LENGTH) {
+        // The member typed all of it in a form that is now gone: hand the text back so it can be pasted again.
+        await ctx.reply({ content: tooLong, ephemeral: true });
+        for (const chunk of codeBlocks(message))
+          await ctx.reply({ content: chunk, ephemeral: true });
+        return;
+      }
+      const content = await saveWelcome(guildOf(ctx.guildId), ctx.values.channel, message);
+      await ctx.reply({ content, ephemeral: true });
+    },
+  });
+
   const welcome = defineCommand({
     name: "welcome",
     description: "Wiadomość powitalna dla nowych członków serwera",
@@ -76,29 +142,45 @@ export function createWelcomeModule({
       set: defineSubcommand({
         description: "Ustawia kanał i treść powitania",
         options: {
-          channel: { type: "channel", description: "Kanał z powitaniami", required: true },
+          channel: {
+            type: "channel",
+            description: "Kanał z powitaniami",
+            required: true,
+            prefixOnly: true,
+          },
           message: {
             type: "string",
             description: "Treść: {user}, {username}, {server}, {memberCount}",
             required: true,
             rest: true,
+            prefixOnly: true,
           },
         },
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
-          const template = ctx.args.message.trim();
-          if (template.length === 0) throw new UserError("Treść powitania nie może być pusta.");
-          if ([...template].length > MAX_MESSAGE_LENGTH) {
-            throw new UserError(`Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`);
+          if (ctx.canShowModal) {
+            // showModal has to be the first answer, so only what is needed to prefill is looked up.
+            const current = await store.get(guildId);
+            // A channel that was deleted or turned into a voice channel would only be refused on submit.
+            const channel =
+              current && (await channels.isTextChannelOf(guildId, current.channelId))
+                ? current.channelId
+                : undefined;
+            await ctx.showModal(
+              setForm.build(
+                ctx.user.id,
+                undefined,
+                current ? { channel, message: current.template } : undefined,
+              ),
+            );
+            return;
           }
-          if (!(await channels.isTextChannelOf(guildId, ctx.args.channel))) {
-            throw new UserError("Wybierz kanał tekstowy z tego serwera.");
+          const { channel, message } = ctx.args;
+          if (channel === undefined || message === undefined) {
+            throw new UserError("Podaj kanał i treść: `welcome set <channel> <message...>`.");
           }
-          await store.set(guildId, { channelId: ctx.args.channel, template });
-          await ctx.reply({
-            content: `Nowi członkowie będą witani na <#${ctx.args.channel}>. Sprawdź wygląd przez \`welcome test\`.`,
-            ephemeral: true,
-          });
+          const content = await saveWelcome(guildId, channel, message);
+          await ctx.reply({ content, ephemeral: true });
         },
       }),
       off: defineSubcommand({
@@ -169,5 +251,5 @@ export function createWelcomeModule({
     }
   }
 
-  return { name: "welcome", commands: [welcome], events: [greet] };
+  return { name: "welcome", commands: [welcome], events: [greet], modals: [setForm] };
 }
