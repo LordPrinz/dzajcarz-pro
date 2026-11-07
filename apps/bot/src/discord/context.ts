@@ -6,6 +6,7 @@ import {
   type Message,
   MessageFlags,
 } from "discord.js";
+import { toModalPayload } from "./modals.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 /** Reads the options a command declared from a slash interaction. */
@@ -76,6 +77,10 @@ export function contextFromInteraction(interaction: ChatInputCommandInteraction)
         });
       }
     },
+    canShowModal: true,
+    async showModal(modal) {
+      await interaction.showModal(toModalPayload(modal));
+    },
   };
 }
 
@@ -103,6 +108,10 @@ export function contextFromMessage(
     },
     async defer() {
       if (channel.isSendable()) await channel.sendTyping();
+    },
+    canShowModal: false,
+    async showModal() {
+      throw new Error("A prefix command cannot open a modal; check ctx.canShowModal");
     },
   };
 }

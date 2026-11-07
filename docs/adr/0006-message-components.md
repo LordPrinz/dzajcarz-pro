@@ -49,11 +49,51 @@ the channel click a button on someone else's message.
 - Testing: `createFakeComponentContext` calls a handler directly; `clickComponent({ registry, customId })`
   plays a click through lookup, ownership, permissions and the error policy.
 
+### Modals
+
+Forms use the same model and the same routing.
+
+- `defineModal({ module, name, title, fields, permissions?, guildOnly?, run(ctx) })` declares one; the
+  modal goes to `BotModule.modals`. `fields` is a record (key = field id, order = order on screen) of
+  1 to 5 entries: `short` and `paragraph` text inputs (`label`, `description`, `placeholder`, `required`,
+  `minLength`, `maxLength`, `defaultValue`), a `channel` select (`channelTypes` filter: `text`, `voice`,
+  `announcement`, `category`, `stage`, `forum`) and a `user` select. Selects take one value. The adapter
+  (`apps/bot/src/discord/modals.ts`) wraps each field in a Discord Label component, which the installed
+  discord.js 14.27 and discord-api-types support for text inputs, channel selects and user selects. Role,
+  mentionable and string selects, file uploads, checkboxes and radio groups are not modelled yet.
+- Opening: `ctx.showModal(modal.build(owner, data?, defaults?))` on slash command contexts and on component
+  contexts. `build` returns a plain `ModalSpec`; `defaults` replaces `defaultValue` for one opening, `data`
+  comes back as `ctx.state`. A prefix message has no interaction to answer with a modal, so
+  `ctx.canShowModal` is false there and `showModal` throws a clear error; the command keeps its argument
+  form and checks `canShowModal` to choose. The modal is the first answer to the interaction.
+- Routing: the modal's `custom_id` is `<module>:<modal>:<owner>:<data>`, resolved with
+  `registry.resolveModal`. `executeModal` applies the same gates as `executeComponent` (owner, `guildOnly`,
+  `permissions`, error policy) with modal wording ("To nie Twój formularz."), and `apps/bot` checks the
+  module toggle first, skipping it in a guild the bot is not in. Modals and components live in separate
+  namespaces, so a button and a modal may share a name.
+- Values: `executeModal` validates the submit against the definition (Discord checks in the client, but
+  the payload is untrusted): required fields, text length, and that select values are snowflakes. A problem
+  is an ephemeral Polish reply ("Pole „Temat” jest wymagane.") and the handler does not run. Otherwise
+  `ctx.values` has one entry per field: a string, or `undefined` for a field with `required: false` left
+  empty. Channel and user fields hold the id. The channel type filter is enforced by Discord only.
+  The handler context also has `reply`, `defer`, `update` and `acknowledged`; `update` edits the message of a
+  button or select that opened the modal and throws for a modal opened from a slash command.
+  An unanswered submit is deferred like a click.
+- Startup checks: the registry builds every modal once with a worst-case owner id and rejects more than
+  5 fields, a title over 45, a label over 45, a description or placeholder over 100, text over 4000 or
+  inconsistent `minLength` / `maxLength`, a `custom_id` over 100 characters, and the same name rules as
+  components.
+- Testing: `ctx.modals` on the fake command and component contexts captures what was opened (and runs the
+  Discord limit checks); `submitModal({ registry, customId, values })` from `@dzajcarz/core/testing` plays
+  a submit through lookup, owner, permissions, validation and the error policy. `values` is what the user
+  gave: text for inputs, an array of ids for selects.
+
 ## Consequences
 
 - Modules stay free of discord.js at runtime and component handlers are tested with fakes.
-- Only string selects and buttons exist; user/role/channel selects, modals and the components v2 layout
-  are added to the model when a module needs them.
+- Message components are buttons and string selects; role, mentionable, user and channel selects in
+  messages and the components v2 layout are added to the model when a module needs them. Modals offer text
+  inputs and user/channel selects (see above).
 - Components never expire on their own. A stale click either finds expired state (the message above) or
   a handler that was removed (an ephemeral "outdated" message and a warning in the log).
 - State in a `custom_id` is visible to anyone who can read the message's JSON: keep secrets out of it.

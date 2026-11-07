@@ -97,6 +97,11 @@ interaction responses only.
    `defineSelect` and list them in `BotModule.components`. For paging use `createPaginator`; for state
    that does not fit into 100 characters use `createComponentStateStore`. Test clicks with
    `clickComponent({ registry, customId })` from `@dzajcarz/core/testing`.
+8. Modals (optional, ADR 6): declare a form with `defineModal` (text, channel and user fields), list it in
+   `BotModule.modals` and open it with `ctx.showModal(modal.build(ctx.user.id, state))` from a slash command
+   or a component handler. Prefix commands cannot open one: check `ctx.canShowModal` and keep an argument
+   form. Test with `ctx.modals` and `submitModal({ registry, customId, values })` from
+   `@dzajcarz/core/testing`.
 
 ## Git hooks (Husky)
 

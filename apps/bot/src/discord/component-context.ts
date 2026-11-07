@@ -1,6 +1,7 @@
 import type { ComponentContext, ResolvedComponent } from "@dzajcarz/core";
 import { type ButtonInteraction, MessageFlags, type StringSelectMenuInteraction } from "discord.js";
 import { placeOf } from "./context.ts";
+import { toModalPayload } from "./modals.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 /** A click on a button or a choice in a select menu, as a module handler sees it. */
@@ -61,6 +62,11 @@ export function contextFromComponent(
       } else {
         await interaction.followUp({ ...payload, flags });
       }
+    },
+    async showModal(modal) {
+      await interaction.showModal(toModalPayload(modal));
+      // The modal is the answer; nothing may defer or update the click afterwards.
+      answer = "reply";
     },
   };
 }

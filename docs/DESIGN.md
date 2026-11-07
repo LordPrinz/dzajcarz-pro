@@ -66,6 +66,15 @@ core but not wired into the composition root: the first module that needs it cre
 store key. A click that the handler leaves unanswered is acknowledged automatically. Slash and prefix
 replies work alike. See ADR 6.
 
+### Modals
+
+`defineModal` describes a form (up to 5 text, channel or user fields) as plain data; the module opens it
+with `ctx.showModal(modal.build(ctx.user.id, data))` from a slash command or a button/select handler and
+gets typed `ctx.values` in `run`. The submit is routed like a click (`<module>:<modal>:<owner>:<data>`,
+owner, permissions and module toggle checks), invalid input is answered with an ephemeral Polish message.
+Prefix commands cannot open modals: `ctx.canShowModal` is false and the argument form stays. Limits are
+checked at startup by the registry. See ADR 6.
+
 ### Private commands
 
 A command's `contexts` say where it runs (`guild`, `bot-dm`, `private-channel`) and for which install

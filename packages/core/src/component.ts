@@ -8,6 +8,7 @@
  */
 import type { CommandContext, Reply } from "./command.ts";
 import { STATE_KEY_LENGTH } from "./component-state.ts";
+import type { ModalSpec } from "./modal.ts";
 
 export type ButtonStyle = "primary" | "secondary" | "success" | "danger";
 
@@ -178,6 +179,8 @@ export interface ComponentContext
   defer(): Promise<void>;
   /** A new message; ephemeral unless the reply says `ephemeral: false`. */
   reply(reply: Reply): Promise<void>;
+  /** Opens a modal as the answer to the click (always available). Must be the first answer. */
+  showModal(modal: ModalSpec): Promise<void>;
 }
 
 export type ComponentKind = "button" | "select";
@@ -199,22 +202,25 @@ export interface AnyComponent extends ComponentDefinition {
   customId(owner: string, data?: string): string;
 }
 
+/** `<module>:<name>:<owner>:<data>`; throws when it cannot fit Discord's 100 characters. */
+export function makeCustomId(module: string, name: string, owner: string, data = ""): string {
+  if (owner === "" || owner.includes(":")) {
+    throw new Error(`"${name}": owner must be a non-empty id without ":"`);
+  }
+  const id = `${module}:${name}:${owner}:${data}`;
+  if (id.length > MAX_CUSTOM_ID) {
+    throw new Error(
+      `custom_id of "${name}" is ${id.length} characters (max ${MAX_CUSTOM_ID}); keep the state in a ComponentStateStore`,
+    );
+  }
+  return id;
+}
+
 function build(kind: ComponentKind, definition: ComponentDefinition): AnyComponent {
   return {
     ...definition,
     kind,
-    customId(owner, data = "") {
-      if (owner === "" || owner.includes(":")) {
-        throw new Error(`Component "${definition.name}": owner must be a non-empty id without ":"`);
-      }
-      const id = `${definition.module}:${definition.name}:${owner}:${data}`;
-      if (id.length > MAX_CUSTOM_ID) {
-        throw new Error(
-          `custom_id of "${definition.name}" is ${id.length} characters (max ${MAX_CUSTOM_ID}); keep the state in a ComponentStateStore`,
-        );
-      }
-      return id;
-    },
+    customId: (owner, data) => makeCustomId(definition.module, definition.name, owner, data),
   };
 }
 

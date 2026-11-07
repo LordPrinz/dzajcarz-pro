@@ -1,9 +1,10 @@
-import { type AnyCommand, type CommandContext, DEFAULT_CONTEXTS } from "./command.ts";
+import { type AnyCommand, type CommandContext, DEFAULT_CONTEXTS, type Reply } from "./command.ts";
 import type { ComponentContext } from "./component.ts";
 import { UserError } from "./errors.ts";
 import type { Logger } from "./logger.ts";
+import { type ModalBaseContext, type ModalRawValues, parseModalValues } from "./modal.ts";
 import { splitInvocation, usage } from "./prefix.ts";
-import type { ResolvedComponent } from "./registry.ts";
+import type { ResolvedComponent, ResolvedModal } from "./registry.ts";
 
 type AccessContext = Pick<CommandContext, "guildId" | "place" | "memberPermissions">;
 
@@ -61,11 +62,59 @@ export const MENU_NO_PERMISSION = "Nie masz uprawnień do tego menu.";
 export const NOT_YOUR_MENU = "To nie Twoje menu.";
 export const UNKNOWN_COMPONENT = "To menu jest nieaktualne. Wywołaj komendę jeszcze raz.";
 
+interface GatedContext extends Pick<CommandContext, "user" | "guildId" | "memberPermissions"> {
+  readonly acknowledged: boolean;
+  defer(): Promise<void>;
+  reply(reply: Reply): Promise<void>;
+}
+
+interface GateMessages {
+  notOwner: string;
+  guildOnly: string;
+  permissions: string;
+  /** Log line for a failure that is not the user's fault. */
+  failed: string;
+}
+
 /**
- * Runs a component handler after the checks every click shares: only the member the component was made
- * for may use it, then the component's own guild/permission rules. Errors follow the command policy
- * (UserError shown, anything else logged), always as an ephemeral reply.
+ * The checks and error policy of anything a member opens from a message (a click, a modal submit): only the
+ * member it was made for may use it, then its own guild/permission rules. A UserError is shown, anything else
+ * is logged and replaced by a generic message, always as an ephemeral reply.
  */
+async function runGated(
+  target: { guildOnly?: boolean; permissions?: bigint },
+  owner: string,
+  ctx: GatedContext,
+  messages: GateMessages,
+  log: Logger,
+  run: () => Promise<void>,
+): Promise<void> {
+  try {
+    if (ctx.user.id !== owner) throw new UserError(messages.notOwner);
+    const denied = checkAccess(target, ctx, messages);
+    if (denied) throw new UserError(denied);
+    await run();
+    // Discord shows "interaction failed" after 3 seconds without an answer.
+    if (!ctx.acknowledged) await ctx.defer();
+  } catch (error) {
+    const userFacing = error instanceof UserError;
+    if (!userFacing) log.error(messages.failed, { error });
+    try {
+      await ctx.reply({ content: userFacing ? error.message : GENERIC_ERROR, ephemeral: true });
+    } catch (replyError) {
+      log.warn("Could not report an error to the user", { error: replyError });
+    }
+  }
+}
+
+const COMPONENT_MESSAGES: GateMessages = {
+  notOwner: NOT_YOUR_MENU,
+  guildOnly: MENU_GUILD_ONLY,
+  permissions: MENU_NO_PERMISSION,
+  failed: "Component failed",
+};
+
+/** Runs a component handler after the checks every click shares (see `runGated`). */
 export async function executeComponent(
   { component, owner }: ResolvedComponent,
   ctx: ComponentContext,
@@ -76,25 +125,42 @@ export async function executeComponent(
     guildId: ctx.guildId,
     userId: ctx.user.id,
   });
-  try {
-    if (ctx.user.id !== owner) throw new UserError(NOT_YOUR_MENU);
-    const denied = checkAccess(component, ctx, {
-      guildOnly: MENU_GUILD_ONLY,
-      permissions: MENU_NO_PERMISSION,
-    });
-    if (denied) throw new UserError(denied);
-    await component.run(ctx);
-    // Discord shows "interaction failed" after 3 seconds without an answer.
-    if (!ctx.acknowledged) await ctx.defer();
-  } catch (error) {
-    const userFacing = error instanceof UserError;
-    if (!userFacing) log.error("Component failed", { error });
-    try {
-      await ctx.reply({ content: userFacing ? error.message : GENERIC_ERROR, ephemeral: true });
-    } catch (replyError) {
-      log.warn("Could not report a component error to the user", { error: replyError });
-    }
-  }
+  await runGated(component, owner, ctx, COMPONENT_MESSAGES, log, () => component.run(ctx));
+}
+
+export const MODAL_GUILD_ONLY = "Ten formularz działa tylko na serwerze.";
+export const MODAL_NO_PERMISSION = "Nie masz uprawnień do tego formularza.";
+export const NOT_YOUR_MODAL = "To nie Twój formularz.";
+export const UNKNOWN_MODAL = "Ten formularz jest nieaktualny. Wywołaj komendę jeszcze raz.";
+
+const MODAL_MESSAGES: GateMessages = {
+  notOwner: NOT_YOUR_MODAL,
+  guildOnly: MODAL_GUILD_ONLY,
+  permissions: MODAL_NO_PERMISSION,
+  failed: "Modal failed",
+};
+
+/**
+ * Runs a modal handler after a submit: the owner and permission checks of a click, then the answers are
+ * validated against the modal's fields (a problem is answered with an ephemeral Polish message) and the
+ * handler gets them as `ctx.values`.
+ */
+export async function executeModal(
+  { modal, owner }: ResolvedModal,
+  ctx: ModalBaseContext,
+  raw: ModalRawValues,
+  logger: Logger,
+): Promise<void> {
+  const log = logger.child({
+    modal: `${modal.module}:${modal.name}`,
+    guildId: ctx.guildId,
+    userId: ctx.user.id,
+  });
+  await runGated(modal, owner, ctx, MODAL_MESSAGES, log, async () => {
+    const values = parseModalValues(modal.fields, raw);
+    // Prototype delegation keeps the live getters (`acknowledged`) of the adapter's context.
+    await modal.run(Object.create(ctx, { values: { value: values, enumerable: true } }));
+  });
 }
 
 /**

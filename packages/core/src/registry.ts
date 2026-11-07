@@ -13,6 +13,7 @@ import {
   MAX_SELECT_OPTIONS,
   parseCustomId,
 } from "./component.ts";
+import { type AnyModal, validateModal } from "./modal.ts";
 import type { AnyEventHandler, BotModule } from "./module.ts";
 import { usageLine } from "./prefix.ts";
 
@@ -61,6 +62,17 @@ export interface ResolvedComponent {
   state: string;
 }
 
+/** A modal submit matched to the modal that handles it. */
+export interface ResolvedModal {
+  modal: AnyModal;
+  /** Name of the module that owns the modal. */
+  module: string;
+  /** Id of the member the modal was opened for. */
+  owner: string;
+  /** The `<data>` part of the custom_id. */
+  state: string;
+}
+
 export interface CommandRegistry {
   /** Looks up a command by name or prefix alias. */
   find(name: string): AnyCommand | undefined;
@@ -68,6 +80,8 @@ export interface CommandRegistry {
   events(): readonly RegisteredEvent[];
   /** Matches a `custom_id` (`<module>:<component>:<owner>:<data>`) to its handler; undefined if unknown. */
   resolveComponent(customId: string): ResolvedComponent | undefined;
+  /** Matches the `custom_id` of a modal submit to its handler; undefined if unknown. */
+  resolveModal(customId: string): ResolvedModal | undefined;
   /** Name of the module that registered the command (a value returned by `find` or `commands`). */
   moduleOf(command: AnyCommand): string | undefined;
   /** What `/help` shows. */
@@ -87,6 +101,7 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
   const summaries: CommandSummary[] = [];
   const moduleNames = new Set<string>();
   const componentsById = new Map<string, AnyComponent>();
+  const modalsById = new Map<string, AnyModal>();
 
   // The help menu lists the modules in one select menu.
   if (modules.length > MAX_SELECT_OPTIONS) {
@@ -135,6 +150,12 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
       if (componentsById.has(id)) throw new Error(`Component "${id}" is registered twice`);
       componentsById.set(id, component);
     }
+    for (const modal of module.modals ?? []) {
+      validateModalDefinition(modal, module.name);
+      const id = `${module.name}:${modal.name}`;
+      if (modalsById.has(id)) throw new Error(`Modal "${id}" is registered twice`);
+      modalsById.set(id, modal);
+    }
     for (const handler of module.events ?? []) events.push({ module: module.name, handler });
   }
 
@@ -149,12 +170,28 @@ export function createRegistry(modules: readonly BotModule[]): CommandRegistry {
       if (!parsed || !component) return undefined;
       return { component, module: parsed.module, owner: parsed.owner, state: parsed.data };
     },
+    resolveModal(customId) {
+      const parsed = parseCustomId(customId);
+      const modal = parsed && modalsById.get(`${parsed.module}:${parsed.name}`);
+      if (!parsed || !modal) return undefined;
+      return { modal, module: parsed.module, owner: parsed.owner, state: parsed.data };
+    },
     moduleOf: (command) => owners.get(command),
   };
 }
 
-function validateComponent(component: AnyComponent, module: string): void {
-  const where = `component "${component.name}" (module "${module}")`;
+function validateModalDefinition(modal: AnyModal, module: string): void {
+  validateComponent(modal, module, "modal");
+  // Building checks the title, every field and a worst-case custom_id (20-digit owner id, no data).
+  validateModal(modal.build("9".repeat(20)));
+}
+
+function validateComponent(
+  component: { name: string; module: string },
+  module: string,
+  kind = "component",
+): void {
+  const where = `${kind} "${component.name}" (module "${module}")`;
   if (component.module !== module) {
     throw new Error(`${where} says it belongs to module "${component.module}"`);
   }

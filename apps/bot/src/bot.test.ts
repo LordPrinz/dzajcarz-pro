@@ -5,14 +5,17 @@ import {
   defineButton,
   defineCommand,
   defineEvent,
+  defineModal,
   silentLogger,
+  UNKNOWN_MODAL,
 } from "@dzajcarz/core";
-import type { ButtonInteraction, Client, Message } from "discord.js";
+import type { ButtonInteraction, Client, Message, ModalSubmitInteraction } from "discord.js";
 import {
   attachHandlers,
   createEventListener,
   handleComponent,
   handleMessage,
+  handleModal,
   matchInvocation,
 } from "./bot.ts";
 import type { ModuleGate } from "./module-gate.ts";
@@ -346,6 +349,7 @@ describe("slash commands in a guild the bot is not in", () => {
     const interaction = {
       id: "1",
       isMessageComponent: () => false,
+      isModalSubmit: () => false,
       isChatInputCommand: () => true,
       commandName: "ping",
       options: { data: [], getSubcommand: () => null },
@@ -373,5 +377,100 @@ describe("slash commands in a guild the bot is not in", () => {
     expect(result.ran).toEqual([]);
     expect(result.gateReads).toBe(1);
     expect(result.replies).toHaveLength(1);
+  });
+});
+
+describe("modals in routing", () => {
+  const GUILD = "100000000000000001";
+  const OWNER = "200000000000000002";
+
+  function setup(disabled: string[]) {
+    const ran: string[] = [];
+    const form = defineModal({
+      module: "fun",
+      name: "form",
+      title: "Formularz",
+      fields: { name: { type: "short", label: "Imię" } },
+      run: async (ctx) => {
+        ran.push(`${ctx.values.name}:${ctx.state}`);
+        await ctx.reply("ok");
+      },
+    });
+    const registry = createRegistry([{ name: "fun", modals: [form] }]);
+    const gate: ModuleGate = {
+      isEnabled: async (_guild, _channel, module) => !disabled.includes(module),
+      forget: async () => {},
+    };
+    const calls: { method: string; payload: unknown }[] = [];
+    const record = (method: string) => async (payload: unknown) => {
+      calls.push({ method, payload });
+    };
+    const submit = (customId: string, userId = OWNER, name = "Ola") =>
+      ({
+        customId,
+        user: { id: userId, displayName: "t" },
+        guildId: GUILD,
+        channelId: "300000000000000003",
+        channel: { isThread: () => false },
+        inGuild: () => true,
+        memberPermissions: { bitfield: 0n },
+        fields: { fields: new Map([["name", { value: name }]]) },
+        isFromMessage: () => false,
+        reply: record("reply"),
+        deferReply: record("deferReply"),
+        followUp: record("followUp"),
+      }) as unknown as ModalSubmitInteraction;
+    const deps = {
+      registry,
+      gate,
+      prefixes: { resolve: async () => "!", forget: async () => {} },
+      botInGuild: () => true,
+      logger: silentLogger,
+    };
+    return { ran, calls, submit, deps, form };
+  }
+
+  test("a submit from the owner runs the handler with typed values", async () => {
+    const { ran, submit, deps, form } = setup([]);
+    await handleModal(submit(form.build(OWNER, "7").customId), deps);
+    expect(ran).toEqual(["Ola:7"]);
+  });
+
+  test("an invalid value is answered ephemerally in Polish", async () => {
+    const { ran, calls, submit, deps, form } = setup([]);
+    await handleModal(submit(form.build(OWNER).customId, OWNER, " "), deps);
+    expect(ran).toEqual([]);
+    expect(calls[0]).toMatchObject({
+      method: "reply",
+      payload: { content: "Pole „Imię” jest wymagane." },
+    });
+  });
+
+  test("someone else's submit is refused", async () => {
+    const { ran, calls, submit, deps, form } = setup([]);
+    await handleModal(submit(form.build(OWNER).customId, "999999999999999999"), deps);
+    expect(ran).toEqual([]);
+    expect(calls[0]).toMatchObject({ payload: { content: "To nie Twój formularz." } });
+  });
+
+  test("a submit for a disabled module is refused", async () => {
+    const { ran, calls, submit, deps, form } = setup(["fun"]);
+    await handleModal(submit(form.build(OWNER).customId), deps);
+    expect(ran).toEqual([]);
+    expect(calls[0]).toMatchObject({
+      payload: { content: "Ten moduł jest wyłączony na tym serwerze albo kanale." },
+    });
+  });
+
+  test("a guild the bot is not in skips the module gate", async () => {
+    const { ran, submit, deps, form } = setup(["fun"]);
+    await handleModal(submit(form.build(OWNER).customId), { ...deps, botInGuild: () => false });
+    expect(ran).toEqual(["Ola:"]);
+  });
+
+  test("an unknown modal is answered instead of timing out", async () => {
+    const { calls, submit, deps } = setup([]);
+    await handleModal(submit(`fun:gone:${OWNER}:`), deps);
+    expect(calls[0]).toMatchObject({ method: "reply", payload: { content: UNKNOWN_MODAL } });
   });
 });
