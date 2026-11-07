@@ -159,7 +159,7 @@ describe("/welcome set form", () => {
     const { ctx, configs } = await openAndSubmit({ channel: [channelId], message });
     expect(replyText(ctx.replies[0])).toContain("2000");
     expect(configs.size).toBe(0);
-    const blocks = ctx.replies.slice(1).map((reply) => replyText(reply));
+    const blocks = ctx.replies.slice(1).map((reply) => replyText(reply) ?? "");
     expect(blocks.length).toBeGreaterThan(1);
     for (const block of blocks) {
       expect(block.length).toBeLessThanOrEqual(2000);
