@@ -51,7 +51,15 @@ export interface SelectSpec {
   disabled?: boolean;
 }
 
-export type ComponentSpec = ButtonSpec | LinkButtonSpec | SelectSpec;
+/** A user select menu with a single choice; the handler gets the chosen user id in `ctx.values`. Takes a whole row. */
+export interface UserSelectSpec {
+  type: "user-select";
+  customId: string;
+  placeholder?: string;
+  disabled?: boolean;
+}
+
+export type ComponentSpec = ButtonSpec | LinkButtonSpec | SelectSpec | UserSelectSpec;
 
 /** One action row: up to 5 buttons, or exactly one select menu. */
 export type ComponentRow = readonly ComponentSpec[];
@@ -82,7 +90,9 @@ export function validateRows(rows: readonly ComponentRow[]): void {
   rows.forEach((row, index) => {
     const at = `component row ${index + 1}`;
     if (row.length === 0) throw new Error(`${at} is empty`);
-    const hasSelect = row.some((component) => component.type === "select");
+    const hasSelect = row.some(
+      (component) => component.type === "select" || component.type === "user-select",
+    );
     if (hasSelect && row.length > 1) {
       throw new Error(`${at}: a select menu takes a whole row`);
     }
@@ -110,8 +120,13 @@ function validateComponent(component: ComponentSpec, at: string): void {
   } else if (!inRange(component.customId, 1, MAX_CUSTOM_ID)) {
     throw new Error(`${at}: custom_id must be 1–${MAX_CUSTOM_ID} characters`);
   }
-  if (component.type === "select") validateSelect(component, at);
-  else if (!inRange(component.label, 1, MAX_LABEL)) {
+  if (component.type === "select") {
+    validateSelect(component, at);
+  } else if (component.type === "user-select") {
+    if ((component.placeholder?.length ?? 0) > MAX_PLACEHOLDER) {
+      throw new Error(`${at}: select placeholder is longer than ${MAX_PLACEHOLDER} characters`);
+    }
+  } else if (!inRange(component.label, 1, MAX_LABEL)) {
     throw new Error(`${at}: button label must be 1–${MAX_LABEL} characters`);
   }
 }
@@ -169,7 +184,7 @@ export interface ComponentContext
   extends Pick<CommandContext, "user" | "guildId" | "place" | "channelId" | "memberPermissions"> {
   /** The `<data>` part of the custom_id. */
   readonly state: string;
-  /** Chosen option values of a select menu; empty for a button. */
+  /** Chosen option values of a select menu, or the chosen user id of a user select; empty for a button. */
   readonly values: readonly string[];
   /** True once the click got any answer (`update`, `reply` or `defer`). */
   readonly acknowledged: boolean;
@@ -183,7 +198,13 @@ export interface ComponentContext
   showModal(modal: ModalSpec): Promise<void>;
 }
 
-export type ComponentKind = "button" | "select";
+export type ComponentKind = "button" | "select" | "user-select";
+
+/**
+ * The owner part of the custom_id of a public component (`public: true`): not a member id, so nobody can
+ * pass an owner check with it; the dispatcher skips that check for public components only.
+ */
+export const PUBLIC_OWNER = "*";
 
 interface ComponentDefinition {
   /** Name of the owning module; the registry checks it matches. */
@@ -193,6 +214,11 @@ interface ComponentDefinition {
   /** Discord permission bits (PermissionFlagsBits) the member needs. Implies guildOnly. */
   permissions?: bigint;
   guildOnly?: boolean;
+  /**
+   * Anyone may use the component, not only the member it was made for (a shared panel in a channel). Build
+   * its custom_id with `PUBLIC_OWNER`. The handler must act on the clicker (`ctx.user`), never on the owner.
+   */
+  public?: boolean;
   run(ctx: ComponentContext): Promise<void>;
 }
 
@@ -230,6 +256,10 @@ export function defineButton(definition: ComponentDefinition): AnyComponent {
 
 export function defineSelect(definition: ComponentDefinition): AnyComponent {
   return build("select", definition);
+}
+
+export function defineUserSelect(definition: ComponentDefinition): AnyComponent {
+  return build("user-select", definition);
 }
 
 export interface ParsedCustomId {

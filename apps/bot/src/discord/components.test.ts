@@ -8,6 +8,7 @@ import {
   type Message,
   MessageFlags,
   type StringSelectMenuInteraction,
+  type UserSelectMenuInteraction,
 } from "discord.js";
 import { contextFromComponent } from "./component-context.ts";
 import { toComponentRows } from "./components.ts";
@@ -59,6 +60,25 @@ describe("toComponentRows", () => {
     });
   });
 
+  test("maps a user select to Discord's user select menu", () => {
+    const [row] = toComponentRows([
+      [{ type: "user-select", customId: "a:u:1:", placeholder: "Kogo?" }],
+    ]);
+    expect(row).toEqual({
+      type: ComponentType.ActionRow,
+      components: [
+        {
+          type: ComponentType.UserSelect,
+          custom_id: "a:u:1:",
+          placeholder: "Kogo?",
+          min_values: 1,
+          max_values: 1,
+          disabled: undefined,
+        },
+      ],
+    });
+  });
+
   test("buttons default to the secondary style", () => {
     const [row] = toComponentRows([[{ type: "button", customId: "x", label: "x" }]]);
     expect(row?.components[0]).toMatchObject({ style: ButtonStyle.Secondary });
@@ -90,6 +110,7 @@ function fakeClick(overrides: Record<string, unknown> = {}) {
     inGuild: () => true,
     memberPermissions: { bitfield: 8n },
     isStringSelectMenu: () => false,
+    isUserSelectMenu: () => false,
     message: { id: "msg1" },
     update: record("update"),
     deferUpdate: record("deferUpdate"),
@@ -133,6 +154,12 @@ describe("contextFromComponent", () => {
       resolved,
     );
     expect(ctx.values).toEqual(["a", "b"]);
+  });
+
+  test("passes the chosen user of a user select menu", () => {
+    const { interaction } = fakeClick({ isUserSelectMenu: () => true, values: ["42"] });
+    const ctx = contextFromComponent(interaction as unknown as UserSelectMenuInteraction, resolved);
+    expect(ctx.values).toEqual(["42"]);
   });
 
   test("has no permissions outside a guild", () => {

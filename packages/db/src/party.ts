@@ -7,8 +7,10 @@ export interface PartyArea {
   joinChannelId: string;
   /** Name of new party channels; `{user}` becomes the member's display name. */
   nameTemplate: string;
-  /** Whether the area wants a command channel (stored only, see the party module). */
+  /** Whether the area wants a command channel: the text chat of the join channel, with a panel. */
   commandChannel: boolean;
+  /** The control panel message in that chat; null until one is posted. */
+  panelMessageId: string | null;
 }
 
 export interface PartyChannel {
@@ -21,12 +23,14 @@ export interface PartyChannel {
 }
 
 export interface PartyRepository {
-  addArea(area: PartyArea): Promise<void>;
+  addArea(area: Omit<PartyArea, "panelMessageId">): Promise<void>;
   /** Changes the settings of an area; false when the area is gone. */
   updateArea(
     joinChannelId: string,
     settings: Pick<PartyArea, "nameTemplate" | "commandChannel">,
   ): Promise<boolean>;
+  /** Remembers (or with null forgets) the panel message; false when the area is gone. */
+  setPanelMessage(joinChannelId: string, messageId: string | null): Promise<boolean>;
   listAreas(guildId: string): Promise<PartyArea[]>;
   /** Every guild's areas, for startup reconciliation. */
   listAllAreas(): Promise<PartyArea[]>;
@@ -55,6 +59,7 @@ const toArea = (row: PartyAreaRow): PartyArea => ({
   joinChannelId: row.join_channel_id,
   nameTemplate: row.name_template,
   commandChannel: row.command_channel,
+  panelMessageId: row.panel_message_id,
 });
 
 const toChannel = (row: PartyChannelRow): PartyChannel => ({
@@ -77,6 +82,15 @@ export function createPartyRepository(sql: SQL): PartyRepository {
     async updateArea(joinChannelId, { nameTemplate, commandChannel }) {
       const updated = await sql<PartyAreaRow[]>`
         UPDATE party_area SET name_template = ${nameTemplate}, command_channel = ${commandChannel}
+        WHERE join_channel_id = ${joinChannelId}
+        RETURNING *
+      `;
+      return updated.length > 0;
+    },
+
+    async setPanelMessage(joinChannelId, messageId) {
+      const updated = await sql<PartyAreaRow[]>`
+        UPDATE party_area SET panel_message_id = ${messageId}
         WHERE join_channel_id = ${joinChannelId}
         RETURNING *
       `;

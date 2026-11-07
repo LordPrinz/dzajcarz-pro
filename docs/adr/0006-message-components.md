@@ -103,10 +103,20 @@ Forms use the same model and the same routing.
   a submit through lookup, owner, permissions, validation and the error policy. `values` is what the user
   gave: text for inputs, an array of ids for selects.
 
+### Public components and user selects
+
+A panel posted once in a channel is pressed by many people, so a component can be declared `public: true`.
+Its `custom_id` owner is `PUBLIC_OWNER` (`*`, not a snowflake) and `executeComponent` skips only the owner
+check for it; `guildOnly`, `permissions` and the module toggle still apply. A component that is not public
+refuses everyone for the `*` owner, so the exemption cannot be reached by crafting an id. A public handler
+must act on `ctx.user`, never on the owner. Modals stay owner-bound: a public button that opens one builds it
+with the presser as owner. `defineUserSelect` adds a single-choice user select in messages (`ctx.values` holds
+the user id); the adapter rejects an interaction whose type does not match the component's kind.
+
 ## Consequences
 
 - Modules stay free of discord.js at runtime and component handlers are tested with fakes.
-- Message components are buttons and string selects; role, mentionable, user and channel selects in
+- Message components are buttons, string selects and user selects; role, mentionable and channel selects in
   messages and the components v2 layout are added to the model when a module needs them. Modals offer text inputs and string, user and channel selects (see above).
 - Components never expire on their own. A stale click either finds expired state (the message above) or
   a handler that was removed (an ephemeral "outdated" message and a warning in the log).

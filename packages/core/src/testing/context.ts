@@ -9,6 +9,7 @@ import {
   validateModal,
 } from "../modal.ts";
 import type { CommandRegistry } from "../registry.ts";
+import type { Scheduler } from "../scheduler.ts";
 
 export interface FakeContext<A> extends CommandContext<A> {
   /** Every reply, in order. */
@@ -275,4 +276,41 @@ export async function submitModal({
 /** The text of a reply, whether it was a string or an object. */
 export function replyText(reply: Reply | undefined): string | undefined {
   return typeof reply === "string" ? reply : reply?.content;
+}
+
+export interface FakeScheduler extends Scheduler {
+  /** Tasks waiting to run. */
+  readonly pending: number;
+  /** Moves the clock forward and runs every task that came due, in order. */
+  advance(ms: number): void;
+}
+
+/** A scheduler driven by `advance`, so a test "waits" 15 seconds instantly. */
+export function createFakeScheduler(): FakeScheduler {
+  let now = 0;
+  let nextId = 0;
+  const tasks = new Map<number, { at: number; task: () => void }>();
+  return {
+    get pending() {
+      return tasks.size;
+    },
+    after(delayMs, task) {
+      const id = nextId++;
+      tasks.set(id, { at: now + delayMs, task });
+      return () => void tasks.delete(id);
+    },
+    advance(ms) {
+      const target = now + ms;
+      for (;;) {
+        const due = [...tasks.entries()]
+          .filter(([, entry]) => entry.at <= target)
+          .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+        if (!due) break;
+        tasks.delete(due[0]);
+        now = due[1].at;
+        due[1].task();
+      }
+      now = target;
+    },
+  };
 }

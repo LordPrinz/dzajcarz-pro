@@ -6,10 +6,12 @@ import {
   createRegistry,
   defineButton,
   defineSelect,
+  defineUserSelect,
   ExpiredStateError,
   MAX_COMPONENT_PREFIX,
   MENU_EXPIRED,
   NOT_YOUR_MENU,
+  PUBLIC_OWNER,
   parseCustomId,
   STATE_KEY_LENGTH,
   UNKNOWN_COMPONENT,
@@ -153,6 +155,82 @@ describe("clicking", () => {
     expect(ctx.replies).toEqual(["chosen"]);
   });
 
+  test("a user select handler gets the chosen user id", async () => {
+    const seen: string[] = [];
+    const who = defineUserSelect({
+      module: "fun",
+      name: "who",
+      run: async (ctx) => void seen.push(`${ctx.state}:${ctx.values.join(",")}`),
+    });
+    const registry = createRegistry([{ name: "fun", components: [who] }]);
+    expect(who.kind).toBe("user-select");
+    await clickComponent({ registry, customId: who.customId(OWNER, "invite"), values: ["42"] });
+    expect(seen).toEqual(["invite:42"]);
+  });
+
+  describe("public components", () => {
+    function publicSetup() {
+      const clicks: string[] = [];
+      const panel = defineButton({
+        module: "fun",
+        name: "panel",
+        public: true,
+        guildOnly: true,
+        permissions: 1n << 5n,
+        run: async (ctx) => void clicks.push(ctx.user.id),
+      });
+      const registry = createRegistry([{ name: "fun", components: [panel] }]);
+      return { clicks, panel, registry };
+    }
+
+    test("anyone may press one, and the handler sees who pressed", async () => {
+      const { clicks, panel, registry } = publicSetup();
+      await clickComponent({
+        registry,
+        customId: panel.customId(PUBLIC_OWNER),
+        userId: STRANGER,
+        memberPermissions: 1n << 5n,
+      });
+      await clickComponent({
+        registry,
+        customId: panel.customId(PUBLIC_OWNER),
+        userId: OWNER,
+        memberPermissions: 1n << 5n,
+      });
+      expect(clicks).toEqual([STRANGER, OWNER]);
+    });
+
+    test("guildOnly and permissions still apply", async () => {
+      const { clicks, panel, registry } = publicSetup();
+      const dm = await clickComponent({
+        registry,
+        customId: panel.customId(PUBLIC_OWNER),
+        userId: STRANGER,
+        guildId: null,
+      });
+      const weak = await clickComponent({
+        registry,
+        customId: panel.customId(PUBLIC_OWNER),
+        userId: STRANGER,
+        memberPermissions: 0n,
+      });
+      expect(clicks).toEqual([]);
+      expect(dm.replies).toHaveLength(1);
+      expect(weak.replies).toHaveLength(1);
+    });
+
+    test("a component that is not public refuses everyone for the public owner id", async () => {
+      const { registry, confirm, clicks } = setup();
+      const ctx = await clickComponent({
+        registry,
+        customId: confirm.customId(PUBLIC_OWNER),
+        userId: STRANGER,
+      });
+      expect(clicks).toEqual([]);
+      expect(ctx.replies).toEqual([{ content: NOT_YOUR_MENU, ephemeral: true }]);
+    });
+  });
+
   test("another member is refused with an ephemeral reply and the handler does not run", async () => {
     const { registry, confirm, clicks } = setup();
     const ctx = await clickComponent({
@@ -238,6 +316,15 @@ describe("validateRows", () => {
         [{ type: "select", customId: "s", options: [{ label: "A", value: "a" }] }],
       ]),
     ).not.toThrow();
+  });
+
+  test("a user select takes a whole row and has a bounded placeholder", () => {
+    const users = { type: "user-select" as const, customId: "u", placeholder: "Kogo?" };
+    expect(() => validateRows([[users]])).not.toThrow();
+    expect(() => validateRows([[users, button("a")]])).toThrow("whole row");
+    expect(() => validateRows([[{ ...users, placeholder: "x".repeat(151) }]])).toThrow(
+      "placeholder",
+    );
   });
 
   test("rejects what Discord would refuse", () => {

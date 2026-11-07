@@ -10,9 +10,9 @@ describe("createInstallLinks", () => {
     expect(url.searchParams.get("client_id")).toBe("123456789012345678");
     expect(url.searchParams.get("integration_type")).toBe("0");
     expect(url.searchParams.get("scope")).toBe("bot applications.commands");
-    // View Channels, Send Messages, Embed Links, Read Message History, Manage Channels, Manage Roles,
-    // Move Members, Connect, Speak.
-    expect(url.searchParams.get("permissions")).toBe("288443408");
+    // View Channels, Send Messages, Embed Links, Read Message History, Manage Messages, Manage Channels,
+    // Manage Roles, Move Members, Connect, Speak.
+    expect(url.searchParams.get("permissions")).toBe("288451600");
     expect(links.guild).toContain("scope=bot+applications.commands");
   });
 

@@ -9,3 +9,4 @@ export * from "./module.ts";
 export * from "./paginator.ts";
 export * from "./prefix.ts";
 export * from "./registry.ts";
+export * from "./scheduler.ts";

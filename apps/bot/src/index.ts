@@ -1,5 +1,5 @@
 // Composition root: creates the real adapters once and hands them to the modules.
-import { createJsonLogger, createRegistry } from "@dzajcarz/core";
+import { createJsonLogger, createRegistry, createScheduler } from "@dzajcarz/core";
 import {
   createDb,
   createGuildSettingsRepository,
@@ -13,7 +13,7 @@ import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
-import { createPartyChannels, createPartyPermissions } from "./discord/party.ts";
+import { createPartyChannels, createPartyChat, createPartyPermissions } from "./discord/party.ts";
 import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
@@ -59,8 +59,9 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.DirectMessages,
   ],
-  // DM channels are not cached, so without this partial the bot never sees DM messages.
-  partials: [Partials.Channel],
+  // DM channels are not cached, so without Channel the bot never sees DM messages. Without Message, a
+  // deleted message that is not in the cache (the party panel after a restart) never fires messageDelete.
+  partials: [Partials.Channel, Partials.Message],
   allowedMentions: NO_MENTIONS,
 });
 
@@ -85,6 +86,8 @@ const modules = createModules({
   partyAreas: createPartyRepository(sql),
   partyChannels: createPartyChannels(client),
   partyPermissions: createPartyPermissions(client),
+  partyChat: createPartyChat(client),
+  scheduler: createScheduler(),
   partyLock: createRedisStore(redis),
   presence: createPresence(client),
   clock: createClock(),

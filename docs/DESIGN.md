@@ -67,6 +67,13 @@ core but not wired into the composition root: the first module that needs it cre
 store key. A click that the handler leaves unanswered is acknowledged automatically. Slash and prefix
 replies work alike. See ADR 6.
 
+`defineUserSelect` adds a single-choice user select (`{ type: "user-select" }`, a whole row); the handler
+gets the chosen id in `ctx.values`. A component declared `public: true` skips the owner check: its
+`custom_id` carries `PUBLIC_OWNER` (`*`) and anyone may press it, so the handler must act on `ctx.user`.
+`guildOnly`, `permissions` and the module toggle still apply, and a component without `public` refuses
+everyone for the `*` owner. The adapter also checks that the interaction type (button, string select, user
+select) matches the component's kind before running it.
+
 ### Modals
 
 `defineModal` describes a form (up to 5 text, select, channel or user fields) as plain data; the module opens it
@@ -142,8 +149,8 @@ warning. It needs the privileged `GuildMembers` intent. The welcome sender is th
 `/party create` opens a form (a modal, see Modals) with the category name, the join channel name, a channel
 name template and whether the area wants a command channel (a select with "Włączony" / "Wyłączony"). Submitting makes a category and a
 join voice channel and stores them in `party_area` (`join_channel_id` is the key, `category_id` is unique, plus
-`name_template`, default `Kanał {user}`, and `command_channel`, default false; the flag is only stored, the panel
-is a separate feature). `/party edit [channel]` opens the same form filled with the area's current values
+`name_template`, default `Kanał {user}`, `command_channel`, default false, and `panel_message_id`, see Command
+channel below). `/party edit [channel]` opens the same form filled with the area's current values
 (`PartyChannels.areaNames`); submitting saves the template and the flag first, then renames only the channels whose name changed
 (`renameArea`), each checked against the rename limit (2 per 10 minutes) before Discord is called, and the
 reply says exactly what was and was not renamed. The `channel` option picks the
@@ -212,6 +219,61 @@ Cleanup ignores module toggles. Handlers declare `alwaysRun: true` (`EventHandle
 switching the module off never strands empty channels. Only the join handler is gated. The leave handler
 runs before the join handler for the same member, which waits for it, so moving from your own channel into
 the join channel hands over or frees the old channel first.
+
+#### Command channel
+
+An area with `command_channel` on uses the text chat of its join voice channel as a command channel. The bot
+posts one panel there (an embed plus buttons Zamknij, Otwórz, Ukryj, Pokaż, Limit, Zmień nazwę and two user
+selects, Zaproś and Zablokuj) and stores its message id in `party_area.panel_message_id`. The panel is
+shared: its components are `public`, so anyone may press them, and each press acts on the presser's own
+party channel through the same functions the `/party lock|unlock|hide|show|limit|rename|invite|block`
+subcommands call (`controlledChannel`: in the channel, owner or Manage Channels, control cooldown, audit
+reason). Replies are ephemeral; a member without a party channel is told "Musisz być na swoim kanale party.".
+Limit and Zmień nazwę open a modal (owned by the presser, checked on submit like any modal) after the same
+checks, cooldown included. That work runs inside the three seconds Discord gives for answering with a modal
+(a later answer fails with 10062), so it stays small: one Redis increment, the cached voice state, one row,
+and a member lookup only for someone who is not the owner. The cooldown also stops repeated presses from
+becoming a stream of those lookups. The user selects redraw the panel first, which clears the menu's choice,
+then answer with a follow-up.
+
+Everything in that chat except the panel is deleted 15 seconds after it appears, the bot's replies to prefix
+commands and slash replies included. A `messageCreate` handler schedules the delete through the `Scheduler`
+port (`@dzajcarz/core`: `after(ms, task)`, `createScheduler()` is `setTimeout`, `createFakeScheduler()` in
+`@dzajcarz/core/testing` is advanced by hand). Messages that fall due within one second of each other are
+deleted in one request per channel, so a burst costs one call (the effective delay is 15 to 16 s). The flush
+re-reads the area, so a message that turns out to be the panel (its creation event can beat the write of its
+id) or a flag switched off meanwhile is left alone. Pinned and system messages are never scheduled; a message
+pinned inside the 15 s window is still deleted. `dispose` cancels pending timers; the startup sweep covers
+what restarts lose.
+
+Every message in the guild reaches the message handlers, so they first ask an in-memory set of the join
+channel ids whose area has the flag on, and return without touching the database for anything else. The set is
+built on `clientReady` and updated by `syncPanel`, `/party edit` and `dismantleArea`. The client enables
+`Partials.Message`, otherwise `messageDelete` is not emitted for a panel that is not in the cache (after a
+restart); the handlers only need the message and channel ids.
+
+The panel is kept in sync by `syncPanel`, one operation per area at a time: it posts a panel when the flag is
+on and there is none or `exists` says it is gone, and removes it when the flag is off. It runs after `/party
+create` and `/party edit` (a failure is reported in the reply, the settings stay saved), when the panel is
+deleted (`messageDelete`, `messageDeleteBulk`) and on `clientReady`, where it also deletes up to 100 leftover
+messages (everything but the panel, pinned and system messages). If the area is removed while a panel is
+being posted, that panel is deleted again and nothing is reported as the panel. A deleted panel is reposted at
+most once per 30 s per area: a second deletion inside the window is held until the window ends, which bounds a
+loop against another bot or an automod rule that keeps removing it.
+
+Discord access sits behind the `PartyChat` port (`post`, `exists`, `recentMessages`, `deleteMessages`). The
+adapter splits ids by snowflake age: two or more messages under 14 days old are bulk-deleted (in batches of
+100), the rest one by one. A bulk delete Discord refuses as a whole (10008, 50021, 50034) is retried one by
+one, and a single delete that hits Unknown Message (10008) or a system message (50021) counts as done, so
+nothing is deleted twice and nothing throws for a message that is already gone.
+
+Module gate: the cleanup, the panel repost and the startup sweep are `alwaysRun`, like the channel cleanup:
+switching the party module off in a channel must not leave a chat that fills up or a panel that vanished.
+Only the panel's buttons are gated (they answer that the module is off). The startup sweep covers every area
+with the flag. The bot needs Send Messages, Embed Links and Read Message History in the join channel for the
+panel and Manage Messages to delete other people's messages (added to the install permissions); without
+Manage Messages the panel works and the chat is not cleaned, and the failure is logged once per channel
+until a delete works again, not once per message.
 
 ### Rotating status
 

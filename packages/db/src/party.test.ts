@@ -28,16 +28,52 @@ describe.skipIf(!sql)("party repository", () => {
     nameTemplate: "Kanał {user}",
     commandChannel: false,
   };
+  const stored = { ...area, panelMessageId: null };
   const channel = { channelId: "501", guildId, ownerId: "601", joinChannelId: "401" };
 
   test("an area is found by join channel and by category", async () => {
     await repo().addArea(area);
-    expect(await repo().findAreaByJoinChannel("401")).toEqual(area);
-    expect(await repo().findAreaByCategory("301")).toEqual(area);
+    expect(await repo().findAreaByJoinChannel("401")).toEqual(stored);
+    expect(await repo().findAreaByCategory("301")).toEqual(stored);
     expect(await repo().findAreaByJoinChannel("999")).toBeNull();
-    expect(await repo().listAreas(guildId)).toEqual([area]);
+    expect(await repo().listAreas(guildId)).toEqual([stored]);
     expect(await repo().listAreas("5555555555555555555")).toEqual([]);
-    expect(await repo().listAllAreas()).toEqual([area]);
+    expect(await repo().listAllAreas()).toEqual([stored]);
+  });
+
+  test("an area can be created with a template and updated", async () => {
+    await repo().addArea({ ...area, nameTemplate: "🔥 {user}", commandChannel: true });
+    expect(await repo().findAreaByJoinChannel("401")).toMatchObject({
+      nameTemplate: "🔥 {user}",
+      commandChannel: true,
+    });
+    expect(
+      await repo().updateArea("401", { nameTemplate: "{user} chill", commandChannel: false }),
+    ).toBe(true);
+    expect(await repo().findAreaByJoinChannel("401")).toMatchObject({
+      nameTemplate: "{user} chill",
+      commandChannel: false,
+    });
+    expect(
+      await repo().updateArea("999", { nameTemplate: "x {user}", commandChannel: false }),
+    ).toBe(false);
+  });
+
+  test("the panel message is remembered, replaced and forgotten", async () => {
+    await repo().addArea(area);
+    expect(await repo().setPanelMessage("401", "7001")).toBe(true);
+    expect(await repo().findAreaByJoinChannel("401")).toMatchObject({ panelMessageId: "7001" });
+    expect(await repo().setPanelMessage("401", "7002")).toBe(true);
+    expect(await repo().setPanelMessage("401", null)).toBe(true);
+    expect(await repo().findAreaByJoinChannel("401")).toMatchObject({ panelMessageId: null });
+    expect(await repo().setPanelMessage("999", "7003")).toBe(false);
+  });
+
+  test("a row written without the form columns gets the defaults", async () => {
+    await (sql as SQL)`
+      INSERT INTO party_area (join_channel_id, guild_id, category_id) VALUES ('401', ${guildId}, '301')
+    `;
+    expect(await repo().findAreaByJoinChannel("401")).toEqual(stored);
   });
 
   test("an area can be created with a template and updated", async () => {
@@ -62,7 +98,7 @@ describe.skipIf(!sql)("party repository", () => {
     await (sql as SQL)`
       INSERT INTO party_area (join_channel_id, guild_id, category_id) VALUES ('401', ${guildId}, '301')
     `;
-    expect(await repo().findAreaByJoinChannel("401")).toEqual(area);
+    expect(await repo().findAreaByJoinChannel("401")).toEqual(stored);
   });
 
   test("a category holds only one area", async () => {

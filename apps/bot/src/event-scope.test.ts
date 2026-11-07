@@ -29,6 +29,18 @@ describe("eventScope", () => {
     ).toEqual({ guildId: "g", channelId: "parent" });
   });
 
+  test("messageDelete and messageDeleteBulk use the channel of the deleted messages", () => {
+    expect(eventScope("messageDelete", [{ guildId: "g", channelId: "c" }])).toEqual({
+      guildId: "g",
+      channelId: "c",
+    });
+    expect(eventScope("messageDelete", [{ guildId: null, channelId: "dm" }])).toBeNull();
+    expect(eventScope("messageDeleteBulk", [new Map(), { guildId: "g", id: "c" }])).toEqual({
+      guildId: "g",
+      channelId: "c",
+    });
+  });
+
   test("guildMemberAdd is guild-wide", () => {
     expect(eventScope("guildMemberAdd", [{ guild: { id: "g" } }])).toEqual({
       guildId: "g",

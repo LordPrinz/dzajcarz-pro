@@ -50,6 +50,14 @@ export function eventScope(event: keyof ClientEvents, args: unknown[]): EventSco
       const [message] = args as ClientEvents["messageCreate"];
       return scope(message.guildId, toggleChannelId(message.channel, message.channelId));
     }
+    case "messageDelete": {
+      const [message] = args as ClientEvents["messageDelete"];
+      return scope(message.guildId, toggleChannelId(message.channel, message.channelId));
+    }
+    case "messageDeleteBulk": {
+      const [, channel] = args as ClientEvents["messageDeleteBulk"];
+      return scope(channel.guildId, toggleChannelId(channel, channel.id));
+    }
     case "guildMemberAdd": {
       const [member] = args as ClientEvents["guildMemberAdd"];
       return scope(member.guild.id, null);

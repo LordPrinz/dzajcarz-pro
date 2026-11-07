@@ -1,9 +1,10 @@
-import type { BotModule, CommandSummary, Logger } from "@dzajcarz/core";
+import type { BotModule, CommandSummary, Logger, Scheduler } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
   createPartyModule,
   type PartyChannels,
+  type PartyChat,
   type PartyPermissions,
   type PartyRepository,
 } from "@dzajcarz/module-party";
@@ -40,6 +41,8 @@ export interface ModuleServices {
   partyAreas: PartyRepository;
   partyChannels: PartyChannels;
   partyPermissions: PartyPermissions;
+  partyChat: PartyChat;
+  scheduler: Scheduler;
   partyLock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
   presence: Presence;
   clock: Clock;
@@ -67,6 +70,8 @@ export function createModules(services: ModuleServices): BotModule[] {
       repository: services.partyAreas,
       channels: services.partyChannels,
       permissions: services.partyPermissions,
+      chat: services.partyChat,
+      scheduler: services.scheduler,
       lock: services.partyLock,
       logger: services.logger.child({ module: "party" }),
     }),
