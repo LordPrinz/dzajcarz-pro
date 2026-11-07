@@ -6,7 +6,7 @@ import {
   type Logger,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext, replyText } from "@dzajcarz/core/testing";
+import { createFakeContext, replyText, submitModal } from "@dzajcarz/core/testing";
 import type { GuildMember } from "discord.js";
 import {
   createWelcomeModule,
@@ -60,15 +60,16 @@ function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
     subcommand: string,
     args: Record<string, unknown> = {},
     memberPermissions: bigint = MANAGE_GUILD,
+    invocation: "slash" | "prefix" = "slash",
   ) => {
-    const ctx = createFakeContext({ args, subcommand, memberPermissions });
+    const ctx = createFakeContext({ args, subcommand, memberPermissions, invocation });
     await executeCommand(command, ctx, silentLogger);
     return Object.assign(
       ctx.replies.map((r) => replyText(r)),
-      { deferred: ctx.deferred, deferOptions: ctx.deferOptions },
+      { deferred: ctx.deferred, deferOptions: ctx.deferOptions, modals: ctx.modals },
     );
   };
-  return { run, configs, sent, warnings, event };
+  return { run, registry, configs, sent, warnings, event };
 }
 
 function fakeMember(bot = false): GuildMember {
@@ -80,39 +81,149 @@ function fakeMember(bot = false): GuildMember {
   } as unknown as GuildMember;
 }
 
+describe("/welcome set form", () => {
+  test("slash opens the form and saves nothing yet", async () => {
+    const { run, configs } = setup();
+    const result = await run("set");
+    expect(result.modals).toHaveLength(1);
+    expect(result).toHaveLength(0);
+    expect(configs.size).toBe(0);
+    const fields = result.modals[0]?.fields ?? [];
+    expect(fields.map((f) => [f.customId, f.type])).toEqual([
+      ["channel", "channel"],
+      ["message", "paragraph"],
+    ]);
+    expect(fields[0]?.channelTypes).toEqual(["text", "announcement"]);
+    expect(fields[0]?.value).toBeUndefined();
+    for (const placeholder of ["{user}", "{username}", "{server}", "{memberCount}"]) {
+      expect(fields[1]?.description).toContain(placeholder);
+    }
+  });
+
+  test("the form is prefilled with the current settings", async () => {
+    const { run, configs } = setup();
+    configs.set(guildId, { channelId, template: "Cześć {user}" });
+    const [spec] = (await run("set")).modals;
+    expect(spec?.fields.map((f) => f.value)).toEqual([channelId, "Cześć {user}"]);
+  });
+
+  async function openAndSubmit(
+    values: Record<string, string | string[]>,
+    permissions: bigint = MANAGE_GUILD,
+  ) {
+    const { run, registry, configs } = setup();
+    const [spec] = (await run("set")).modals;
+    if (!spec) throw new Error("modal not opened");
+    const ctx = await submitModal({
+      registry,
+      customId: spec.customId,
+      values,
+      guildId,
+      memberPermissions: permissions,
+    });
+    return { ctx, configs };
+  }
+
+  test("a valid submit saves the settings and answers ephemerally", async () => {
+    const { ctx, configs } = await openAndSubmit({
+      channel: [channelId],
+      message: "  Hej {user}  ",
+    });
+    expect(configs.get(guildId)).toEqual({ channelId, template: "Hej {user}" });
+    expect(replyText(ctx.replies[0])).toContain(`<#${channelId}>`);
+    expect(ctx.replies[0]).toMatchObject({ ephemeral: true });
+  });
+
+  test("a channel of another guild is refused", async () => {
+    const { ctx, configs } = await openAndSubmit({ channel: [foreignChannelId], message: "Hej" });
+    expect(replyText(ctx.replies[0])).toBe("Wybierz kanał tekstowy z tego serwera.");
+    expect(configs.size).toBe(0);
+  });
+
+  test("an empty message is refused", async () => {
+    const { ctx, configs } = await openAndSubmit({ channel: [channelId], message: "   " });
+    expect(replyText(ctx.replies[0])).toContain("wymagane");
+    expect(configs.size).toBe(0);
+  });
+
+  test("a message over the limit is refused", async () => {
+    const { ctx, configs } = await openAndSubmit({
+      channel: [channelId],
+      message: "a".repeat(2001),
+    });
+    expect(replyText(ctx.replies[0])).toContain("2000");
+    expect(configs.size).toBe(0);
+  });
+
+  test("a submit without Manage Server saves nothing", async () => {
+    const { configs } = await openAndSubmit({ channel: [channelId], message: "x" }, 0n);
+    expect(configs.size).toBe(0);
+  });
+
+  test("someone else cannot submit the form", async () => {
+    const { run, registry, configs } = setup();
+    const [spec] = (await run("set")).modals;
+    if (!spec) throw new Error("modal not opened");
+    const ctx = await submitModal({
+      registry,
+      customId: spec.customId,
+      values: { channel: [channelId], message: "x" },
+      userId: "999999999999999999",
+      guildId,
+      memberPermissions: MANAGE_GUILD,
+    });
+    expect(replyText(ctx.replies[0])).toContain("Twój formularz");
+    expect(configs.size).toBe(0);
+  });
+});
+
 describe("/welcome commands", () => {
   test("set stores channel and trimmed template", async () => {
     const { run, configs } = setup();
-    const [reply] = await run("set", { channel: channelId, message: "  Hej {user}  " });
+    const [reply] = await run(
+      "set",
+      { channel: channelId, message: "  Hej {user}  " },
+      MANAGE_GUILD,
+      "prefix",
+    );
     expect(configs.get(guildId)).toEqual({ channelId, template: "Hej {user}" });
     expect(reply).toContain(`<#${channelId}>`);
   });
 
   test("set refuses a channel of another guild or one that is not text", async () => {
     const { run, configs } = setup();
-    const [reply] = await run("set", { channel: foreignChannelId, message: "Hej" });
+    const [reply] = await run(
+      "set",
+      { channel: foreignChannelId, message: "Hej" },
+      MANAGE_GUILD,
+      "prefix",
+    );
     expect(reply).toBe("Wybierz kanał tekstowy z tego serwera.");
     expect(configs.size).toBe(0);
   });
 
   test("set counts the length in code points", async () => {
     const { run, configs } = setup();
-    await run("set", { channel: channelId, message: "😀".repeat(2000) });
+    await run("set", { channel: channelId, message: "😀".repeat(2000) }, MANAGE_GUILD, "prefix");
     expect(configs.size).toBe(1);
   });
 
   test("set rejects an empty or over-long message", async () => {
     const { run, configs } = setup();
-    expect((await run("set", { channel: channelId, message: "   " }))[0]).toContain("pusta");
-    expect((await run("set", { channel: channelId, message: "a".repeat(2001) }))[0]).toContain(
-      "2000",
-    );
+    expect(
+      (await run("set", { channel: channelId, message: "   " }, MANAGE_GUILD, "prefix"))[0],
+    ).toContain("pusta");
+    expect(
+      (
+        await run("set", { channel: channelId, message: "a".repeat(2001) }, MANAGE_GUILD, "prefix")
+      )[0],
+    ).toContain("2000");
     expect(configs.size).toBe(0);
   });
 
   test("set, off and test need Manage Server", async () => {
     const { run, configs } = setup();
-    await run("set", { channel: channelId, message: "x" }, 0n);
+    await run("set", { channel: channelId, message: "x" }, 0n, "prefix");
     expect(configs.size).toBe(0);
   });
 

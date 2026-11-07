@@ -2,6 +2,7 @@ import {
   type BotModule,
   defineCommand,
   defineEvent,
+  defineModal,
   defineSubcommand,
   type Logger,
   UserError,
@@ -68,37 +69,86 @@ export function createWelcomeModule({
     return guildId;
   };
 
+  /** Shared by the prefix form and the modal, so both refuse the same input. */
+  async function saveWelcome(guildId: string, channelId: string, message: string): Promise<string> {
+    const template = message.trim();
+    if (template.length === 0) throw new UserError("Treść powitania nie może być pusta.");
+    if ([...template].length > MAX_MESSAGE_LENGTH) {
+      throw new UserError(`Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`);
+    }
+    if (!(await channels.isTextChannelOf(guildId, channelId))) {
+      throw new UserError("Wybierz kanał tekstowy z tego serwera.");
+    }
+    await store.set(guildId, { channelId, template });
+    return `Nowi członkowie będą witani na <#${channelId}>. Sprawdź wygląd przez \`welcome test\`.`;
+  }
+
+  const setForm = defineModal({
+    module: "welcome",
+    name: "set",
+    title: "Powitanie nowych członków",
+    permissions: MANAGE_GUILD,
+    fields: {
+      channel: {
+        type: "channel",
+        label: "Kanał",
+        description: "Tu pojawi się powitanie.",
+        channelTypes: ["text", "announcement"],
+      },
+      message: {
+        type: "paragraph",
+        label: "Treść powitania",
+        description: "Zmienne: {user}, {username}, {server}, {memberCount}",
+        placeholder: "Witaj {user} na {server}! Jesteś {memberCount}. osobą.",
+      },
+    },
+    run: async (ctx) => {
+      const content = await saveWelcome(
+        guildOf(ctx.guildId),
+        ctx.values.channel,
+        ctx.values.message,
+      );
+      await ctx.reply({ content, ephemeral: true });
+    },
+  });
+
   const welcome = defineCommand({
     name: "welcome",
     description: "Wiadomość powitalna dla nowych członków serwera",
     permissions: MANAGE_GUILD,
     subcommands: {
       set: defineSubcommand({
-        description: "Ustawia kanał i treść powitania",
+        description: "Ustawia kanał i treść powitania (formularz)",
         options: {
-          channel: { type: "channel", description: "Kanał z powitaniami", required: true },
+          channel: {
+            type: "channel",
+            description: "Kanał z powitaniami",
+            required: true,
+            prefixOnly: true,
+          },
           message: {
             type: "string",
             description: "Treść: {user}, {username}, {server}, {memberCount}",
             required: true,
             rest: true,
+            prefixOnly: true,
           },
         },
         run: async (ctx) => {
           const guildId = guildOf(ctx.guildId);
-          const template = ctx.args.message.trim();
-          if (template.length === 0) throw new UserError("Treść powitania nie może być pusta.");
-          if ([...template].length > MAX_MESSAGE_LENGTH) {
-            throw new UserError(`Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`);
+          if (ctx.canShowModal) {
+            const current = await store.get(guildId);
+            await ctx.showModal(
+              setForm.build(
+                ctx.user.id,
+                undefined,
+                current ? { channel: current.channelId, message: current.template } : undefined,
+              ),
+            );
+            return;
           }
-          if (!(await channels.isTextChannelOf(guildId, ctx.args.channel))) {
-            throw new UserError("Wybierz kanał tekstowy z tego serwera.");
-          }
-          await store.set(guildId, { channelId: ctx.args.channel, template });
-          await ctx.reply({
-            content: `Nowi członkowie będą witani na <#${ctx.args.channel}>. Sprawdź wygląd przez \`welcome test\`.`,
-            ephemeral: true,
-          });
+          const content = await saveWelcome(guildId, ctx.args.channel, ctx.args.message);
+          await ctx.reply({ content, ephemeral: true });
         },
       }),
       off: defineSubcommand({
@@ -169,5 +219,5 @@ export function createWelcomeModule({
     }
   }
 
-  return { name: "welcome", commands: [welcome], events: [greet] };
+  return { name: "welcome", commands: [welcome], events: [greet], modals: [setForm] };
 }

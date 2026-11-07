@@ -30,6 +30,12 @@ export interface OptionDef<T extends OptionType = OptionType> {
   maxValue?: number;
   /** string only, last option only: a prefix command passes the rest of the line here. */
   rest?: boolean;
+  /**
+   * Left out of the slash command, so the prefix form is the only one that takes it. For a command whose
+   * slash form collects the same input another way (a modal): `run` must branch on `ctx.canShowModal`
+   * before reading the option, because a slash invocation never carries it.
+   */
+  prefixOnly?: boolean;
 }
 
 /** Key order is the positional order of prefix arguments. */
