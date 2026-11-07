@@ -4,6 +4,7 @@ import {
   createDb,
   createGuildSettingsRepository,
   createModuleToggleRepository,
+  createWelcomeRepository,
 } from "@dzajcarz/db";
 import { createRedisStore, keepConnected } from "@dzajcarz/kv";
 import { RedisClient } from "bun";
@@ -11,6 +12,7 @@ import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
+import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
@@ -47,6 +49,9 @@ const client = new Client({
     // Privileged: enable "Message Content Intent" in the developer portal, or prefix commands go quiet.
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
+    // Privileged: enable "Server Members Intent" in the developer portal, or guildMemberAdd never
+    // fires and welcome messages stay silent.
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.DirectMessages,
   ],
   // DM channels are not cached, so without this partial the bot never sees DM messages.
@@ -62,8 +67,12 @@ const modules = createModules({
   moduleToggles: createModuleToggles(moduleToggleRepository, gate, () =>
     modules.map((module) => module.name),
   ),
-  channels: createGuildChannels(client),
+  channels: { ...createGuildChannels(client), ...createTextChannels(client) },
   defaultPrefix: env.BOT_PREFIX,
+  welcomeConfigs: createWelcomeRepository(sql),
+  welcomeSender: createWelcomeSender(client),
+  guildLookup: createGuildLookup(client, logger.child({ component: "guild-lookup" })),
+  logger,
 });
 const registry = createRegistry(modules);
 attachHandlers(client, { registry, prefixes, gate, logger });

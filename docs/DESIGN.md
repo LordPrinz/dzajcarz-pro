@@ -78,6 +78,15 @@ events and for commands. The lookup is bounded to 1.5 s (Discord wants an answer
 3 s); a slower lookup counts as enabled. `/modules` only accepts channels the guild really has, checked
 through the `GuildChannels` port. `general` and `settings` cannot be disabled.
 
+### Welcome messages
+
+`welcome_config` holds one row per guild: the channel and a template of at most 2000 characters (Discord's
+message limit). `renderWelcome` fills `{user}`, `{username}`, `{server}` and `{memberCount}` in a single
+pass, so substituted text is never re-expanded and unknown placeholders stay as written. The
+`guildMemberAdd` handler skips bots and never throws: a missing config, channel or permission is a logged
+warning. It needs the privileged `GuildMembers` intent. The welcome sender is the one place that overrides
+`NO_MENTIONS`: it allows a ping for the joining member only (`allowedMentions: { users: [memberId] }`).
+
 ### Mentions
 
 The client and every reply set `allowedMentions: { parse: [] }`. Commands echo user input (song titles,

@@ -16,3 +16,11 @@ export interface ModuleDisabledRow {
   channel_id: string;
   created_at: Date;
 }
+
+export interface WelcomeConfigRow {
+  guild_id: string;
+  channel_id: string;
+  template: string;
+  created_at: Date;
+  updated_at: Date;
+}
