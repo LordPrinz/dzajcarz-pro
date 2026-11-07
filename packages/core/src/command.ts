@@ -92,15 +92,31 @@ export interface CommandContext<A = Record<string, unknown>> {
   defer(options?: { ephemeral?: boolean }): Promise<void>;
 }
 
+/** Where a command can be used: a server, a direct message with the bot, or another private channel (group DM). */
+export type CommandPlace = "guild" | "bot-dm" | "private-channel";
+/** How the bot reached the user: added to a server, or added to the user's own account. */
+export type InstallType = "guild" | "user";
+
+export interface CommandContexts {
+  places: readonly CommandPlace[];
+  installs: readonly InstallType[];
+}
+
+/** What a command gets without a `contexts` field: servers only, for a bot added to the server. */
+export const DEFAULT_CONTEXTS: CommandContexts = { places: ["guild"], installs: ["guild"] };
+
 interface CommandBase {
   /** Lowercase, 1–32 characters: Discord's rule for slash command names. */
   name: string;
   description: string;
   /** Extra names for the prefix form only (`!p` for `!play`). */
   aliases?: readonly string[];
-  /** Refuse to run in direct messages. */
-  guildOnly?: boolean;
-  /** Discord permission bits (PermissionFlagsBits) the member needs. Implies guildOnly. */
+  /**
+   * Where the command runs and which installs it is offered to (default: guild only, guild install). A
+   * private channel (group DM) needs the `user` install, because the bot is never a member there.
+   */
+  contexts?: CommandContexts;
+  /** Discord permission bits (PermissionFlagsBits) the member needs. Needs a guild-only command. */
   permissions?: bigint;
 }
 

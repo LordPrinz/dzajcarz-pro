@@ -1,4 +1,4 @@
-import type { AnyCommand, OptionDef, OptionsDef } from "./command.ts";
+import type { AnyCommand, CommandPlace, InstallType, OptionDef, OptionsDef } from "./command.ts";
 import { type AnyComponent, MAX_COMPONENT_PREFIX, parseCustomId } from "./component.ts";
 import type { AnyEventHandler, BotModule } from "./module.ts";
 import { usageLine } from "./prefix.ts";
@@ -148,6 +148,7 @@ function validateCommand(command: AnyCommand, module: string): void {
     }
   }
   checkDescription(command.description, where);
+  validateContexts(command, where);
 
   const { subcommands } = command;
   if ((command.run === undefined) === (subcommands === undefined)) {
@@ -167,6 +168,47 @@ function validateCommand(command: AnyCommand, module: string): void {
     if (!NAME_PATTERN.test(name)) throw new Error(`Invalid name for ${at}`);
     checkDescription(subcommand.description, at);
     validateOptions(subcommand.options ?? {}, at);
+  }
+}
+
+const PLACES: readonly CommandPlace[] = ["guild", "bot-dm", "private-channel"];
+const INSTALLS: readonly InstallType[] = ["guild", "user"];
+
+function validateContexts(command: AnyCommand, where: string): void {
+  const { contexts } = command;
+  if (!contexts) return;
+  if (contexts.places.length < 1 || contexts.installs.length < 1) {
+    throw new Error(`${where}: "contexts" needs at least one place and one install type`);
+  }
+  if (new Set(contexts.places).size !== contexts.places.length) {
+    throw new Error(`${where}: duplicate place in contexts`);
+  }
+  if (new Set(contexts.installs).size !== contexts.installs.length) {
+    throw new Error(`${where}: duplicate install type in contexts`);
+  }
+  for (const place of contexts.places) {
+    if (!PLACES.includes(place)) throw new Error(`${where}: unknown place "${place}" in contexts`);
+  }
+  for (const install of contexts.installs) {
+    if (!INSTALLS.includes(install)) {
+      throw new Error(`${where}: unknown install type "${install}" in contexts`);
+    }
+  }
+  if (contexts.places.includes("private-channel") && !contexts.installs.includes("user")) {
+    throw new Error(`${where}: the "private-channel" place needs the "user" install`);
+  }
+  if (command.permissions !== undefined && contexts.places.some((place) => place !== "guild")) {
+    throw new Error(
+      `${where}: "permissions" cannot be checked outside a server; keep it guild-only`,
+    );
+  }
+  const permissioned =
+    command.permissions !== undefined ||
+    Object.values(command.subcommands ?? {}).some((sub) => sub.permissions !== undefined);
+  if (permissioned && contexts.installs.includes("user")) {
+    throw new Error(
+      `${where}: "permissions" cannot be checked for a user install; keep it guild-install only`,
+    );
   }
 }
 

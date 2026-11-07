@@ -1,4 +1,4 @@
-import type { AnyCommand, CommandContext } from "./command.ts";
+import { type AnyCommand, type CommandContext, DEFAULT_CONTEXTS } from "./command.ts";
 import type { ComponentContext } from "./component.ts";
 import { UserError } from "./errors.ts";
 import type { Logger } from "./logger.ts";
@@ -27,7 +27,7 @@ export async function executeCommand(
   });
 
   try {
-    const denied = checkAccess(command, ctx);
+    const denied = checkCommandAccess(command, ctx);
     if (denied) throw new UserError(denied);
     if (command.subcommands) {
       const { subcommand } = ctx;
@@ -104,7 +104,7 @@ export function checkPrefixAccess(
   rest: string,
   ctx: Pick<CommandContext, "guildId" | "memberPermissions">,
 ): string | null {
-  const denied = checkAccess(command, ctx);
+  const denied = checkCommandAccess(command, ctx);
   if (denied || !command.subcommands) return denied;
   const word = splitInvocation(rest)?.name;
   const picked =
@@ -112,6 +112,25 @@ export function checkPrefixAccess(
       ? command.subcommands[word]
       : undefined;
   return picked ? checkAccess(picked, ctx) : null;
+}
+
+/**
+ * `checkAccess` for a command, preceded by the exact-place check: the command must allow the place the call
+ * came from (a server, or a direct message with the bot). Discord enforces this for slash commands already;
+ * prefix calls rely on this check alone.
+ */
+function checkCommandAccess(
+  command: AnyCommand,
+  ctx: Pick<CommandContext, "guildId" | "memberPermissions">,
+): string | null {
+  const { places } = command.contexts ?? DEFAULT_CONTEXTS;
+  if (ctx.guildId !== null && !places.includes("guild")) {
+    return "Ta komenda działa tylko w prywatnej wiadomości do bota.";
+  }
+  if (ctx.guildId === null && !places.includes("bot-dm")) {
+    return "Ta komenda działa tylko na serwerze.";
+  }
+  return checkAccess({ permissions: command.permissions }, ctx);
 }
 
 /**

@@ -181,7 +181,6 @@ export function createPartyModule({
   const party = defineCommand({
     name: "party",
     description: "Strefa imprezowa: kanały głosowe tworzone na życzenie",
-    guildOnly: true,
     // No command-level permission: Discord would hide the owner controls from regular members.
     subcommands: {
       create: defineSubcommand({

@@ -4,6 +4,19 @@ const snowflake = z.string().regex(/^\d{17,20}$/, "expected a Discord id (17–2
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
 
+/** A flag: unset, empty, "0" and "false" are off; "1" and "true" are on; anything else is rejected. */
+const FLAG_VALUES: Record<string, boolean> = {
+  "": false,
+  "0": false,
+  false: false,
+  "1": true,
+  true: true,
+};
+const flag = z.preprocess(
+  (value) => (value === undefined ? false : (FLAG_VALUES[String(value)] ?? value)),
+  z.boolean(),
+);
+
 const Env = z.object({
   DISCORD_TOKEN: z.string().min(50),
   DISCORD_CLIENT_ID: snowflake,
@@ -20,7 +33,7 @@ const DeployEnv = Env.pick({
   DISCORD_TOKEN: true,
   DISCORD_CLIENT_ID: true,
   DISCORD_DEV_GUILD_ID: true,
-});
+}).extend({ DEPLOY_GLOBAL: flag, DEPLOY_CLEAR: flag });
 export type DeployEnv = z.infer<typeof DeployEnv>;
 
 function parse<T extends z.ZodType>(
