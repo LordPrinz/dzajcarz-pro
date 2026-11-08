@@ -201,7 +201,11 @@ describe("music module", () => {
 
     test("refuses links to other sites before searching", async () => {
       const { run, player } = setup();
-      for (const query of ["https://example.com/a.mp3", "https://youtube.com.evil.com/x"]) {
+      for (const query of [
+        "https://example.com/a.mp3",
+        "https://youtube.com.evil.com/x",
+        "https://soundcloud.com/a/b",
+      ]) {
         expect(lastText(await run("play", { query }))).toBe(UNSUPPORTED_LINK);
         expect(lastText(await run("search", { query }))).toBe(UNSUPPORTED_LINK);
       }

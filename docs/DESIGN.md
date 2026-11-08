@@ -16,7 +16,7 @@ Discord gateway ──▶ apps/bot ──▶ registry ──▶ modules (general
                       │                          │ ports
                       ├──▶ Postgres (guild settings, warnings, …)
                       ├──▶ Redis (prefix cache, cooldowns)
-                      └──▶ Lavalink ──▶ YouTube, SoundCloud, …  (music only)
+                      └──▶ Lavalink ──▶ YouTube, Bandcamp, …  (music only)
 ```
 
 | Package     | Depends on                  | Notes                                                                           |
@@ -399,11 +399,11 @@ the client library can be swapped:
 Commands are guild-only and answer in Polish: `/play <query>` (`p`), `/search <query>`, `/queue`, `/skip`,
 `/stop`, `/pause`, `/resume`, `/nowplaying` (`np`) and the controls below. A query that is an http(s) link (Discord's `<link>`
 form is unwrapped) is loaded as a link only when its host is one of youtube.com (plus `www.`, `m.`,
-`music.`), youtu.be, soundcloud.com (plus `m.`, `on.`), bandcamp.com and its subdomains, twitch.tv (plus
+`music.`), youtu.be, bandcamp.com and its subdomains, twitch.tv (plus
 `www.`, `m.`) or vimeo.com (plus `www.`, `player.`), compared exactly on the parsed, punycode hostname,
 with no user info and no explicit port; the link then goes on in the parser's normalised form, so the node
 fetches the host that was checked. Any other link is refused with "Obsługuję tylko linki z YouTube,
-SoundCloud, Bandcamp, Twitch i Vimeo." Anything else is YouTube search text, sent as `ytsearch:<text>`
+Bandcamp, Twitch i Vimeo." Anything else is YouTube search text, sent as `ytsearch:<text>`
 straight to `/loadtracks`, so a typed `local:`, `scsearch:` or path never selects a source. The adapter
 builds the identifier itself instead of going through the client's search helper, which strips source
 prefixes and passes anything starting with `http` through raw. `/play` takes the first search hit, or up to
