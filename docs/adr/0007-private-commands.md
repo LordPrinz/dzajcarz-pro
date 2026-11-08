@@ -36,7 +36,8 @@ command was registered for the guild install and only `guildOnly` decided whethe
   `DISCORD_DEV_GUILD_ID` omits them. `DEPLOY_GLOBAL=1 bun run commands:deploy` deploys globally even when a
   dev guild is set, which is the only way to try DMs and the user install; it also PUTs an empty set to the
   dev guild so the commands do not show up twice. `DEPLOY_CLEAR=1 bun run commands:deploy` empties the
-  global set, to return to dev-guild mode.
+  global set, to return to dev-guild mode. The bot's startup deploy reads `DEPLOY_GLOBAL` the same way; in
+  dev guild mode it warns when the global set is not empty, and never deletes it.
 
 ## Consequences
 

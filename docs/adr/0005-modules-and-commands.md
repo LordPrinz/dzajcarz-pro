@@ -48,5 +48,7 @@ tested on a live server, and features reached into each other's files.
   `run` must check `canShowModal` or narrow before using it.
 - On start the bot compares its command set with Discord's (dev guild when set, else global) and PUTs it
   only when they differ, so added and removed commands follow the code without a manual deploy and
-  restarts cost no rate limit (`COMMANDS_AUTO_DEPLOY=false` turns it off). `bun run commands:deploy` does
-  the same PUT by hand. A command Discord still shows after a removal gets a warning in the log.
+  restarts cost no rate limit (`COMMANDS_AUTO_DEPLOY=false` turns it off). With `DEPLOY_GLOBAL` it deploys
+  globally and empties the dev guild, as `bun run commands:deploy` does by hand; in dev guild mode it warns
+  when a global set exists too (every command would show twice). A command Discord still shows after a
+  removal gets a warning in the log.

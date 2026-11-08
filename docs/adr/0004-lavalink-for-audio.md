@@ -28,8 +28,8 @@ spends the bot's CPU on transcoding. Native voice bindings on Bun are less prove
 
 ## Client library
 
-- **Choice:** `lavalink-client` 2.11.0 (spike DZAJ-10, 2026-11-08). It is not a dependency yet; the music module
-  ticket adds it.
+- **Choice:** `lavalink-client` 2.11.0 (spike DZAJ-10, 2026-11-08), a dependency of `apps/bot` since the
+  music player (DZAJ-11).
 - **Candidates:** `shoukaku` 4.3.0 and `moonlink.js` 5.2.0 were run against the same node (Lavalink 4.2.2,
   youtube-plugin 1.18.2, Bun 1.4.4, discord.js 14.27.0) with the same script: connect, join voice, search,
   play, pause, resume, seek, volume, a timescale filter, skip, restart of the Lavalink container during
@@ -63,7 +63,20 @@ Caveats for the music ticket:
   adapter has to re-send the current track at the stored position after the `connect` event; do not rely on
   the client's `resume` option, which only covers websocket drops while the node stays alive. With
   `lavalink-client` the player object survived the restart but reported `playing: false` and a position
-  that kept counting.
+  that kept counting. Re-sending the track is not enough on its own: the voice session died with the old
+  node and Discord closes a reused one with code 4006, so the adapter leaves and rejoins the channel to get
+  new voice credentials first (found while building DZAJ-11).
+  Every player is rejoined, not only those with a track, and the stored position is checked against the
+  track's length: one that would have ended during the outage moves on to the next track. When the replay
+  fails the player is destroyed instead of being left silent in the channel.
+- **The client gives up and destroys the players.** After `retryAmount` failed reconnects
+  `lavalink-client` destroys the node and every player on it. The adapter sets an unreachable
+  `retryAmount` and changes `retryDelay` on the `reconnecting` event: 20 attempts 3 s apart, then one every
+  30 s until the node is back, then 3 s again. Music commands say the player is unavailable meanwhile and
+  work again without a restart of the bot (checked against a closed port: attempt 21 came 30 s after 20).
+- **`Player#destroy` during an outage.** It leaves voice and removes the player from the manager before it
+  calls the node; when that call fails it rejects and never emits `playerDestroy`. The adapter catches it
+  and emits `playerDestroyed` itself, so `/stop` and the idle leave still work while the node is down.
 - **`shoukaku` reconnect bug.** After a restart the node reconnected at the socket level, but the library
   marked it disconnected and every call failed with `Session not found`. In `Node#connect` the stored
   `connectError` from a failed first attempt is not cleared when a later attempt succeeds, so a successful

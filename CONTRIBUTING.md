@@ -48,8 +48,12 @@ Guild commands cannot be used in DMs or as a user-installed app. To try those, d
 `DEPLOY_GLOBAL=1 bun run commands:deploy`. With a dev guild set, this also empties the dev guild so the
 commands do not show up twice (the global rollout can take a while). To go back to dev-guild mode, run
 `DEPLOY_CLEAR=1 bun run commands:deploy` (empties the global set), then a plain `bun run commands:deploy`.
-Both flags accept `1` or `true`. While testing the global set with a dev guild configured, start the bot
-with `COMMANDS_AUTO_DEPLOY=false`, or it fills the dev guild again and every command shows up twice.
+Both flags accept `1` or `true`. The bot reads `DEPLOY_GLOBAL` too: started with it, the bot deploys the
+global set and empties the dev guild instead of filling it. In dev guild mode the bot leaves the global set
+alone and logs "Global commands duplicate the dev guild" when it is not empty, because the dev guild then
+shows every command twice; run `DEPLOY_CLEAR=1 bun run commands:deploy` to empty it. Before unsetting
+`DISCORD_DEV_GUILD_ID`, empty the dev guild (`DEPLOY_GLOBAL=1 bun run commands:deploy` does it), or its
+commands stay behind next to the global ones.
 
 ## Installing the bot
 
