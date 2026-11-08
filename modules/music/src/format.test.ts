@@ -6,6 +6,7 @@ import {
   MAX_SEARCH_LENGTH,
   MAX_URL_LENGTH,
   parseQuery,
+  parseTime,
   progressLine,
   truncate,
 } from "./format.ts";
@@ -133,5 +134,52 @@ describe("formatting", () => {
       "utworów",
       "utwory",
     ]);
+  });
+});
+
+describe("parseTime", () => {
+  test("reads seconds, clock times and unit times", () => {
+    expect(parseTime("90")).toBe(90_000);
+    expect(parseTime("0")).toBe(0);
+    expect(parseTime("1:30")).toBe(90_000);
+    expect(parseTime("0:05")).toBe(5000);
+    expect(parseTime("90:00")).toBe(5_400_000);
+    expect(parseTime("1:02:03")).toBe(3_723_000);
+    expect(parseTime("1m30s")).toBe(90_000);
+    expect(parseTime("1m")).toBe(60_000);
+    expect(parseTime("45s")).toBe(45_000);
+    expect(parseTime("1h2m3s")).toBe(3_723_000);
+  });
+
+  test("ignores case and spaces", () => {
+    expect(parseTime("  1M 30S ")).toBe(90_000);
+    expect(parseTime(" 1:30 ")).toBe(90_000);
+  });
+
+  test("refuses everything else", () => {
+    for (const bad of [
+      "",
+      "   ",
+      "abc",
+      "-5",
+      "1.5",
+      "1:5",
+      "1:75",
+      "1:99:00",
+      "1:2:3:4",
+      "30s1m",
+      "1m 1m",
+      "m",
+      "99999999",
+      "999h",
+      "1e3",
+    ]) {
+      expect(parseTime(bad)).toBeNull();
+    }
+  });
+
+  test("stops at 99:59:59", () => {
+    expect(parseTime("359999")).toBe(359_999_000);
+    expect(parseTime("360000")).toBeNull();
   });
 });

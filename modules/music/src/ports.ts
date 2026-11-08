@@ -27,6 +27,12 @@ export type SearchResult =
   /** The source refused (video unavailable, region lock…); `message` is for the log, not for users. */
   | { kind: "error"; message: string };
 
+/** What repeats: nothing, the current track, or the whole queue. */
+export type LoopMode = "off" | "track" | "queue";
+
+/** Sound effects the player can apply; one at a time. */
+export type MusicFilter = "off" | "bassboost" | "nightcore" | "vaporwave" | "8d";
+
 /** A guild's player as the module sees it. */
 export interface PlayerState {
   voiceChannelId: string;
@@ -38,6 +44,10 @@ export interface PlayerState {
   upcoming: readonly MusicTrack[];
   positionMs: number;
   paused: boolean;
+  loop: LoopMode;
+  /** Percent; 100 is the source's own level. */
+  volume: number;
+  filter: MusicFilter;
 }
 
 export interface MusicListener {
@@ -72,6 +82,32 @@ export interface MusicPlayer {
   skip(guildId: string, expectedTrackId: string): Promise<void>;
   pause(guildId: string): Promise<void>;
   resume(guildId: string): Promise<void>;
+  setLoop(guildId: string, mode: LoopMode): Promise<void>;
+  /** Shuffles the upcoming tracks; the current one stays. */
+  shuffle(guildId: string): Promise<void>;
+  /** Moves the current track to `positionMs`; rejects for a stream or a position past the end. */
+  seek(guildId: string, positionMs: number): Promise<void>;
+  /** `percent` is 0 to 150. */
+  setVolume(guildId: string, percent: number): Promise<void>;
+  /** Replaces the active filter (`off` clears it). */
+  setFilter(guildId: string, filter: MusicFilter): Promise<void>;
+  /**
+   * Removes `upcoming[index]` (zero-based) if it still is `expectedTrackId`; returns it, or null when that
+   * place holds another track by now.
+   */
+  remove(guildId: string, index: number, expectedTrackId: string): Promise<MusicTrack | null>;
+  /**
+   * Plays `upcoming[index]` now and drops the tracks before it, if it still is `expectedTrackId`; false when
+   * that place holds another track by now.
+   */
+  jump(guildId: string, index: number, expectedTrackId: string): Promise<boolean>;
+  /**
+   * Plays the previously played track again; the current one goes back to the front of the queue. Null when
+   * there is no previous track.
+   */
+  previous(guildId: string): Promise<MusicTrack | null>;
+  /** Empties the upcoming tracks; the current one keeps playing. */
+  clear(guildId: string): Promise<void>;
   /** Stops playback, clears the queue and leaves the voice channel. */
   leave(guildId: string): Promise<void>;
   /** Returns a function that removes the listener. */
@@ -97,6 +133,8 @@ export interface PanelMessages {
   edit(channelId: string, messageId: string, message: PanelMessage): Promise<"edited" | "gone">;
   /** A message that is already gone counts as deleted. */
   delete(channelId: string, messageId: string): Promise<void>;
+  /** A direct message to a member; false when their DMs are closed to the bot. Rejects on other failures. */
+  direct(userId: string, message: PanelMessage): Promise<boolean>;
 }
 
 /** A panel is a normal reply without `ephemeral`. */

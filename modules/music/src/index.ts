@@ -15,9 +15,27 @@ import {
   type StateStorage,
   UserError,
 } from "@dzajcarz/core";
-import { escapeMarkdown, formatDuration, parseQuery, truncate } from "./format.ts";
-import { PANEL_COLOR, panelMessage, queueLine, trackEmbed, tracksWord } from "./panel.ts";
+import {
+  escapeMarkdown,
+  formatDuration,
+  httpUrl,
+  parseQuery,
+  parseTime,
+  truncate,
+} from "./format.ts";
+import {
+  FILTER_LABELS,
+  LOOP_LABELS,
+  PANEL_COLOR,
+  panelMessage,
+  queueLine,
+  settingsLine,
+  trackEmbed,
+  tracksWord,
+} from "./panel.ts";
 import type {
+  LoopMode,
+  MusicFilter,
   MusicPlayer,
   MusicQuery,
   MusicTrack,
@@ -50,6 +68,8 @@ export const MAX_QUEUE_LENGTH = 500;
 /** Discord allows 25 options; ten results are enough to choose from. */
 const MAX_SEARCH_RESULTS = 10;
 const QUEUE_PAGE_SIZE = 10;
+export const MAX_VOLUME = 150;
+const LOOP_ORDER: readonly LoopMode[] = ["off", "track", "queue"];
 
 export const UNAVAILABLE = "Odtwarzacz muzyki jest teraz niedostępny.";
 export const NOT_IN_VOICE = "Najpierw wejdź na kanał głosowy.";
@@ -58,6 +78,8 @@ export const UNSUPPORTED_LINK =
   "Obsługuję tylko linki z YouTube, SoundCloud, Bandcamp, Twitch i Vimeo.";
 export const trackFailedText = (title: string) =>
   `Nie udało się odtworzyć **${escapeMarkdown(title)}**, gram dalej.`;
+export const EMPTY_QUEUE = "Kolejka jest pusta.";
+export const queueChanged = "Kolejka zmieniła się w międzyczasie, spróbuj jeszcze raz.";
 export const otherChannel = (channelId: string) =>
   `Musisz być na kanale <#${channelId}>, na którym gram.`;
 
@@ -160,6 +182,20 @@ export function createMusicModule({
     });
   }
 
+  const nextLoop = (mode: LoopMode): LoopMode =>
+    LOOP_ORDER[(LOOP_ORDER.indexOf(mode) + 1) % LOOP_ORDER.length] ?? "off";
+
+  /** Mixes the upcoming tracks; shared by `/shuffle` and its panel button. */
+  function shuffleQueue(guildId: string, userId: string): Promise<void> {
+    return oneAtATime(guildId, async () => {
+      const state = await requireControl(guildId, userId);
+      if (state.upcoming.length < 2) {
+        throw new UserError("W kolejce jest za mało utworów, żeby je pomieszać.");
+      }
+      await player.shuffle(guildId);
+    });
+  }
+
   function addedText(track: MusicTrack, startsNow: boolean, position: number): string {
     const title = `**${escapeMarkdown(track.title)}** (${track.isStream ? "na żywo" : formatDuration(track.durationMs)})`;
     return startsNow ? `Gram: ${title}.` : `Dodano do kolejki na miejsce ${position}: ${title}.`;
@@ -220,7 +256,46 @@ export function createMusicModule({
     },
   });
 
+  const loopButton = defineButton({
+    module: MODULE,
+    name: "panel-loop",
+    public: true,
+    guildOnly: true,
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const state = await requireControl(guildId, ctx.user.id);
+      await player.setLoop(guildId, nextLoop(state.loop));
+      await updatePanelFromClick(ctx, guildId);
+    },
+  });
+
+  const shuffleButton = defineButton({
+    module: MODULE,
+    name: "panel-shuffle",
+    public: true,
+    guildOnly: true,
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      await shuffleQueue(guildId, ctx.user.id);
+      await updatePanelFromClick(ctx, guildId);
+    },
+  });
+
   const buttons = {
+    loop: (mode: LoopMode): ButtonSpec => ({
+      type: "button",
+      customId: loopButton.customId(PUBLIC_OWNER),
+      label: `Pętla: ${LOOP_LABELS[mode]}`,
+      emoji: mode === "track" ? "🔂" : "🔁",
+      style: mode === "off" ? "secondary" : "success",
+    }),
+    shuffle: {
+      type: "button",
+      customId: shuffleButton.customId(PUBLIC_OWNER),
+      label: "Losowo",
+      emoji: "🔀",
+      style: "secondary",
+    },
     pause: (paused: boolean): ButtonSpec => ({
       type: "button",
       customId: pauseButton.customId(PUBLIC_OWNER),
@@ -602,7 +677,12 @@ export function createMusicModule({
     async run(ctx) {
       const state = player.state(guildOf(ctx));
       if (!state?.current) throw new UserError(NOTHING_PLAYING);
-      const embed = trackEmbed(state.current, state.positionMs, state.upcoming.length);
+      const embed = trackEmbed(
+        state.current,
+        state.positionMs,
+        state.upcoming.length,
+        settingsLine(state),
+      );
       await ctx.reply({
         embeds: [
           { ...embed, footer: state.paused ? `Wstrzymane · ${embed.footer}` : embed.footer },
@@ -611,11 +691,283 @@ export function createMusicModule({
     },
   });
 
+  const redrawPanel = (guildId: string) => void inOrder(guildId, () => showPanel(guildId));
+
+  const loop = defineCommand({
+    name: "loop",
+    description: "Ustawia powtarzanie: wyłączone, utwór albo kolejka",
+    options: {
+      mode: {
+        type: "string",
+        description: "Co powtarzać",
+        required: true,
+        choices: [
+          { name: "wyłączone", value: "off" },
+          { name: "utwór", value: "track" },
+          { name: "kolejka", value: "queue" },
+        ],
+      },
+    },
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const mode = LOOP_ORDER.find((candidate) => candidate === ctx.args.mode.trim().toLowerCase());
+      if (!mode) throw new UserError("Podaj `off`, `track` albo `queue`.");
+      await requireControl(guildId, ctx.user.id);
+      await player.setLoop(guildId, mode);
+      redrawPanel(guildId);
+      await ctx.reply(`Powtarzanie: **${LOOP_LABELS[mode]}**.`);
+    },
+  });
+
+  const shuffle = defineCommand({
+    name: "shuffle",
+    description: "Miesza kolejkę",
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      await shuffleQueue(guildId, ctx.user.id);
+      redrawPanel(guildId);
+      await ctx.reply("Pomieszano kolejkę.");
+    },
+  });
+
+  const seek = defineCommand({
+    name: "seek",
+    description: "Przewija bieżący utwór (np. 1:30, 90 albo 1m30s)",
+    options: {
+      time: { type: "string", description: "Dokąd przewinąć", required: true, rest: true },
+    },
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const positionMs = parseTime(ctx.args.time);
+      if (positionMs === null) {
+        throw new UserError("Nie rozumiem czasu. Podaj np. `1:30`, `90` albo `1m30s`.");
+      }
+      await oneAtATime(guildId, async () => {
+        const state = await requireControl(guildId, ctx.user.id);
+        const current = state.current;
+        if (!current) throw new UserError(NOTHING_PLAYING);
+        if (current.isStream) throw new UserError("Transmisji na żywo nie da się przewijać.");
+        if (positionMs > current.durationMs) {
+          throw new UserError(
+            `Utwór trwa tylko ${formatDuration(current.durationMs)}, nie przewinę dalej.`,
+          );
+        }
+        await player.seek(guildId, positionMs);
+      });
+      redrawPanel(guildId);
+      await ctx.reply(`Przewinięto do **${formatDuration(positionMs)}**.`);
+    },
+  });
+
+  const volume = defineCommand({
+    name: "volume",
+    description: `Ustawia głośność (0-${MAX_VOLUME})`,
+    aliases: ["vol"],
+    options: {
+      percent: {
+        type: "integer",
+        description: `Głośność w procentach (0-${MAX_VOLUME})`,
+        required: true,
+        minValue: 0,
+        maxValue: MAX_VOLUME,
+      },
+    },
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const percent = ctx.args.percent;
+      if (!Number.isInteger(percent) || percent < 0 || percent > MAX_VOLUME) {
+        throw new UserError(`Głośność musi być liczbą od 0 do ${MAX_VOLUME}.`);
+      }
+      await requireControl(guildId, ctx.user.id);
+      await player.setVolume(guildId, percent);
+      redrawPanel(guildId);
+      await ctx.reply(`Głośność: **${percent}%**.`);
+    },
+  });
+
+  const filter = defineCommand({
+    name: "filter",
+    description: "Włącza efekt dźwiękowy albo go wyłącza",
+    options: {
+      name: {
+        type: "string",
+        description: "Efekt",
+        required: true,
+        choices: [
+          { name: "bassboost", value: "bassboost" },
+          { name: "nightcore", value: "nightcore" },
+          { name: "vaporwave", value: "vaporwave" },
+          { name: "8D", value: "8d" },
+          { name: "wyłącz", value: "off" },
+        ],
+      },
+    },
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const name = Object.keys(FILTER_LABELS).find(
+        (candidate): candidate is MusicFilter => candidate === ctx.args.name.trim().toLowerCase(),
+      );
+      if (!name) {
+        throw new UserError("Podaj `bassboost`, `nightcore`, `vaporwave`, `8d` albo `off`.");
+      }
+      await requireControl(guildId, ctx.user.id);
+      await ctx.defer();
+      await player.setFilter(guildId, name);
+      redrawPanel(guildId);
+      await ctx.reply(name === "off" ? "Wyłączono efekty." : `Efekt: **${FILTER_LABELS[name]}**.`);
+    },
+  });
+
+  /** The place in `/queue` (1-based) as an index into the upcoming tracks, checked against the queue. */
+  function queueIndexOf(state: PlayerState, place: number): number {
+    if (state.upcoming.length === 0) throw new UserError(EMPTY_QUEUE);
+    if (!Number.isInteger(place) || place < 1 || place > state.upcoming.length) {
+      throw new UserError(
+        `Nie ma utworu na miejscu ${place}. W kolejce jest ${state.upcoming.length} ${tracksWord(state.upcoming.length)}.`,
+      );
+    }
+    return place - 1;
+  }
+
+  const placeOption = {
+    place: {
+      type: "integer",
+      description: "Miejsce w kolejce (jak w /queue)",
+      required: true,
+      minValue: 1,
+    },
+  } as const;
+
+  const remove = defineCommand({
+    name: "remove",
+    description: "Usuwa utwór z kolejki",
+    options: placeOption,
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const removed = await oneAtATime(guildId, async () => {
+        const state = await requireControl(guildId, ctx.user.id);
+        const index = queueIndexOf(state, ctx.args.place);
+        const wanted = state.upcoming[index];
+        if (!wanted) throw new UserError(queueChanged);
+        const taken = await player.remove(guildId, index, wanted.id);
+        if (!taken) throw new UserError(queueChanged);
+        return taken;
+      });
+      redrawPanel(guildId);
+      await ctx.reply(`Usunięto z kolejki: **${escapeMarkdown(removed.title)}**.`);
+    },
+  });
+
+  const jump = defineCommand({
+    name: "jump",
+    description: "Przeskakuje do utworu z kolejki, pomijając te przed nim",
+    options: placeOption,
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const target = await oneAtATime(guildId, async () => {
+        const state = await requireControl(guildId, ctx.user.id);
+        const index = queueIndexOf(state, ctx.args.place);
+        const wanted = state.upcoming[index];
+        if (!wanted || !(await player.jump(guildId, index, wanted.id))) {
+          throw new UserError(queueChanged);
+        }
+        return wanted;
+      });
+      await ctx.reply(`Przeskoczono do: **${escapeMarkdown(target.title)}**.`);
+    },
+  });
+
+  const back = defineCommand({
+    name: "back",
+    description: "Wraca do poprzedniego utworu",
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const previous = await oneAtATime(guildId, async () => {
+        await requireControl(guildId, ctx.user.id);
+        return player.previous(guildId);
+      });
+      if (!previous) throw new UserError("Nie ma poprzedniego utworu.");
+      await ctx.reply(`Wracam do: **${escapeMarkdown(previous.title)}**.`);
+    },
+  });
+
+  const clear = defineCommand({
+    name: "clear",
+    description: "Czyści kolejkę, bieżący utwór gra dalej",
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const count = await oneAtATime(guildId, async () => {
+        const state = await requireControl(guildId, ctx.user.id);
+        if (state.upcoming.length === 0) throw new UserError(EMPTY_QUEUE);
+        await player.clear(guildId);
+        return state.upcoming.length;
+      });
+      redrawPanel(guildId);
+      await ctx.reply(`Wyczyszczono kolejkę (${count} ${tracksWord(count)}).`);
+    },
+  });
+
+  const save = defineCommand({
+    name: "save",
+    description: "Wysyła Ci w wiadomości prywatnej bieżący utwór",
+    aliases: ["sv"],
+    async run(ctx) {
+      const guildId = guildOf(ctx);
+      const state = await requireControl(guildId, ctx.user.id);
+      const current = state.current;
+      if (!current) throw new UserError(NOTHING_PLAYING);
+      const link = httpUrl(current.uri);
+      const delivered = await panels.direct(ctx.user.id, {
+        content: [
+          `**${escapeMarkdown(current.title)}**`,
+          `**Autor:** ${escapeMarkdown(current.author)}`,
+          link ? `<${link}>` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      });
+      await ctx.reply({
+        content: delivered
+          ? "Wysłałem Ci ten utwór w wiadomości prywatnej."
+          : "Nie mogę Ci wysłać wiadomości prywatnej. Sprawdź, czy masz je włączone dla członków serwera.",
+        ephemeral: true,
+      });
+    },
+  });
+
   return {
     name: MODULE,
-    commands: [play, search, queue, skip, stop, pause, resume, nowPlaying],
+    commands: [
+      play,
+      search,
+      queue,
+      skip,
+      stop,
+      pause,
+      resume,
+      nowPlaying,
+      loop,
+      shuffle,
+      seek,
+      volume,
+      filter,
+      remove,
+      jump,
+      back,
+      clear,
+      save,
+    ],
     events: [voiceChange, guildGone],
-    components: [pauseButton, skipButton, stopButton, queueButton, pick, queuePages.button],
+    components: [
+      pauseButton,
+      skipButton,
+      stopButton,
+      queueButton,
+      loopButton,
+      shuffleButton,
+      pick,
+      queuePages.button,
+    ],
     async dispose() {
       unsubscribe();
       for (const cancel of idleTimers.values()) cancel();

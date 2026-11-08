@@ -16,11 +16,14 @@ export function createVoiceChannels(client: Client): VoiceChannels {
   };
 }
 
+function isCode(error: unknown, code: number): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
 function isUnknown(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("code" in error)) return false;
   return (
-    error.code === RESTJSONErrorCodes.UnknownMessage ||
-    error.code === RESTJSONErrorCodes.UnknownChannel
+    isCode(error, RESTJSONErrorCodes.UnknownMessage) ||
+    isCode(error, RESTJSONErrorCodes.UnknownChannel)
   );
 }
 
@@ -57,6 +60,18 @@ export function createPanelMessages(client: Client): PanelMessages {
         return "edited";
       } catch (error) {
         if (isUnknown(error)) return "gone";
+        throw error;
+      }
+    },
+
+    async direct(userId, message) {
+      const { content, embeds, components } = toReplyPayload(message);
+      try {
+        const user = await client.users.fetch(userId);
+        await user.send({ content, embeds, components, allowedMentions: NO_MENTIONS });
+        return true;
+      } catch (error) {
+        if (isCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
         throw error;
       }
     },

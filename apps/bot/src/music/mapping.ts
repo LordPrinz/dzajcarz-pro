@@ -1,5 +1,12 @@
 /** Pure translations between lavalink-client objects and the music module's port types. */
-import type { MusicQuery, MusicTrack, PlayerState, SearchResult } from "@dzajcarz/module-music";
+import type {
+  LoopMode,
+  MusicFilter,
+  MusicQuery,
+  MusicTrack,
+  PlayerState,
+  SearchResult,
+} from "@dzajcarz/module-music";
 import type { LavalinkNodeOptions, Track, UnresolvedTrack } from "lavalink-client";
 
 /** A restarted node is back within seconds; fast retries cover about a minute (spike DZAJ-10). */
@@ -131,10 +138,12 @@ export interface PlayerLike {
   playing: boolean;
   paused: boolean;
   position: number;
+  volume: number;
+  repeatMode: LoopMode;
   queue: { current: Track | null; tracks: (Track | UnresolvedTrack)[] };
 }
 
-export function toPlayerState(player: PlayerLike): PlayerState | null {
+export function toPlayerState(player: PlayerLike, filter: MusicFilter): PlayerState | null {
   if (!player.voiceChannelId) return null;
   const current = player.queue.current;
   return {
@@ -144,5 +153,8 @@ export function toPlayerState(player: PlayerLike): PlayerState | null {
     upcoming: player.queue.tracks.map(toMusicTrack),
     positionMs: current ? Math.max(0, player.position) : 0,
     paused: player.paused,
+    loop: player.repeatMode,
+    volume: player.volume,
+    filter,
   };
 }

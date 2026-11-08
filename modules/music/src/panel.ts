@@ -1,6 +1,6 @@
 import type { ButtonSpec, Embed } from "@dzajcarz/core";
 import { escapeMarkdown, formatDuration, httpUrl, progressLine, truncate } from "./format.ts";
-import type { MusicTrack, PanelMessage, PlayerState } from "./ports.ts";
+import type { LoopMode, MusicFilter, MusicTrack, PanelMessage, PlayerState } from "./ports.ts";
 
 export const PANEL_COLOR = 0x1db954;
 /** Discord's embed title limit. */
@@ -11,10 +11,36 @@ export interface PanelButtons {
   skip: ButtonSpec;
   stop: ButtonSpec;
   queue: ButtonSpec;
+  loop: (mode: LoopMode) => ButtonSpec;
+  shuffle: ButtonSpec;
+}
+
+export const LOOP_LABELS: Record<LoopMode, string> = {
+  off: "wył.",
+  track: "utwór",
+  queue: "kolejka",
+};
+
+export const FILTER_LABELS: Record<MusicFilter, string> = {
+  off: "brak",
+  bassboost: "bassboost",
+  nightcore: "nightcore",
+  vaporwave: "vaporwave",
+  "8d": "8D",
+};
+
+/** `Pętla: utwór · Głośność: 80% · Filtr: nightcore`, the settings part of the footer. */
+export function settingsLine(state: Pick<PlayerState, "loop" | "volume" | "filter">): string {
+  return `Pętla: ${LOOP_LABELS[state.loop]} · Głośność: ${state.volume}% · Filtr: ${FILTER_LABELS[state.filter]}`;
 }
 
 /** Title (linked), author, cover, progress and who added the track. */
-export function trackEmbed(track: MusicTrack, positionMs: number, upcoming: number): Embed {
+export function trackEmbed(
+  track: MusicTrack,
+  positionMs: number,
+  upcoming: number,
+  settings: string,
+): Embed {
   return {
     title: truncate(track.title, MAX_TITLE),
     url: httpUrl(track.uri),
@@ -25,7 +51,7 @@ export function trackEmbed(track: MusicTrack, positionMs: number, upcoming: numb
       `**Dodał(a):** <@${track.requesterId}>`,
       progressLine(positionMs, track.durationMs, track.isStream),
     ].join("\n"),
-    footer: upcoming === 0 ? "Kolejka jest pusta" : `W kolejce: ${upcoming}`,
+    footer: `${upcoming === 0 ? "Kolejka jest pusta" : `W kolejce: ${upcoming}`} · ${settings}`,
   };
 }
 
@@ -33,8 +59,13 @@ export function trackEmbed(track: MusicTrack, positionMs: number, upcoming: numb
 export function panelMessage(state: PlayerState, buttons: PanelButtons): PanelMessage | null {
   if (!state.current) return null;
   return {
-    embeds: [trackEmbed(state.current, state.positionMs, state.upcoming.length)],
-    components: [[buttons.pause(state.paused), buttons.skip, buttons.stop, buttons.queue]],
+    embeds: [
+      trackEmbed(state.current, state.positionMs, state.upcoming.length, settingsLine(state)),
+    ],
+    components: [
+      [buttons.pause(state.paused), buttons.skip, buttons.stop, buttons.queue],
+      [buttons.loop(state.loop), buttons.shuffle],
+    ],
   };
 }
 

@@ -98,3 +98,30 @@ export function httpUrl(url: string | null): string | undefined {
   if (protocol !== "http:" && protocol !== "https:") return undefined;
   return href.length <= MAX_URL_LENGTH ? href : undefined;
 }
+
+/** Longest time `/seek` reads: 99:59:59, far past any track. */
+const MAX_TIME_SECONDS = 359_999;
+
+/**
+ * A time typed by a member, in milliseconds: `90` (seconds), `1:30`, `1:02:03`, `1m30s`, `1h2m`, `45s`.
+ * Null for anything else, including an empty string or a negative number.
+ */
+export function parseTime(input: string): number | null {
+  const text = input.trim().toLowerCase();
+  let seconds: number;
+  const plain = /^\d{1,6}$/.exec(text);
+  const clock = /^(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)$/.exec(text);
+  const units = /^(?:(\d{1,3})h)?\s*(?:(\d{1,4})m)?\s*(?:(\d{1,6})s)?$/.exec(text);
+  if (plain) {
+    seconds = Number(text);
+  } else if (clock) {
+    const [, hours, minutes, secs] = clock;
+    if (hours !== undefined && Number(minutes) > 59) return null;
+    seconds = Number(hours ?? 0) * 3600 + Number(minutes) * 60 + Number(secs);
+  } else if (units && text !== "") {
+    seconds = Number(units[1] ?? 0) * 3600 + Number(units[2] ?? 0) * 60 + Number(units[3] ?? 0);
+  } else {
+    return null;
+  }
+  return seconds > MAX_TIME_SECONDS ? null : seconds * 1000;
+}

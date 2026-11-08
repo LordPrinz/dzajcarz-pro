@@ -1,6 +1,6 @@
 /** `MusicPlayer` on top of lavalink-client (ADR 4): one node, one player per guild. */
 import type { Logger } from "@dzajcarz/core";
-import type { MusicListener, MusicPlayer, MusicTrack } from "@dzajcarz/module-music";
+import type { MusicFilter, MusicListener, MusicPlayer, MusicTrack } from "@dzajcarz/module-music";
 import { type Client, Events } from "discord.js";
 import {
   LavalinkManager,
@@ -108,8 +108,12 @@ export function createLavalinkMusicPlayer({
   /** Guilds whose bot leaves and rejoins voice on purpose (recovery); their disconnect is not a kick. */
   const rejoining = new Map<string, () => void>();
 
+  /** The effect each player runs; the client only knows the individual switches. */
+  const filters = new Map<string, MusicFilter>();
+
   function playerGone(guildId: string, reason: unknown): void {
     resumeAt.delete(guildId);
+    filters.delete(guildId);
     skipping.delete(guildId);
     logger.info("Music player destroyed", { guildId, reason });
     emit("playerDestroyed", (listener) => listener.playerDestroyed(guildId));
@@ -294,7 +298,7 @@ export function createLavalinkMusicPlayer({
 
     state(guildId) {
       const player = manager.getPlayer(guildId);
-      return player ? toPlayerState(player) : null;
+      return player ? toPlayerState(player, filters.get(guildId) ?? "off") : null;
     },
 
     async join(guildId, voiceChannelId, textChannelId) {
@@ -344,6 +348,74 @@ export function createLavalinkMusicPlayer({
     async resume(guildId) {
       const player = playerOf(guildId);
       if (player.paused) await player.resume();
+    },
+
+    async setLoop(guildId, mode) {
+      await playerOf(guildId).setRepeatMode(mode);
+    },
+
+    async shuffle(guildId) {
+      await playerOf(guildId).queue.shuffle();
+    },
+
+    async seek(guildId, positionMs) {
+      await playerOf(guildId).seek(positionMs);
+    },
+
+    async setVolume(guildId, percent) {
+      await playerOf(guildId).setVolume(percent);
+    },
+
+    async setFilter(guildId, filter) {
+      const { filterManager } = playerOf(guildId);
+      // One effect at a time: switch the old one off, then the new one on.
+      await filterManager.resetFilters();
+      await filterManager.clearEQ();
+      if (filter === "bassboost") await filterManager.setEQPreset("BassboostMedium");
+      else if (filter === "nightcore") await filterManager.toggleNightcore();
+      else if (filter === "vaporwave") await filterManager.toggleVaporwave();
+      else if (filter === "8d") await filterManager.toggleRotation();
+      filters.set(guildId, filter);
+    },
+
+    async remove(guildId, index, expectedTrackId) {
+      const player = playerOf(guildId);
+      if (player.queue.tracks[index]?.encoded !== expectedTrackId) return null;
+      const removed = await player.queue.splice(index, 1);
+      const track = Array.isArray(removed) ? removed[0] : removed;
+      return track ? toMusicTrack(track) : null;
+    },
+
+    async jump(guildId, index, expectedTrackId) {
+      const player = playerOf(guildId);
+      const current = player.queue.current;
+      if (!current?.encoded || player.queue.tracks[index]?.encoded !== expectedTrackId)
+        return false;
+      // Skipping to place n drops the n - 1 tracks before it and ends the current one.
+      skipping.set(guildId, current.encoded);
+      try {
+        await player.skip(index + 1, false);
+      } catch (error) {
+        skipping.delete(guildId);
+        throw error;
+      }
+      return true;
+    },
+
+    async previous(guildId) {
+      const player = playerOf(guildId);
+      const back = await player.queue.shiftPrevious();
+      if (!back) return null;
+      const current = player.queue.current;
+      // The track that was playing waits at the front of the queue, so the next skip returns to it.
+      if (current) await player.queue.add(current, 0);
+      await player.play({ clientTrack: back });
+      return toMusicTrack(back);
+    },
+
+    async clear(guildId) {
+      const player = playerOf(guildId);
+      if (player.queue.tracks.length > 0) await player.queue.splice(0, player.queue.tracks.length);
     },
 
     async leave(guildId) {
