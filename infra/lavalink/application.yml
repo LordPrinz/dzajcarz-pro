@@ -6,8 +6,10 @@ server:
 lavalink:
   plugins:
     # YouTube moved out of Lavaplayer into this plugin; the built-in source is disabled below.
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
-      snapshot: false
+    # Snapshot of youtube-source main: 1.18.2 has no client that still plays (ADR 0004 says how to go
+    # back to a release).
+    - dependency: "dev.lavalink.youtube:youtube-plugin:2be8e542d3f6f178e048dca565892684c2e40177"
+      snapshot: true
   server:
     sources:
       youtube: false
@@ -42,7 +44,21 @@ plugins:
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
-    clients: ["MUSIC", "WEB", "ANDROID_VR", "TVHTML5EMBEDDED"]
+    # Tried in order. MUSIC serves ytmsearch, WEB loads searches and videos, ANDROID_VR loads the
+    # playlists WEB can no longer parse, IOS plays. WEB stays before IOS: with IOS first, ytsearch comes
+    # back empty (youtube-source #250). ADR 0004 has the per-client test results behind this list.
+    clients: ["MUSIC", "WEB", "ANDROID_VR", "IOS"]
+    clientOptions:
+      # WEB only gets formats without URLs and ANDROID_VR is told to log in, so without this every track
+      # would fail on both before reaching IOS.
+      WEB:
+        playback: false
+      ANDROID_VR:
+        playback: false
+    # Signature deciphering runs in the yt-cipher compose service (docker-compose.yml).
+    remoteCipher:
+      url: "http://yt-cipher:8001"
+      userAgent: "dzajcarz"
 
 metrics:
   prometheus:

@@ -51,12 +51,33 @@ services:
     volumes:
       - lavalink-plugins:/opt/Lavalink/plugins
 
+  # Deciphers YouTube stream signatures for the youtube-plugin (ADR 0004). The plugin no longer keeps up
+  # with YouTube's player script on its own. The project only publishes a moving `master` tag, so the
+  # image is pinned by digest. No published port: only Lavalink talks to it, over the compose network.
+  yt-cipher:
+    image: ghcr.io/kikkia/yt-cipher@sha256:4c5ec381ff57336cfc24822d2b526a5ad7cd0171f61065a1bbc87bb736842449
+    profiles: ["music"]
+    # The image is distroless and already runs as `nonroot`; the explicit uid keeps it that way if
+    # upstream changes the Dockerfile. Only the player script cache (~/.cache/yt-cipher) needs to be writable.
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /home/nonroot/.cache:uid=65532,gid=65532,mode=0700,size=64m
+      - /tmp:uid=65532,gid=65532,mode=0700,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      # Upstream recommends IAS: it is the only player script variant that deciphers reliably.
+      OVERRIDE_PLAYER_VARIANT: IAS
+
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
     profiles: ["music"]
     depends_on:
       lavalink-plugins-init:
         condition: service_completed_successfully
+      yt-cipher:
+        condition: service_started
     environment:
       LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env}
       _JAVA_OPTIONS: -Xmx512M

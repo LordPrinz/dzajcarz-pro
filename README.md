@@ -41,7 +41,7 @@ modules/
   status/           rotates the bot's activity (the old bot's song)
   music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), a now playing panel with buttons
   …                 moderation, fun (see the board)
-infra/              docker-compose: Postgres, Redis, Lavalink (profile "music")
+infra/              docker-compose: Postgres, Redis, Lavalink and yt-cipher (profile "music")
 scripts/            git hooks and GitHub automation (Bun scripts)
 docs/               design doc and ADRs
 ```
@@ -71,7 +71,8 @@ there after 15 seconds; without it the panel still works and the chat is just no
 
 The music module needs Lavalink as well:
 `docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d` (port 2333), with
-`LAVALINK_URL` and `LAVALINK_PASSWORD` in `.env`. Both are optional: without them, or while the node is
+`LAVALINK_URL` and `LAVALINK_PASSWORD` in `.env`. The profile also starts yt-cipher, which deciphers
+YouTube stream signatures for Lavalink (ADR 4). Both variables are optional: without them, or while the node is
 down, the bot runs normally and music commands answer that the player is unavailable. In the voice channel
 the bot needs **Connect** and **Speak**, and **Send Messages** and **Embed Links** in the text channel where
 music was started (the now playing panel).
