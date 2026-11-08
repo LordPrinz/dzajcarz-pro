@@ -139,13 +139,20 @@ describe("toMusicTrack", () => {
       uri: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       artworkUrl: "https://i.ytimg.com/vi/x/mqdefault.jpg",
       isStream: false,
+      isSeekable: true,
       requesterId: "200000000000000002",
     });
   });
 
-  test("a stream has no duration", () => {
-    const stream = toMusicTrack(built(raw("live", { isStream: true, duration: 9_999_999 })));
-    expect(stream).toMatchObject({ isStream: true, durationMs: 0 });
+  test("a stream has no duration and is never seekable", () => {
+    const stream = toMusicTrack(
+      built(raw("live", { isStream: true, isSeekable: true, duration: 9_999_999 })),
+    );
+    expect(stream).toMatchObject({ isStream: true, durationMs: 0, isSeekable: false });
+  });
+
+  test("a source that cannot seek stays unseekable", () => {
+    expect(toMusicTrack(built(raw("a", { isSeekable: false }))).isSeekable).toBe(false);
   });
 });
 
@@ -183,7 +190,7 @@ describe("toPlayerState", () => {
       playing: false,
       paused: false,
       position: 5000,
-      volume: 50,
+      volume: 100,
       repeatMode: "off" as const,
       queue: { current: null, tracks: [] },
     };

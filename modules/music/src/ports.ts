@@ -16,6 +16,8 @@ export interface MusicTrack {
   uri: string | null;
   artworkUrl: string | null;
   isStream: boolean;
+  /** False for a stream and for sources that cannot jump to a position. */
+  isSeekable: boolean;
   /** Member who added it. */
   requesterId: string;
 }
@@ -45,7 +47,7 @@ export interface PlayerState {
   positionMs: number;
   paused: boolean;
   loop: LoopMode;
-  /** Percent; 100 is the source's own level. */
+  /** Percent; 100 is the source's own level, and the level a new player starts at. */
   volume: number;
   filter: MusicFilter;
 }
@@ -85,11 +87,15 @@ export interface MusicPlayer {
   setLoop(guildId: string, mode: LoopMode): Promise<void>;
   /** Shuffles the upcoming tracks; the current one stays. */
   shuffle(guildId: string): Promise<void>;
-  /** Moves the current track to `positionMs`; rejects for a stream or a position past the end. */
-  seek(guildId: string, positionMs: number): Promise<void>;
+  /**
+   * Moves the current track to `positionMs` (the track's length itself is allowed and ends it) if it still is
+   * `expectedTrackId`; false when another track plays by now or a skip is on its way. Rejects for a track
+   * that is not seekable.
+   */
+  seek(guildId: string, positionMs: number, expectedTrackId: string): Promise<boolean>;
   /** `percent` is 0 to 150. */
   setVolume(guildId: string, percent: number): Promise<void>;
-  /** Replaces the active filter (`off` clears it). */
+  /** Replaces the active filter (`off` clears it); setting the active one again changes nothing. */
   setFilter(guildId: string, filter: MusicFilter): Promise<void>;
   /**
    * Removes `upcoming[index]` (zero-based) if it still is `expectedTrackId`; returns it, or null when that
@@ -97,15 +103,17 @@ export interface MusicPlayer {
    */
   remove(guildId: string, index: number, expectedTrackId: string): Promise<MusicTrack | null>;
   /**
-   * Plays `upcoming[index]` now and drops the tracks before it, if it still is `expectedTrackId`; false when
-   * that place holds another track by now.
+   * Plays `upcoming[index]` now, if it still is `expectedTrackId`. The tracks before it are dropped, or with
+   * the queue loop moved to the end of the queue. False when that place holds another track by now or a skip
+   * is on its way.
    */
   jump(guildId: string, index: number, expectedTrackId: string): Promise<boolean>;
   /**
-   * Plays the previously played track again; the current one goes back to the front of the queue. Null when
-   * there is no previous track.
+   * Plays the previously played track again; the current one goes back to the front of the queue. Copies of
+   * the current track in the history (the track loop) are passed over. `"none"` when there is no previous
+   * track, `"changed"` while a skip is on its way.
    */
-  previous(guildId: string): Promise<MusicTrack | null>;
+  previous(guildId: string): Promise<MusicTrack | "none" | "changed">;
   /** Empties the upcoming tracks; the current one keeps playing. */
   clear(guildId: string): Promise<void>;
   /** Stops playback, clears the queue and leaves the voice channel. */
@@ -133,8 +141,12 @@ export interface PanelMessages {
   edit(channelId: string, messageId: string, message: PanelMessage): Promise<"edited" | "gone">;
   /** A message that is already gone counts as deleted. */
   delete(channelId: string, messageId: string): Promise<void>;
-  /** A direct message to a member; false when their DMs are closed to the bot. Rejects on other failures. */
-  direct(userId: string, message: PanelMessage): Promise<boolean>;
+}
+
+/** Direct messages to members. */
+export interface DirectMessages {
+  /** False when the member's DMs are closed to the bot. Rejects on other failures. */
+  send(userId: string, message: PanelMessage): Promise<boolean>;
 }
 
 /** A panel is a normal reply without `ephemeral`. */

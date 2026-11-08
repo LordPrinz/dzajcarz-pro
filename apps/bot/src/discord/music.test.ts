@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type Client, RESTJSONErrorCodes } from "discord.js";
-import { createPanelMessages, createVoiceChannels } from "./music.ts";
+import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./music.ts";
+import { NO_MENTIONS } from "./reply.ts";
 
 const GUILD = "100000000000000001";
 const VOICE = "400000000000000004";
@@ -93,5 +94,38 @@ describe("createPanelMessages", () => {
     }
     const limited = createPanelMessages(textClient(undefined, { code: 0, status: 503 }).client);
     await expect(limited.edit(TEXT, "5", panel)).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+describe("createDirectMessages", () => {
+  function dmClient(sendError?: unknown) {
+    const sent: unknown[] = [];
+    const user = {
+      send: async (payload: unknown) => {
+        if (sendError) throw sendError;
+        sent.push(payload);
+      },
+    };
+    const client = { users: { fetch: async () => user } } as unknown as Client;
+    return { client, sent };
+  }
+
+  test("sends without mentions and answers true", async () => {
+    const { client, sent } = dmClient();
+    expect(await createDirectMessages(client).send("200000000000000002", { content: "hej" })).toBe(
+      true,
+    );
+    expect(sent).toEqual([
+      expect.objectContaining({ content: "hej", allowedMentions: NO_MENTIONS }),
+    ]);
+  });
+
+  test("closed DMs answer false, any other failure rejects", async () => {
+    const closed = dmClient({ code: RESTJSONErrorCodes.CannotSendMessagesToThisUser });
+    expect(await createDirectMessages(closed.client).send("2", { content: "x" })).toBe(false);
+    const down = dmClient({ code: 0, status: 503 });
+    await expect(
+      createDirectMessages(down.client).send("2", { content: "x" }),
+    ).rejects.toMatchObject({ status: 503 });
   });
 });

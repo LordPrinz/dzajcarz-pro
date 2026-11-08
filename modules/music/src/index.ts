@@ -34,6 +34,7 @@ import {
   tracksWord,
 } from "./panel.ts";
 import type {
+  DirectMessages,
   LoopMode,
   MusicFilter,
   MusicPlayer,
@@ -50,6 +51,8 @@ export interface MusicModuleDeps {
   player: MusicPlayer;
   voice: VoiceChannels;
   panels: PanelMessages;
+  /** `/save` sends the track this way. */
+  directMessages: DirectMessages;
   /** Runs the idle timeout. */
   scheduler: Scheduler;
   /** Holds `/search` results until the member picks one (ADR 6 component state). */
@@ -71,6 +74,31 @@ const QUEUE_PAGE_SIZE = 10;
 export const MAX_VOLUME = 150;
 const LOOP_ORDER: readonly LoopMode[] = ["off", "track", "queue"];
 
+/** What the prefix forms of `/loop` and `/filter` accept, in English and Polish. */
+const LOOP_WORDS: Readonly<Record<string, LoopMode>> = {
+  off: "off",
+  wyłącz: "off",
+  wyłączona: "off",
+  track: "track",
+  utwór: "track",
+  queue: "queue",
+  kolejka: "queue",
+};
+const FILTER_WORDS: Readonly<Record<string, MusicFilter>> = {
+  bassboost: "bassboost",
+  bas: "bassboost",
+  nightcore: "nightcore",
+  vaporwave: "vaporwave",
+  "8d": "8d",
+  off: "off",
+  wyłącz: "off",
+};
+/** `Object.hasOwn` keeps words like `constructor` from reaching the prototype. */
+const wordIn = <T>(words: Readonly<Record<string, T>>, input: string): T | undefined => {
+  const word = input.trim().toLowerCase();
+  return Object.hasOwn(words, word) ? words[word] : undefined;
+};
+
 export const UNAVAILABLE = "Odtwarzacz muzyki jest teraz niedostępny.";
 export const NOT_IN_VOICE = "Najpierw wejdź na kanał głosowy.";
 export const NOTHING_PLAYING = "Nic teraz nie gra.";
@@ -91,6 +119,7 @@ export function createMusicModule({
   player,
   voice,
   panels,
+  directMessages,
   scheduler,
   stateStorage,
   logger,
@@ -263,8 +292,11 @@ export function createMusicModule({
     guildOnly: true,
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const state = await requireControl(guildId, ctx.user.id);
-      await player.setLoop(guildId, nextLoop(state.loop));
+      // In the chain, so a double click reads the mode the first click set and moves on from there.
+      await oneAtATime(guildId, async () => {
+        const state = await requireControl(guildId, ctx.user.id);
+        await player.setLoop(guildId, nextLoop(state.loop));
+      });
       await updatePanelFromClick(ctx, guildId);
     },
   });
@@ -710,10 +742,16 @@ export function createMusicModule({
     },
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const mode = LOOP_ORDER.find((candidate) => candidate === ctx.args.mode.trim().toLowerCase());
-      if (!mode) throw new UserError("Podaj `off`, `track` albo `queue`.");
-      await requireControl(guildId, ctx.user.id);
-      await player.setLoop(guildId, mode);
+      const mode = wordIn(LOOP_WORDS, ctx.args.mode);
+      if (!mode) {
+        throw new UserError(
+          "Podaj `wyłącz`, `utwór` albo `kolejka` (albo `off`, `track`, `queue`).",
+        );
+      }
+      await oneAtATime(guildId, async () => {
+        await requireControl(guildId, ctx.user.id);
+        await player.setLoop(guildId, mode);
+      });
       redrawPanel(guildId);
       await ctx.reply(`Powtarzanie: **${LOOP_LABELS[mode]}**.`);
     },
@@ -747,12 +785,16 @@ export function createMusicModule({
         const current = state.current;
         if (!current) throw new UserError(NOTHING_PLAYING);
         if (current.isStream) throw new UserError("Transmisji na żywo nie da się przewijać.");
+        if (!current.isSeekable) throw new UserError("Tego utworu nie da się przewijać.");
+        // The end itself is allowed: the track ends and the next one plays.
         if (positionMs > current.durationMs) {
           throw new UserError(
             `Utwór trwa tylko ${formatDuration(current.durationMs)}, nie przewinę dalej.`,
           );
         }
-        await player.seek(guildId, positionMs);
+        if (!(await player.seek(guildId, positionMs, current.id))) {
+          throw new UserError("Utwór zmienił się w międzyczasie, spróbuj jeszcze raz.");
+        }
       });
       redrawPanel(guildId);
       await ctx.reply(`Przewinięto do **${formatDuration(positionMs)}**.`);
@@ -804,15 +846,19 @@ export function createMusicModule({
     },
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const name = Object.keys(FILTER_LABELS).find(
-        (candidate): candidate is MusicFilter => candidate === ctx.args.name.trim().toLowerCase(),
-      );
+      const name = wordIn(FILTER_WORDS, ctx.args.name);
       if (!name) {
-        throw new UserError("Podaj `bassboost`, `nightcore`, `vaporwave`, `8d` albo `off`.");
+        throw new UserError(
+          "Podaj `bassboost` (albo `bas`), `nightcore`, `vaporwave`, `8d` albo `wyłącz` (`off`).",
+        );
       }
+      // Refused here already, so the answer stays private; checked again in the chain.
       await requireControl(guildId, ctx.user.id);
       await ctx.defer();
-      await player.setFilter(guildId, name);
+      await oneAtATime(guildId, async () => {
+        await requireControl(guildId, ctx.user.id);
+        await player.setFilter(guildId, name);
+      });
       redrawPanel(guildId);
       await ctx.reply(name === "off" ? "Wyłączono efekty." : `Efekt: **${FILTER_LABELS[name]}**.`);
     },
@@ -886,7 +932,8 @@ export function createMusicModule({
         await requireControl(guildId, ctx.user.id);
         return player.previous(guildId);
       });
-      if (!previous) throw new UserError("Nie ma poprzedniego utworu.");
+      if (previous === "none") throw new UserError("Nie ma poprzedniego utworu.");
+      if (previous === "changed") throw new UserError(queueChanged);
       await ctx.reply(`Wracam do: **${escapeMarkdown(previous.title)}**.`);
     },
   });
@@ -912,12 +959,11 @@ export function createMusicModule({
     description: "Wysyła Ci w wiadomości prywatnej bieżący utwór",
     aliases: ["sv"],
     async run(ctx) {
-      const guildId = guildOf(ctx);
-      const state = await requireControl(guildId, ctx.user.id);
-      const current = state.current;
+      // Like /queue and /nowplaying: anyone in the server may save what plays, in voice or not.
+      const current = player.state(guildOf(ctx))?.current;
       if (!current) throw new UserError(NOTHING_PLAYING);
       const link = httpUrl(current.uri);
-      const delivered = await panels.direct(ctx.user.id, {
+      const delivered = await directMessages.send(ctx.user.id, {
         content: [
           `**${escapeMarkdown(current.title)}**`,
           `**Autor:** ${escapeMarkdown(current.author)}`,

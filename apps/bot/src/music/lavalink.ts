@@ -3,6 +3,7 @@ import type { Logger } from "@dzajcarz/core";
 import type { MusicFilter, MusicListener, MusicPlayer, MusicTrack } from "@dzajcarz/module-music";
 import { type Client, Events } from "discord.js";
 import {
+  EQList,
   LavalinkManager,
   type ManagerOptions,
   type Player,
@@ -37,9 +38,36 @@ export interface LavalinkPlayerOptions {
 
 /** Searched tracks kept to enqueue without asking the node again; older ones are decoded on demand. */
 const TRACK_CACHE_SIZE = 2000;
-const VOLUME = 50;
+/** Lavalink's 100 is the source's own level (the client's volumeDecrementer stays at 1). */
+const VOLUME = 100;
 /** How long a recovery waits for Discord to confirm that the bot left voice before joining again. */
 const REJOIN_TIMEOUT_MS = 5000;
+
+/** The client's own presets (toggleNightcore, toggleVaporwave, toggleRotation), written out. */
+const NIGHTCORE = { speed: 1.29, pitch: 1.29, rate: 0.9366 };
+const VAPORWAVE = { speed: 0.85, pitch: 0.8, rate: 1 };
+const UNCHANGED_TIMESCALE = { speed: 1, pitch: 1, rate: 1 };
+const ROTATION_HZ = 0.2;
+
+/**
+ * Writes `filter` into the client's filter data in place of whatever effect was there; nothing goes to the
+ * node yet. The client's toggle* helpers flip state and send one request each, so a repeated or
+ * interrupted change could switch an effect off; writing the data and sending it once
+ * (`applyPlayerFilters`, a single update with every filter) gives the same result however often it runs.
+ */
+function writeFilter(filterManager: Player["filterManager"], filter: MusicFilter): void {
+  const timescale =
+    filter === "nightcore" ? NIGHTCORE : filter === "vaporwave" ? VAPORWAVE : UNCHANGED_TIMESCALE;
+  filterManager.data.timescale = { ...timescale };
+  filterManager.data.rotation = { rotationHz: filter === "8d" ? ROTATION_HZ : 0 };
+  filterManager.equalizerBands =
+    filter === "bassboost" ? EQList.BassboostMedium.map((band) => ({ ...band })) : [];
+  // The client's own flags, so its view of the player matches what was sent.
+  filterManager.filters.nightcore = filter === "nightcore";
+  filterManager.filters.vaporwave = filter === "vaporwave";
+  filterManager.filters.rotation = filter === "8d";
+  filterManager.filters.custom = false;
+}
 
 export function createLavalinkMusicPlayer({
   client,
@@ -86,6 +114,11 @@ export function createLavalinkMusicPlayer({
 
   const connectedNode = () => manager.nodeManager.leastUsedNodes()[0];
 
+  /** `Queue#splice` answers one track, an array, or null. */
+  function tracksOf(spliced: Track | UnresolvedTrack | (Track | UnresolvedTrack)[] | null) {
+    return spliced === null ? [] : [spliced].flat();
+  }
+
   function playerOf(guildId: string): Player {
     const player = manager.getPlayer(guildId);
     if (!player) throw new Error(`No music player in guild ${guildId}`);
@@ -110,6 +143,19 @@ export function createLavalinkMusicPlayer({
 
   /** The effect each player runs; the client only knows the individual switches. */
   const filters = new Map<string, MusicFilter>();
+
+  /** Sends the guild's effect to a node that lost it (a restart). A failure leaves the player without one. */
+  async function restoreFilter(player: Player): Promise<void> {
+    const filter = filters.get(player.guildId) ?? "off";
+    if (filter === "off") return;
+    try {
+      writeFilter(player.filterManager, filter);
+      await player.filterManager.applyPlayerFilters();
+    } catch (error) {
+      filters.set(player.guildId, "off");
+      logger.warn("Restoring the music filter failed", { guildId: player.guildId, filter, error });
+    }
+  }
 
   function playerGone(guildId: string, reason: unknown): void {
     resumeAt.delete(guildId);
@@ -199,16 +245,17 @@ export function createLavalinkMusicPlayer({
       }
       player.options.voiceChannelId = channelId;
       await player.connect();
-      if (!current) return;
-      const at = resumePosition(current.info, position);
-      if (at !== null) {
+      const at = current ? resumePosition(current.info, position) : null;
+      if (current && at !== null) {
         await player.play({ clientTrack: current, position: at, paused });
-        return;
+      } else if (current) {
+        // The track would have ended during the outage.
+        player.queue.current = null;
+        if (player.queue.tracks.length > 0) await player.play({ paused });
+        else emit("queueEnd", (listener) => listener.queueEnd(guildId));
       }
-      // The track would have ended during the outage.
-      player.queue.current = null;
-      if (player.queue.tracks.length > 0) await player.play({ paused });
-      else emit("queueEnd", (listener) => listener.queueEnd(guildId));
+      // The new session starts without effects, and play() does not send them.
+      await restoreFilter(player);
     } catch (error) {
       logger.warn("Recovering a music player failed", { guildId, error });
       await destroyPlayer(player, "RecoveryFailed");
@@ -358,8 +405,11 @@ export function createLavalinkMusicPlayer({
       await playerOf(guildId).queue.shuffle();
     },
 
-    async seek(guildId, positionMs) {
-      await playerOf(guildId).seek(positionMs);
+    async seek(guildId, positionMs, expectedTrackId) {
+      const player = playerOf(guildId);
+      if (player.queue.current?.encoded !== expectedTrackId || skipping.has(guildId)) return false;
+      await player.seek(positionMs);
+      return true;
     },
 
     async setVolume(guildId, percent) {
@@ -368,13 +418,10 @@ export function createLavalinkMusicPlayer({
 
     async setFilter(guildId, filter) {
       const { filterManager } = playerOf(guildId);
-      // One effect at a time: switch the old one off, then the new one on.
-      await filterManager.resetFilters();
-      await filterManager.clearEQ();
-      if (filter === "bassboost") await filterManager.setEQPreset("BassboostMedium");
-      else if (filter === "nightcore") await filterManager.toggleNightcore();
-      else if (filter === "vaporwave") await filterManager.toggleVaporwave();
-      else if (filter === "8d") await filterManager.toggleRotation();
+      writeFilter(filterManager, filter);
+      // Until the node confirms, the footer claims no effect rather than one that may not be on.
+      filters.set(guildId, "off");
+      await filterManager.applyPlayerFilters();
       filters.set(guildId, filter);
     },
 
@@ -389,12 +436,22 @@ export function createLavalinkMusicPlayer({
     async jump(guildId, index, expectedTrackId) {
       const player = playerOf(guildId);
       const current = player.queue.current;
-      if (!current?.encoded || player.queue.tracks[index]?.encoded !== expectedTrackId)
+      if (
+        !current?.encoded ||
+        skipping.has(guildId) ||
+        player.queue.tracks[index]?.encoded !== expectedTrackId
+      )
         return false;
-      // Skipping to place n drops the n - 1 tracks before it and ends the current one.
       skipping.set(guildId, current.encoded);
       try {
-        await player.skip(index + 1, false);
+        if (player.repeatMode === "queue" && index > 0) {
+          // The loop keeps every track: the ones passed over wait at the end instead of being dropped.
+          await player.queue.add(tracksOf(await player.queue.splice(0, index)));
+          await player.skip(0, false);
+        } else {
+          // Skipping to place n drops the n - 1 tracks before it and ends the current one.
+          await player.skip(index + 1, false);
+        }
       } catch (error) {
         skipping.delete(guildId);
         throw error;
@@ -404,9 +461,19 @@ export function createLavalinkMusicPlayer({
 
     async previous(guildId) {
       const player = playerOf(guildId);
-      const back = await player.queue.shiftPrevious();
-      if (!back) return null;
+      if (skipping.has(guildId)) return "changed";
       const current = player.queue.current;
+      // The track loop adds the current track to the history on every repeat; going back means before it.
+      while (current?.encoded && player.queue.previous[0]?.encoded === current.encoded) {
+        await player.queue.shiftPrevious();
+      }
+      const back = await player.queue.shiftPrevious();
+      if (!back) return "none";
+      if (player.repeatMode === "queue") {
+        // The queue loop already put the back track at the end; playing it now must not add a second turn.
+        const copy = player.queue.tracks.findLastIndex((track) => track.encoded === back.encoded);
+        if (copy >= 0) await player.queue.splice(copy, 1);
+      }
       // The track that was playing waits at the front of the queue, so the next skip returns to it.
       if (current) await player.queue.add(current, 0);
       await player.play({ clientTrack: back });

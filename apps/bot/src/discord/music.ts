@@ -1,4 +1,4 @@
-import type { PanelMessages, VoiceChannels } from "@dzajcarz/module-music";
+import type { DirectMessages, PanelMessages, VoiceChannels } from "@dzajcarz/module-music";
 import { type Client, RESTJSONErrorCodes } from "discord.js";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
@@ -64,7 +64,20 @@ export function createPanelMessages(client: Client): PanelMessages {
       }
     },
 
-    async direct(userId, message) {
+    async delete(channelId, messageId) {
+      try {
+        const channel = await channelOf(channelId);
+        await channel.messages.delete(messageId);
+      } catch (error) {
+        if (!isUnknown(error)) throw error;
+      }
+    },
+  };
+}
+
+export function createDirectMessages(client: Client): DirectMessages {
+  return {
+    async send(userId, message) {
       const { content, embeds, components } = toReplyPayload(message);
       try {
         const user = await client.users.fetch(userId);
@@ -73,15 +86,6 @@ export function createPanelMessages(client: Client): PanelMessages {
       } catch (error) {
         if (isCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
         throw error;
-      }
-    },
-
-    async delete(channelId, messageId) {
-      try {
-        const channel = await channelOf(channelId);
-        await channel.messages.delete(messageId);
-      } catch (error) {
-        if (!isUnknown(error)) throw error;
       }
     },
   };

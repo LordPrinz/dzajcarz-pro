@@ -114,6 +114,7 @@ export function toMusicTrack(track: Track | UnresolvedTrack): MusicTrack {
     uri: info.uri ?? null,
     artworkUrl: info.artworkUrl ?? track.pluginInfo?.artworkUrl ?? null,
     isStream: info.isStream ?? false,
+    isSeekable: !info.isStream && (info.isSeekable ?? false),
     requesterId: requesterOf(track),
   };
 }

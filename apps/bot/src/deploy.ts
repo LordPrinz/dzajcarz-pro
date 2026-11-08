@@ -295,6 +295,7 @@ export const createDeployRegistry = () =>
       musicPlayer: createUnavailableMusicPlayer(),
       voiceChannels: unusedServices(),
       musicPanels: unusedServices(),
+      directMessages: unusedServices(),
       componentState: unusedServices(),
       presence: unusedServices(),
       clock: unusedServices(),

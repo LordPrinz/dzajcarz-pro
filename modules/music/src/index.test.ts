@@ -16,6 +16,7 @@ import {
 } from "@dzajcarz/core/testing";
 import type { Guild, VoiceState } from "discord.js";
 import {
+  createFakeDirectMessages,
   createFakePanels,
   createFakePlayer,
   createFakeVoice,
@@ -49,11 +50,13 @@ function setup() {
   const player = createFakePlayer();
   const voice = createFakeVoice();
   const panels = createFakePanels();
+  const directMessages = createFakeDirectMessages();
   const scheduler = createFakeScheduler();
   const module = createMusicModule({
     player,
     voice,
     panels,
+    directMessages,
     scheduler,
     stateStorage: createMemoryStorage(),
     logger: silentLogger,
@@ -104,6 +107,7 @@ function setup() {
     player,
     voice,
     panels,
+    directMessages,
     scheduler,
     module,
     registry,
@@ -443,13 +447,13 @@ describe("music module", () => {
       await run("pause");
       const reply = (await run("nowplaying")).replies[0] as Exclude<Reply, string>;
       expect(reply.embeds?.[0]?.footer).toBe(
-        "Wstrzymane · W kolejce: 1 · Pętla: wył. · Głośność: 50% · Filtr: brak",
+        "Wstrzymane · W kolejce: 1 · Pętla: wył. · Głośność: 100% · Filtr: brak",
       );
       player.finishTrack(GUILD);
       await run("pause");
       const alone = (await run("nowplaying")).replies[0] as Exclude<Reply, string>;
       expect(alone.embeds?.[0]?.footer).toBe(
-        "Wstrzymane · Kolejka jest pusta · Pętla: wył. · Głośność: 50% · Filtr: brak",
+        "Wstrzymane · Kolejka jest pusta · Pętla: wył. · Głośność: 100% · Filtr: brak",
       );
     });
   });
@@ -495,7 +499,7 @@ describe("music module", () => {
       await run("play", { query: "b" });
       expect(panels.posts).toEqual(["panel-1"]);
       expect(panel()?.embeds?.[0]?.footer).toBe(
-        "W kolejce: 1 · Pętla: wył. · Głośność: 50% · Filtr: brak",
+        "W kolejce: 1 · Pętla: wył. · Głośność: 100% · Filtr: brak",
       );
 
       player.finishTrack(GUILD);
@@ -761,7 +765,6 @@ describe("music module", () => {
         ["jump", { place: 1 }],
         ["back", {}],
         ["clear", {}],
-        ["save", {}],
       ];
       for (const [name, args] of commands) {
         expect(lastText(await run(name, args))).toBe(NOTHING_PLAYING);
@@ -793,9 +796,27 @@ describe("music module", () => {
         expect(ctx.player.state(GUILD)?.loop).toBe("off");
       });
 
+      test("reads Polish and English words, as the prefix form gets them", async () => {
+        const ctx = await playing(["A"]);
+        for (const [mode, loop] of [
+          ["utwór", "track"],
+          ["wyłącz", "off"],
+          ["KOLEJKA", "queue"],
+          ["wyłączona", "off"],
+          [" track ", "track"],
+          ["off", "off"],
+          ["queue", "queue"],
+        ] as const) {
+          await ctx.run("loop", { mode });
+          expect(ctx.player.state(GUILD)?.loop).toBe(loop);
+        }
+      });
+
       test("refuses an unknown mode", async () => {
         const ctx = await playing(["A"]);
-        expect(lastText(await ctx.run("loop", { mode: "forever" }))).toContain("`off`");
+        for (const mode of ["forever", "constructor", "toString"]) {
+          expect(lastText(await ctx.run("loop", { mode }))).toContain("`wyłącz`");
+        }
         expect(ctx.player.state(GUILD)?.loop).toBe("off");
       });
     });
@@ -849,6 +870,24 @@ describe("music module", () => {
         expect(ctx.player.state(GUILD)?.positionMs).toBe(200_000);
       });
 
+      test("refuses a track whose source cannot seek", async () => {
+        const ctx = setup();
+        ctx.player.nextResult = { kind: "tracks", tracks: [track("A", { isSeekable: false })] };
+        await ctx.run("play", { query: "a" });
+        expect(lastText(await ctx.run("seek", { time: "10" }))).toBe(
+          "Tego utworu nie da się przewijać.",
+        );
+      });
+
+      test("leaves a track that changed meanwhile alone and asks to try again", async () => {
+        const ctx = await playing(["A", "B"]);
+        ctx.player.skipInFlight = true;
+        expect(lastText(await ctx.run("seek", { time: "10" }))).toBe(
+          "Utwór zmienił się w międzyczasie, spróbuj jeszcze raz.",
+        );
+        expect(ctx.player.state(GUILD)?.positionMs).toBe(0);
+      });
+
       test("refuses a stream", async () => {
         const ctx = setup();
         ctx.player.nextResult = {
@@ -863,6 +902,12 @@ describe("music module", () => {
     });
 
     describe("/volume", () => {
+      test("starts at 100%, the source's own level", async () => {
+        const ctx = await playing(["A"]);
+        expect(ctx.player.state(GUILD)?.volume).toBe(100);
+        expect(ctx.panel()?.embeds?.[0]?.footer).toContain("Głośność: 100%");
+      });
+
       test("sets the level and shows it on the panel", async () => {
         const ctx = await playing(["A"]);
         expect(lastText(await ctx.run("volume", { percent: 120 }))).toBe("Głośność: **120%**.");
@@ -897,9 +942,50 @@ describe("music module", () => {
         expect(ctx.player.state(GUILD)?.filter).toBe("off");
       });
 
+      test("setting the active effect again keeps it on", async () => {
+        const ctx = await playing(["A"]);
+        await ctx.run("filter", { name: "nightcore" });
+        await ctx.run("filter", { name: "nightcore" });
+        expect(ctx.player.state(GUILD)?.filter).toBe("nightcore");
+      });
+
+      test("reads Polish and English words, as the prefix form gets them", async () => {
+        const ctx = await playing(["A"]);
+        for (const [name, filter] of [
+          ["bas", "bassboost"],
+          ["wyłącz", "off"],
+          ["8D", "8d"],
+          ["Vaporwave", "vaporwave"],
+          ["off", "off"],
+        ] as const) {
+          await ctx.run("filter", { name });
+          expect(ctx.player.state(GUILD)?.filter).toBe(filter);
+        }
+      });
+
+      test("two changes at once run one after the other", async () => {
+        const ctx = await playing(["A"]);
+        const order: string[] = [];
+        const setFilter = ctx.player.setFilter;
+        ctx.player.setFilter = async (guildId, filter) => {
+          order.push(`start ${filter}`);
+          await settle();
+          await setFilter(guildId, filter);
+          order.push(`end ${filter}`);
+        };
+        await Promise.all([
+          ctx.run("filter", { name: "nightcore" }),
+          ctx.run("filter", { name: "8d" }),
+        ]);
+        expect(order).toEqual(["start nightcore", "end nightcore", "start 8d", "end 8d"]);
+        expect(ctx.player.state(GUILD)?.filter).toBe("8d");
+      });
+
       test("refuses an unknown effect", async () => {
         const ctx = await playing(["A"]);
-        expect(lastText(await ctx.run("filter", { name: "reverb" }))).toContain("`bassboost`");
+        for (const name of ["reverb", "constructor"]) {
+          expect(lastText(await ctx.run("filter", { name }))).toContain("`bassboost`");
+        }
         expect(ctx.player.state(GUILD)?.filter).toBe("off");
       });
     });
@@ -917,6 +1003,21 @@ describe("music module", () => {
         expect(ctx.player.state(GUILD)?.current?.title).toBe("C");
         expect(upcoming(ctx)).toEqual(["D"]);
         expect(ctx.panel()?.embeds?.[0]?.title).toBe("C");
+      });
+
+      test("jump with the queue loop moves the passed tracks to the end", async () => {
+        const ctx = await playing(["A", "B", "C", "D"]);
+        await ctx.run("loop", { mode: "queue" });
+        expect(lastText(await ctx.run("jump", { place: 3 }))).toBe("Przeskoczono do: **D**.");
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("D");
+        expect(upcoming(ctx)).toEqual(["B", "C"]);
+      });
+
+      test("jump while a skip is on its way asks to try again", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        ctx.player.skipInFlight = true;
+        expect(lastText(await ctx.run("jump", { place: 2 }))).toBe(queueChanged);
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
       });
 
       test("both refuse an empty queue and a place outside it", async () => {
@@ -970,6 +1071,14 @@ describe("music module", () => {
         expect(lastText(await ctx.run("back"))).toBe("Nie ma poprzedniego utworu.");
         expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
       });
+
+      test("asks to try again while a skip is on its way", async () => {
+        const ctx = await playing(["A", "B"]);
+        ctx.player.finishTrack(GUILD);
+        ctx.player.skipInFlight = true;
+        expect(lastText(await ctx.run("back"))).toBe(queueChanged);
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+      });
     });
 
     describe("/clear", () => {
@@ -993,27 +1102,41 @@ describe("music module", () => {
         const reply = (await ctx.run("save")).replies[0] as Exclude<Reply, string>;
         expect(reply.ephemeral).toBe(true);
         expect(reply.content).toBe("Wysłałem Ci ten utwór w wiadomości prywatnej.");
-        expect(ctx.panels.directs).toHaveLength(1);
-        const [dm] = ctx.panels.directs;
+        expect(ctx.directMessages.sent).toHaveLength(1);
+        const [dm] = ctx.directMessages.sent;
         expect(dm?.userId).toBe(CALLER);
         expect(dm?.message.content).toBe(
           "**A\\_b**\n**Autor:** Autor\n<https://www.youtube.com/watch?v=A_b>",
         );
       });
 
+      test("works for anyone in the server, in voice or not", async () => {
+        const ctx = await playing(["A"]);
+        ctx.player.up = false;
+        const reply = (await ctx.run("save", {}, FRIEND)).replies[0] as Exclude<Reply, string>;
+        expect(reply.content).toBe("Wysłałem Ci ten utwór w wiadomości prywatnej.");
+        expect(ctx.directMessages.sent.map((dm) => dm.userId)).toEqual([FRIEND]);
+      });
+
+      test("says nothing plays when nothing does", async () => {
+        const ctx = setup();
+        expect(lastText(await ctx.run("save", {}, FRIEND))).toBe(NOTHING_PLAYING);
+        expect(ctx.directMessages.sent).toEqual([]);
+      });
+
       test("works through the sv alias", async () => {
         const ctx = await playing(["A"]);
         await ctx.run("sv");
-        expect(ctx.panels.directs).toHaveLength(1);
+        expect(ctx.directMessages.sent).toHaveLength(1);
       });
 
       test("tells the caller privately when DMs are closed", async () => {
         const ctx = await playing(["A"]);
-        ctx.panels.dmsOpen = false;
+        ctx.directMessages.open = false;
         const reply = (await ctx.run("save")).replies[0] as Exclude<Reply, string>;
         expect(reply.ephemeral).toBe(true);
         expect(reply.content).toContain("Nie mogę Ci wysłać wiadomości prywatnej");
-        expect(ctx.panels.directs).toHaveLength(0);
+        expect(ctx.directMessages.sent).toHaveLength(0);
       });
 
       test("leaves out a link the source does not have", async () => {
@@ -1021,7 +1144,7 @@ describe("music module", () => {
         ctx.player.nextResult = { kind: "tracks", tracks: [track("A", { uri: null })] };
         await ctx.run("play", { query: "a" });
         await ctx.run("save");
-        expect(ctx.panels.directs[0]?.message.content).toBe("**A**\n**Autor:** Autor");
+        expect(ctx.directMessages.sent[0]?.message.content).toBe("**A**\n**Autor:** Autor");
       });
     });
 
@@ -1040,6 +1163,13 @@ describe("music module", () => {
         }
         expect(modes).toEqual(["track", "queue", "off"]);
         expect(labels).toEqual(["Pętla: utwór", "Pętla: kolejka", "Pętla: wył."]);
+      });
+
+      test("a double click on loop moves two steps, not one", async () => {
+        const ctx = await playing(["A"]);
+        const id = ctx.panelButton("panel-loop").customId;
+        await Promise.all([ctx.click(id), ctx.click(id)]);
+        expect(ctx.player.state(GUILD)?.loop).toBe("queue");
       });
 
       test("shuffle mixes the queue and redraws the panel", async () => {
