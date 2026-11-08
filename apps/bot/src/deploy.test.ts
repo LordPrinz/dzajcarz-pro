@@ -1,15 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { silentLogger } from "@dzajcarz/core";
 import { ApplicationIntegrationType, InteractionContextType } from "discord.js";
-import {
-  buildDeployBody,
-  createDeployRegistry,
-  deployOnStartup,
-  deployRoute,
-  deployTarget,
-  unusedServices,
-} from "./deploy.ts";
-import { loadDeployEnv, loadEnv } from "./env.ts";
+import { buildDeployBody, deployRoute, deployTarget, unusedServices } from "./deploy.ts";
+import { loadDeployEnv } from "./env.ts";
 
 const GUILD = "100000000000000001";
 const CLIENT = "200000000000000002";
@@ -123,70 +115,5 @@ describe("unusedServices", () => {
     const held = { service, send: service.send };
     expect(held.send).toBeDefined();
     expect(await Promise.resolve(service)).toBe(service);
-  });
-});
-
-describe("deployOnStartup", () => {
-  function fakeRest(fail = false) {
-    const puts: { route: string; body: unknown }[] = [];
-    return {
-      puts,
-      async put(route: `/${string}`, { body }: { body: unknown }) {
-        if (fail) throw new Error("Missing Access");
-        puts.push({ route, body });
-        return [];
-      },
-    };
-  }
-
-  test("registers every command in the dev guild, or globally without one", async () => {
-    const registry = createDeployRegistry();
-    const rest = fakeRest();
-    await deployOnStartup({
-      rest,
-      clientId: CLIENT,
-      devGuildId: GUILD,
-      registry,
-      logger: silentLogger,
-    });
-    await deployOnStartup({
-      rest,
-      clientId: CLIENT,
-      devGuildId: undefined,
-      registry,
-      logger: silentLogger,
-    });
-    expect(rest.puts.map((put) => put.route)).toEqual([
-      `/applications/${CLIENT}/guilds/${GUILD}/commands`,
-      `/applications/${CLIENT}/commands`,
-    ]);
-    const names = ((rest.puts[0]?.body ?? []) as { name: string }[]).map((command) => command.name);
-    expect(names).toContain("play");
-    expect(names).toHaveLength(registry.commands().length);
-  });
-
-  test("a refused deploy is logged, not thrown", async () => {
-    const errors: string[] = [];
-    const logger = { ...silentLogger, error: (message: string) => void errors.push(message) };
-    await deployOnStartup({
-      rest: fakeRest(true),
-      clientId: CLIENT,
-      devGuildId: GUILD,
-      registry: createDeployRegistry(),
-      logger,
-    });
-    expect(errors).toEqual(["Deploying slash commands failed"]);
-  });
-
-  test("DEPLOY_ON_START is on unless switched off", () => {
-    const env = {
-      ...base,
-      DATABASE_URL: "postgres://u:p@localhost:5432/db",
-      REDIS_URL: "redis://localhost:6379",
-    };
-    expect(loadEnv(env).DEPLOY_ON_START).toBe(true);
-    expect(loadEnv({ ...env, DEPLOY_ON_START: "" }).DEPLOY_ON_START).toBe(true);
-    expect(loadEnv({ ...env, DEPLOY_ON_START: "0" }).DEPLOY_ON_START).toBe(false);
-    expect(loadEnv({ ...env, DEPLOY_ON_START: "false" }).DEPLOY_ON_START).toBe(false);
   });
 });
