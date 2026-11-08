@@ -61,6 +61,31 @@ interface LooseCommand {
   options?: readonly LooseCommand[] | null;
 }
 
+/**
+ * The keys `canonicalCommand` and `canonicalOptions` compare, per level. A key `toSlashCommand` emits that is
+ * missing here would be ignored by the "is Discord up to date" check, so a test fails when the two drift.
+ */
+export const HANDLED_COMMAND_KEYS: readonly string[] = [
+  "type",
+  "name",
+  "description",
+  "default_member_permissions",
+  "options",
+  "integration_types",
+  "contexts",
+];
+export const HANDLED_OPTION_KEYS: readonly string[] = [
+  "type",
+  "name",
+  "description",
+  "required",
+  "choices",
+  "min_value",
+  "max_value",
+  "options",
+];
+export const HANDLED_CHOICE_KEYS: readonly string[] = ["name", "value"];
+
 function canonicalOptions(options: readonly LooseCommand[] | null | undefined): unknown[] {
   // Order matters: it is the order of prefix arguments and of the options in Discord's picker.
   return (options ?? []).map((option) => ({
@@ -154,30 +179,69 @@ export async function deployOnStartup({
       const route = deployRoute(clientId, step);
       const body = buildDeployBody(step, registry);
       const remote = await rest.get(route);
-      if (Array.isArray(remote) && sameCommands(body, remote, step.scope)) {
+      if (!Array.isArray(remote)) {
+        logger.warn("Discord returned an unexpected command list; sending the set anyway", {
+          where,
+        });
+      } else if (sameCommands(body, remote, step.scope)) {
         logger.info("Slash commands are up to date", { where, count: body.length });
         continue;
+      } else {
+        logger.debug("Slash commands differ", {
+          where,
+          differing: differingNames(body, remote, step.scope),
+        });
       }
       await rest.put(route, { body });
       logger.info(step.clear ? "Cleared slash commands" : "Deployed slash commands", {
         where,
         count: body.length,
+        names: body.map((command) => command.name),
       });
     } catch (error) {
       logger.error("Deploying slash commands failed", { where, error });
     }
   }
-  if (steps.some((step) => step.scope === "global")) return;
+  if (!steps.some((step) => step.scope === "global")) {
+    await warnOnGlobalDuplicates({ rest, clientId, logger });
+  }
+}
+
+/** Names of the commands added, removed or changed between the local and the remote set. */
+function differingNames(
+  local: readonly CommandBody[],
+  remote: readonly LooseCommand[],
+  scope: DeployStep["scope"],
+): string[] {
+  const keyed = (commands: readonly LooseCommand[]) =>
+    new Map(
+      commands.map((command) => [command.name, JSON.stringify(canonicalCommand(command, scope))]),
+    );
+  const before = keyed(remote);
+  const after = keyed(local as readonly LooseCommand[]);
+  const names = new Set([...before.keys(), ...after.keys()]);
+  return [...names].filter((name) => before.get(name) !== after.get(name)).map(String);
+}
+
+/**
+ * In dev guild mode a leftover global set shows every command twice. Only warns: deleting global commands
+ * is the user's call (`DEPLOY_CLEAR=1 bun run commands:deploy`). A failed read is logged and nothing more.
+ */
+async function warnOnGlobalDuplicates({
+  rest,
+  clientId,
+  logger,
+}: Pick<StartupDeployOptions, "rest" | "clientId" | "logger">): Promise<void> {
   try {
     const remoteGlobal = await rest.get(Routes.applicationCommands(clientId));
     if (Array.isArray(remoteGlobal) && remoteGlobal.length > 0) {
-      logger.warn(
-        "Global slash commands exist too, so the dev guild shows every command twice; empty them with DEPLOY_CLEAR=1 bun run commands:deploy",
-        { count: remoteGlobal.length },
-      );
+      logger.warn("Global commands duplicate the dev guild", {
+        count: remoteGlobal.length,
+        hint: "run DEPLOY_CLEAR=1 bun run commands:deploy, or start the bot with DEPLOY_GLOBAL=1",
+      });
     }
   } catch (error) {
-    logger.warn("Reading the global slash commands failed", { error });
+    logger.warn("Reading the global commands failed", { error });
   }
 }
 

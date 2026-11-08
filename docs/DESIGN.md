@@ -93,10 +93,11 @@ Discord's defaults filled in (it leaves out empty `options` and `required: false
 turns it off; `commands:deploy` does the same PUT by hand. With `DEPLOY_GLOBAL` the bot deploys globally and
 empties the dev guild, like the script. In dev guild mode it leaves the global set alone and logs a warning
 when that set is not empty (members of the dev guild would see every command twice). The deploy sends
-`integration_types` and `contexts` for global commands and leaves them out for the dev guild. Prefix commands in a DM use the default prefix; a guild-only command answers "Ta komenda
-działa tylko na serwerze.". With only the user install the bot cannot post in the channel, so replies go
-through the interaction. Contexts carry the exact `place`, so a group DM is never mistaken for the DM
-with the bot. See ADR 7.
+`integration_types` and `contexts` for global commands and leaves them out for the dev guild. Prefix
+commands in a DM use the default prefix; a guild-only command answers "Ta komenda działa tylko na
+serwerze.". With only the user install the bot cannot post in the channel, so replies go through the
+interaction. Contexts carry the exact `place`, so a group DM is never mistaken for the DM with the bot.
+See ADR 7.
 
 ### Help
 
