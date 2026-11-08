@@ -25,6 +25,12 @@ const Env = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   REDIS_URL: z.url({ protocol: /^rediss?$/ }),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  // On unless set to 0/false: the bot registers its slash commands at startup. Turn it off when several
+  // instances share the application.
+  COMMANDS_AUTO_DEPLOY: z.preprocess(
+    (value) => (value === undefined || value === "" ? "1" : value),
+    flag,
+  ),
 });
 export type Env = z.infer<typeof Env>;
 

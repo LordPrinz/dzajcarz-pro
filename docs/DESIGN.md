@@ -87,8 +87,11 @@ checked at startup by the registry. See ADR 6.
 
 A command's `contexts` say where it runs (`guild`, `bot-dm`, `private-channel`) and for which install
 (`guild`, `user`); the default is guild only. `/help` and `/ping` run everywhere, the other modules stay in
-servers. The deploy sends `integration_types` and `contexts` for global commands and leaves them out for
-the dev guild. Prefix commands in a DM use the default prefix; a guild-only command answers "Ta komenda
+servers. The bot deploys its commands itself on start, to the dev guild if one is set, else globally, and
+only when Discord's set differs: both sides are reduced to the fields `toSlashCommand` sends, with
+Discord's defaults filled in (it leaves out empty `options` and `required: false`). `COMMANDS_AUTO_DEPLOY`
+turns it off; `commands:deploy` does the same PUT by hand. The deploy sends `integration_types` and
+`contexts` for global commands and leaves them out for the dev guild. Prefix commands in a DM use the default prefix; a guild-only command answers "Ta komenda
 działa tylko na serwerze.". With only the user install the bot cannot post in the channel, so replies go
 through the interaction. Contexts carry the exact `place`, so a group DM is never mistaken for the DM
 with the bot. See ADR 7.
