@@ -17,7 +17,7 @@ const flag = z.preprocess(
   z.boolean(),
 );
 
-const Env = z.object({
+const EnvFields = z.object({
   DISCORD_TOKEN: z.string().min(50),
   DISCORD_CLIENT_ID: snowflake,
   DISCORD_DEV_GUILD_ID: optional(snowflake),
@@ -25,11 +25,21 @@ const Env = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   REDIS_URL: z.url({ protocol: /^rediss?$/ }),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  // Optional: without them the bot runs and music commands say the player is unavailable.
+  LAVALINK_URL: optional(z.url({ protocol: /^https?$/ })),
+  LAVALINK_PASSWORD: optional(z.string().min(1)),
 });
+const Env = EnvFields.refine(
+  (env) => (env.LAVALINK_URL === undefined) === (env.LAVALINK_PASSWORD === undefined),
+  {
+    message: "set both LAVALINK_URL and LAVALINK_PASSWORD, or neither",
+    path: ["LAVALINK_PASSWORD"],
+  },
+);
 export type Env = z.infer<typeof Env>;
 
 /** Just what deploying slash commands needs; no database or Redis. */
-const DeployEnv = Env.pick({
+const DeployEnv = EnvFields.pick({
   DISCORD_TOKEN: true,
   DISCORD_CLIENT_ID: true,
   DISCORD_DEV_GUILD_ID: true,

@@ -2,6 +2,12 @@ import type { BotModule, CommandSummary, Logger, Scheduler } from "@dzajcarz/cor
 import type { KeyValueStore } from "@dzajcarz/kv";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
+  createMusicModule,
+  type MusicPlayer,
+  type PanelMessages,
+  type VoiceChannels,
+} from "@dzajcarz/module-music";
+import {
   createPartyModule,
   type PartyChannels,
   type PartyChat,
@@ -46,6 +52,10 @@ export interface ModuleServices {
   partyLock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
   presence: Presence;
   clock: Clock;
+  musicPlayer: MusicPlayer;
+  voiceChannels: VoiceChannels;
+  musicPanels: PanelMessages;
+  componentState: Pick<KeyValueStore, "get" | "set">;
   logger: Logger;
 }
 
@@ -74,6 +84,14 @@ export function createModules(services: ModuleServices): BotModule[] {
       scheduler: services.scheduler,
       lock: services.partyLock,
       logger: services.logger.child({ module: "party" }),
+    }),
+    createMusicModule({
+      player: services.musicPlayer,
+      voice: services.voiceChannels,
+      panels: services.musicPanels,
+      scheduler: services.scheduler,
+      stateStorage: services.componentState,
+      logger: services.logger.child({ module: "music" }),
     }),
     createStatusModule({
       presence: services.presence,

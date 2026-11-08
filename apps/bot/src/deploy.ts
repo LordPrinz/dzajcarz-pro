@@ -3,6 +3,7 @@ import { type RESTPostAPIChatInputApplicationCommandsJSONBody, Routes } from "di
 import { toSlashCommand } from "./discord/slash.ts";
 import type { DeployEnv } from "./env.ts";
 import { createModules } from "./modules.ts";
+import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
 
 /** One PUT to Discord: set or empty the commands of the application or of one guild. */
 export type DeployStep =
@@ -88,6 +89,11 @@ export const createDeployRegistry = () =>
       partyChat: unusedServices(),
       scheduler: unusedServices(),
       partyLock: unusedServices(),
+      // The music module subscribes to its player when it is created.
+      musicPlayer: createUnavailableMusicPlayer(),
+      voiceChannels: unusedServices(),
+      musicPanels: unusedServices(),
+      componentState: unusedServices(),
       presence: unusedServices(),
       clock: unusedServices(),
       logger: silentLogger,

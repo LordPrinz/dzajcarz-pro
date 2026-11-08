@@ -39,7 +39,8 @@ modules/
   welcome/          welcome (set through a form, off, test), greets new members
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, block, hide, show), a voice channel per member who joins the party area
   status/           rotates the bot's activity (the old bot's song)
-  …                 music, moderation, fun (see the board)
+  music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), a now playing panel with buttons
+  …                 moderation, fun (see the board)
 infra/              docker-compose: Postgres, Redis, Lavalink (profile "music")
 scripts/            git hooks and GitHub automation (Bun scripts)
 docs/               design doc and ADRs
@@ -70,7 +71,11 @@ channel, where the bot needs **Send Messages** and **Embed Links** (the panel), 
 there after 15 seconds; without it the panel still works and the chat is just not cleaned.
 
 The music module needs Lavalink as well:
-`docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d` (port 2333).
+`docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d` (port 2333), with
+`LAVALINK_URL` and `LAVALINK_PASSWORD` in `.env`. Both are optional: without them, or while the node is
+down, the bot runs normally and music commands answer that the player is unavailable. In the voice channel
+the bot needs **Connect** and **Speak**, and **Send Messages** and **Embed Links** in the text channel where
+music was started (the now playing panel).
 
 ## Scripts
 

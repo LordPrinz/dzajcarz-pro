@@ -294,8 +294,55 @@ Code, docs and logs are English. Everything users read on Discord is Polish.
 
 ### Music
 
-Audio goes through Lavalink (ADR 4). The music module talks to a small `MusicPlayer` port, so tests run
-without a Lavalink node and the client library can be swapped.
+Audio goes through Lavalink (ADR 4). `modules/music` talks to ports only, so tests run without a node and
+the client library can be swapped:
+
+- `MusicPlayer`: `available()`, `search(query, requesterId)` (tracks, a playlist, empty or an error),
+  per guild `state()` (voice and text channel, current track, upcoming tracks, position, paused), `join`,
+  `enqueue`, `skip`, `pause`, `resume`, `leave`, and `subscribe` for `trackStart`, `queueEnd` and
+  `playerDestroyed`.
+- `VoiceChannels`: the member's voice channel and the number of people (bots excluded) in a channel, read
+  from the gateway's voice state cache.
+- `PanelMessages`: post, edit and delete the now playing panel.
+- `Scheduler` (idle timeout) and the component state storage (search results).
+
+Commands are guild-only and answer in Polish: `/play <query>` (`p`), `/search <query>`, `/queue`, `/skip`,
+`/stop`, `/pause`, `/resume`, `/nowplaying` (`np`). A query that is an http(s) link (Discord's `<link>`
+form is unwrapped) is loaded as a link; anything else is YouTube search text, sent as `ytsearch:<text>`
+straight to `/loadtracks`, so a typed `local:`, `scsearch:` or path never selects a source. The adapter
+builds the identifier itself instead of going through the client's search helper, which strips source
+prefixes and passes anything starting with `http` through raw. `/play` takes the first search hit, or up to
+100 tracks of a playlist, and the queue holds at most 500 tracks (current one included); the reply says how
+many were left out. `/search` shows up to ten results in a string select owned by the caller; the results
+wait in the component state store (ADR 6) and the pick is checked again against the voice rules.
+
+Access: the caller must be in a voice channel, and once the bot plays in the guild, in the bot's channel.
+Anyone in that channel may control playback (no DJ role, no votes). `/queue` and `/nowplaying` only read and
+work for everyone in the server. While no node is connected every control answers "Odtwarzacz muzyki jest
+teraz niedostępny."; other modules are unaffected and the bot starts without `LAVALINK_URL` or with the
+node offline (the module is then wired to a player that is never available).
+
+Now playing panel: one message per guild in the text channel where music was started, posted on the first
+`trackStart` and edited on the next ones (and when tracks are added or playback is paused). It shows the
+title (linked), author, cover, progress at that moment, who added the track and the queue length, with
+public buttons Pauza/Wznów, Dalej, Stop and Kolejka. The first three check the clicker against the bot's
+channel like the commands; Kolejka opens the paged queue ephemerally for the clicker. A panel that was
+deleted is posted again on the next change. It is removed when the queue ends, the player is destroyed and
+on shutdown. Panel work runs one at a time per guild, so quick track changes never post two panels. Loop and
+shuffle buttons come with the controls ticket (#12).
+
+Idle: the bot leaves 3 minutes after the queue ran out or the last person (bots do not count) left its
+channel. The check runs on `trackStart`, `queueEnd`, after tracks are added and on `voiceStateUpdate`
+(`alwaysRun`, so it works where the module is switched off); a track or a person coming back cancels it.
+
+Adapter (`apps/bot/src/music`, `lavalink-client` 2.11.0): one node from `LAVALINK_URL` /
+`LAVALINK_PASSWORD` (`https` means TLS), 20 retries 3 s apart, `autoSkip` on, players join self-deafened.
+Searched tracks are cached (2000) so enqueueing needs no extra request; an older one is decoded by the
+node. Discord voice events reach the client through the `raw` gateway event. A disconnect by someone else
+destroys the player. When the node restarts, the current track of each player is replayed from the
+position it had when the node went away: the bot leaves and rejoins its channel first, because the old
+voice session is gone and Discord refuses it (4006). Shutdown removes the panels (module `dispose`), then
+destroys the players and the node connection before the Discord client.
 
 ## Testing
 
