@@ -38,14 +38,19 @@ git push -u origin HEAD                           # pre-push: branch name, typec
 gh pr create --base v5 --fill                     # PR title must follow the same format
 ```
 
-Test new commands on a private test server: set `DISCORD_DEV_GUILD_ID` and run `bun run commands:deploy`,
-so slash commands show up there at once instead of after the global rollout.
+Test new commands on a private test server: set `DISCORD_DEV_GUILD_ID`, so slash commands show up there at
+once instead of after the global rollout. The bot registers them itself on start: it reads the set Discord
+has and sends the new one only when it differs (the log says "Deployed slash commands" or "Slash commands
+are up to date"). `COMMANDS_AUTO_DEPLOY=false` turns that off. `bun run commands:deploy` is now optional;
+it does the same without starting the bot and always sends the set.
 
 Guild commands cannot be used in DMs or as a user-installed app. To try those, deploy globally with
 `DEPLOY_GLOBAL=1 bun run commands:deploy`. With a dev guild set, this also empties the dev guild so the
 commands do not show up twice (the global rollout can take a while). To go back to dev-guild mode, run
 `DEPLOY_CLEAR=1 bun run commands:deploy` (empties the global set), then a plain `bun run commands:deploy`.
-Both flags accept `1` or `true`.
+Both flags accept `1` or `true`. The bot reads `DEPLOY_GLOBAL` too: started with it, the bot deploys the
+global set and empties the dev guild instead of filling it. In dev guild mode the bot leaves the global set
+alone and logs a warning when it is not empty, because the dev guild then shows every command twice.
 
 ## Installing the bot
 
