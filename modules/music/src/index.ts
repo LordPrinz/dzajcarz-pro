@@ -19,6 +19,7 @@ import { escapeMarkdown, formatDuration, parseQuery, truncate } from "./format.t
 import { PANEL_COLOR, panelMessage, queueLine, trackEmbed, tracksWord } from "./panel.ts";
 import type {
   MusicPlayer,
+  MusicQuery,
   MusicTrack,
   PanelMessages,
   PlayerState,
@@ -53,6 +54,10 @@ const QUEUE_PAGE_SIZE = 10;
 export const UNAVAILABLE = "Odtwarzacz muzyki jest teraz niedostępny.";
 export const NOT_IN_VOICE = "Najpierw wejdź na kanał głosowy.";
 export const NOTHING_PLAYING = "Nic teraz nie gra.";
+export const UNSUPPORTED_LINK =
+  "Obsługuję tylko linki z YouTube, SoundCloud, Bandcamp, Twitch i Vimeo.";
+export const trackFailedText = (title: string) =>
+  `Nie udało się odtworzyć **${escapeMarkdown(title)}**, gram dalej.`;
 export const otherChannel = (channelId: string) =>
   `Musisz być na kanale <#${channelId}>, na którym gram.`;
 
@@ -77,12 +82,21 @@ export function createMusicModule({
     return ctx.guildId;
   }
 
+  /** The member's input as a query; a link to another site is refused here. */
+  function queryOf(input: string, emptyText: string): MusicQuery {
+    const query = parseQuery(input);
+    if (!query) throw new UserError(emptyText);
+    if (query.kind === "unsupported") throw new UserError(UNSUPPORTED_LINK);
+    return query;
+  }
+
   /**
    * The caller must be in a voice channel, and in the bot's once the bot plays in the guild. Returns
-   * the caller's channel and the guild's player, if any.
+   * the caller's channel and the guild's player, if any. `needsNode: false` lets a command that only
+   * tears down (stop) through while the node is away.
    */
-  async function requireListener(guildId: string, userId: string) {
-    if (!player.available()) throw new UserError(UNAVAILABLE);
+  async function requireListener(guildId: string, userId: string, needsNode = true) {
+    if (needsNode && !player.available()) throw new UserError(UNAVAILABLE);
     const channelId = await voice.channelOf(guildId, userId);
     if (channelId === null) throw new UserError(NOT_IN_VOICE);
     const state = player.state(guildId);
@@ -93,36 +107,57 @@ export function createMusicModule({
   }
 
   /** Like `requireListener`, for controls: there must be something to control. */
-  async function requireControl(guildId: string, userId: string): Promise<PlayerState> {
-    if (!player.available()) throw new UserError(UNAVAILABLE);
+  async function requireControl(
+    guildId: string,
+    userId: string,
+    needsNode = true,
+  ): Promise<PlayerState> {
+    if (needsNode && !player.available()) throw new UserError(UNAVAILABLE);
     if (!player.state(guildId)) throw new UserError(NOTHING_PLAYING);
-    const { state } = await requireListener(guildId, userId);
+    const { state } = await requireListener(guildId, userId, needsNode);
     if (!state) throw new UserError(NOTHING_PLAYING);
     return state;
   }
 
+  /** Additions run one at a time per guild: two quick `/play`s must not both join or both "start". */
+  const additions = new Map<string, Promise<unknown>>();
+
+  function oneAtATime<T>(guildId: string, task: () => Promise<T>): Promise<T> {
+    const result = (additions.get(guildId) ?? Promise.resolve()).then(task);
+    const settled = result.catch(() => {});
+    additions.set(guildId, settled);
+    void settled.then(() => {
+      if (additions.get(guildId) === settled) additions.delete(guildId);
+    });
+    return result;
+  }
+
   /**
-   * Adds tracks for a member who passed `requireListener`, joining first when the bot is not in voice.
-   * Returns what was accepted (the queue has a cap) and whether playback starts with it.
+   * Adds tracks for a member, joining first when the bot is not in voice. The voice rules, the queue cap
+   * and the "starts now" answer are all decided from the state inside the per-guild chain, so they see
+   * what an addition just before did. Returns what was accepted and whether playback starts with it.
    */
-  async function addTracks(
+  function addTracks(
     guildId: string,
-    voiceChannelId: string,
+    userId: string,
     textChannelId: string,
     tracks: readonly MusicTrack[],
   ) {
-    const state = player.state(guildId);
-    const queued = state ? state.upcoming.length + (state.current ? 1 : 0) : 0;
-    const room = MAX_QUEUE_LENGTH - queued;
-    if (room <= 0) throw new UserError(`Kolejka jest pełna (${MAX_QUEUE_LENGTH} utworów).`);
-    const accepted = tracks.slice(0, room);
-    if (!state) await player.join(guildId, voiceChannelId, textChannelId);
-    await player.enqueue(guildId, accepted);
-    const startsNow = !state?.current;
-    // A new track redraws the panel by itself; otherwise only its queue count changed.
-    if (!startsNow) void inOrder(guildId, () => showPanel(guildId));
-    void reviewIdle(guildId);
-    return { accepted, startsNow, position: queued };
+    return oneAtATime(guildId, async () => {
+      // The caller may have moved since the command started, or another addition made the bot join.
+      const { channelId, state } = await requireListener(guildId, userId);
+      const queued = state ? state.upcoming.length + (state.current ? 1 : 0) : 0;
+      const room = MAX_QUEUE_LENGTH - queued;
+      if (room <= 0) throw new UserError(`Kolejka jest pełna (${MAX_QUEUE_LENGTH} utworów).`);
+      const accepted = tracks.slice(0, room);
+      if (!state) await player.join(guildId, channelId, textChannelId);
+      await player.enqueue(guildId, accepted);
+      const startsNow = !state?.current;
+      // A new track redraws the panel by itself; otherwise only its queue count changed.
+      if (!startsNow) void inOrder(guildId, () => showPanel(guildId));
+      void reviewIdle(guildId);
+      return { accepted, startsNow, position: queued };
+    });
   }
 
   function addedText(track: MusicTrack, startsNow: boolean, position: number): string {
@@ -151,10 +186,12 @@ export function createMusicModule({
     guildOnly: true,
     async run(ctx) {
       const guildId = guildOf(ctx);
+      // Answer the click first: Discord gives three seconds, and the skip waits for the node.
+      await ctx.defer();
       const state = await requireControl(guildId, ctx.user.id);
       if (!state.current) throw new UserError(NOTHING_PLAYING);
       // The next trackStart (or queueEnd) redraws the panel.
-      await player.skip(guildId);
+      await player.skip(guildId, state.current.id);
     },
   });
 
@@ -165,7 +202,9 @@ export function createMusicModule({
     guildOnly: true,
     async run(ctx) {
       const guildId = guildOf(ctx);
-      await requireControl(guildId, ctx.user.id);
+      // Acknowledged before playerDestroyed deletes the panel this button sits on.
+      await ctx.defer();
+      await requireControl(guildId, ctx.user.id, false);
       // playerDestroyed removes the panel.
       await player.leave(guildId);
     },
@@ -234,13 +273,16 @@ export function createMusicModule({
     if (!state || !message) return;
     const existing = posted.get(guildId);
     if (existing?.channelId === state.textChannelId) {
+      let edited: "edited" | "gone";
       try {
-        await panels.edit(existing.channelId, existing.messageId, message);
-        return;
+        edited = await panels.edit(existing.channelId, existing.messageId, message);
       } catch (error) {
-        // Deleted by someone, most likely: post a fresh one.
-        logger.debug("Editing the panel failed, posting a new one", { guildId, error });
+        // Discord refused for another reason (rate limit, outage): keep the panel, the next change retries.
+        logger.warn("Editing the now playing panel failed", { guildId, error });
+        return;
       }
+      if (edited === "edited") return;
+      // Someone deleted the panel or its channel: post a fresh one.
     } else if (existing) {
       await panels.delete(existing.channelId, existing.messageId).catch(() => {});
     }
@@ -320,6 +362,13 @@ export function createMusicModule({
       cancelIdle(guildId);
       void inOrder(guildId, () => removePanel(guildId));
     },
+    trackFailed(guildId, track) {
+      const channelId = player.state(guildId)?.textChannelId;
+      if (!channelId) return;
+      panels.post(channelId, { content: trackFailedText(track.title) }).catch((error: unknown) => {
+        logger.warn("Posting a failed track note failed", { guildId, error });
+      });
+    },
   });
 
   const voiceChange = defineEvent({
@@ -330,6 +379,16 @@ export function createMusicModule({
     async run(_oldState, newState) {
       const guildId = newState.guild.id;
       if (player.state(guildId)) await reviewIdle(guildId);
+    },
+  });
+
+  const guildGone = defineEvent({
+    name: "music-guild-gone",
+    event: "guildDelete",
+    // The bot was removed from the server (or it went unavailable): nothing is left to play into.
+    alwaysRun: true,
+    async run(guild) {
+      if (player.state(guild.id)) await player.leave(guild.id);
     },
   });
 
@@ -383,9 +442,8 @@ export function createMusicModule({
     options: queryOption,
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const query = parseQuery(ctx.args.query);
-      if (!query) throw new UserError("Podaj link albo czego szukać.");
-      const { channelId } = await requireListener(guildId, ctx.user.id);
+      const query = queryOf(ctx.args.query, "Podaj link albo czego szukać.");
+      await requireListener(guildId, ctx.user.id);
       await ctx.defer();
       const result = await player.search(query, ctx.user.id);
       if (result.kind === "error") {
@@ -400,9 +458,8 @@ export function createMusicModule({
         result.kind === "playlist"
           ? result.tracks.slice(0, MAX_PLAYLIST_TRACKS)
           : result.tracks.slice(0, 1);
-      // Re-checked after the search: the bot may have joined another channel meanwhile.
-      await requireListener(guildId, ctx.user.id);
-      const added = await addTracks(guildId, channelId, ctx.channelId, wanted);
+      // addTracks checks the voice rules again: the search took a while.
+      const added = await addTracks(guildId, ctx.user.id, ctx.channelId, wanted);
       if (result.kind !== "playlist") {
         const [track] = added.accepted;
         if (track) await ctx.reply(addedText(track, added.startsNow, added.position));
@@ -429,8 +486,7 @@ export function createMusicModule({
       const { tracks } = await searches.load<PendingSearch>(ctx.state);
       const track = tracks[Number(ctx.values[0])];
       if (!track) throw new UserError("Nie ma takiego wyniku.");
-      const { channelId } = await requireListener(guildId, ctx.user.id);
-      const added = await addTracks(guildId, channelId, ctx.channelId, [track]);
+      const added = await addTracks(guildId, ctx.user.id, ctx.channelId, [track]);
       await ctx.update({
         content: addedText(track, added.startsNow, added.position),
         components: [],
@@ -444,8 +500,7 @@ export function createMusicModule({
     options: queryOption,
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const query = parseQuery(ctx.args.query);
-      if (!query) throw new UserError("Podaj, czego szukać.");
+      const query = queryOf(ctx.args.query, "Podaj, czego szukać.");
       await requireListener(guildId, ctx.user.id);
       await ctx.defer({ ephemeral: true });
       const result = await player.search(query, ctx.user.id);
@@ -496,7 +551,7 @@ export function createMusicModule({
       const guildId = guildOf(ctx);
       const state = await requireControl(guildId, ctx.user.id);
       if (!state.current) throw new UserError(NOTHING_PLAYING);
-      await player.skip(guildId);
+      await player.skip(guildId, state.current.id);
       await ctx.reply(`Pominięto: **${escapeMarkdown(state.current.title)}**.`);
     },
   });
@@ -506,7 +561,8 @@ export function createMusicModule({
     description: "Zatrzymuje muzykę, czyści kolejkę i wychodzi z kanału",
     async run(ctx) {
       const guildId = guildOf(ctx);
-      await requireControl(guildId, ctx.user.id);
+      // Works while the node is away too: the bot still leaves voice.
+      await requireControl(guildId, ctx.user.id, false);
       await player.leave(guildId);
       await ctx.reply("Zatrzymano muzykę i wyczyszczono kolejkę.");
     },
@@ -546,12 +602,10 @@ export function createMusicModule({
     async run(ctx) {
       const state = player.state(guildOf(ctx));
       if (!state?.current) throw new UserError(NOTHING_PLAYING);
+      const embed = trackEmbed(state.current, state.positionMs, state.upcoming.length);
       await ctx.reply({
         embeds: [
-          {
-            ...trackEmbed(state.current, state.positionMs, state.upcoming.length),
-            ...(state.paused ? { footer: "Wstrzymane" } : {}),
-          },
+          { ...embed, footer: state.paused ? `Wstrzymane · ${embed.footer}` : embed.footer },
         ],
       });
     },
@@ -560,7 +614,7 @@ export function createMusicModule({
   return {
     name: MODULE,
     commands: [play, search, queue, skip, stop, pause, resume, nowPlaying],
-    events: [voiceChange],
+    events: [voiceChange, guildGone],
     components: [pauseButton, skipButton, stopButton, queueButton, pick, queuePages.button],
     async dispose() {
       unsubscribe();

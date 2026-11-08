@@ -39,6 +39,9 @@ export interface FakePlayer extends MusicPlayer {
   up: boolean;
   /** What the next `search` returns. */
   nextResult: SearchResult;
+  /** Runs while a search is in flight (a member moving channels meanwhile). */
+  duringSearch: (() => void) | null;
+  readonly skips: { guildId: string; expectedTrackId: string }[];
   readonly searches: { query: MusicQuery; requesterId: string }[];
   readonly joins: { guildId: string; voiceChannelId: string; textChannelId: string }[];
   readonly players: Map<string, GuildPlayer>;
@@ -46,6 +49,8 @@ export interface FakePlayer extends MusicPlayer {
   finishTrack(guildId: string): void;
   /** The bot was kicked from voice or the node dropped the player. */
   destroy(guildId: string): void;
+  /** The node could not play the current track; it moves on to the next one. */
+  failTrack(guildId: string): void;
 }
 
 export function createFakePlayer(): FakePlayer {
@@ -74,12 +79,15 @@ export function createFakePlayer(): FakePlayer {
   const fake: FakePlayer = {
     up: true,
     nextResult: { kind: "tracks", tracks: [track("Pierwszy")] },
+    duringSearch: null,
+    skips: [],
     searches: [],
     joins: [],
     players,
     available: () => fake.up,
     async search(query, requesterId) {
       fake.searches.push({ query, requesterId });
+      fake.duringSearch?.();
       return fake.nextResult;
     },
     state(guildId): PlayerState | null {
@@ -88,6 +96,8 @@ export function createFakePlayer(): FakePlayer {
     },
     async join(guildId, voiceChannelId, textChannelId) {
       fake.joins.push({ guildId, voiceChannelId, textChannelId });
+      // Joining waits for Discord, which is where two quick additions used to overlap.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       if (players.has(guildId)) return;
       players.set(guildId, {
         voiceChannelId,
@@ -103,8 +113,10 @@ export function createFakePlayer(): FakePlayer {
       guild.upcoming.push(...tracks);
       if (!guild.current) advance(guildId, guild);
     },
-    async skip(guildId) {
-      advance(guildId, need(guildId));
+    async skip(guildId, expectedTrackId) {
+      fake.skips.push({ guildId, expectedTrackId });
+      const guild = need(guildId);
+      if (guild.current?.id === expectedTrackId) advance(guildId, guild);
     },
     async pause(guildId) {
       need(guildId).paused = true;
@@ -125,6 +137,12 @@ export function createFakePlayer(): FakePlayer {
     destroy(guildId) {
       if (!players.delete(guildId)) return;
       emit((listener) => listener.playerDestroyed(guildId));
+    },
+    failTrack(guildId) {
+      const guild = need(guildId);
+      const failed = guild.current;
+      if (failed) emit((listener) => listener.trackFailed(guildId, failed));
+      advance(guildId, guild);
     },
   };
   return fake;
@@ -151,6 +169,8 @@ export interface FakePanels extends PanelMessages {
   readonly posts: string[];
   readonly edits: string[];
   readonly deletes: string[];
+  /** Edits reject with this (a non-"gone" Discord failure) while set. */
+  editError: Error | null;
 }
 
 export function createFakePanels(): FakePanels {
@@ -161,6 +181,7 @@ export function createFakePanels(): FakePanels {
     posts: [],
     edits: [],
     deletes: [],
+    editError: null,
     async post(channelId, message) {
       const id = `panel-${++next}`;
       messages.set(id, { channelId, message });
@@ -168,9 +189,11 @@ export function createFakePanels(): FakePanels {
       return id;
     },
     async edit(channelId, messageId, message) {
-      if (!messages.has(messageId)) throw new Error("Unknown Message");
+      if (panels.editError) throw panels.editError;
+      if (!messages.has(messageId)) return "gone";
       messages.set(messageId, { channelId, message });
       panels.edits.push(messageId);
+      return "edited";
     },
     async delete(_channelId, messageId) {
       messages.delete(messageId);

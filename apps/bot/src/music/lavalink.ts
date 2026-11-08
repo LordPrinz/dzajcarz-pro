@@ -2,11 +2,19 @@
 import type { Logger } from "@dzajcarz/core";
 import type { MusicListener, MusicPlayer, MusicTrack } from "@dzajcarz/module-music";
 import { type Client, Events } from "discord.js";
-import { LavalinkManager, type Player, type Track } from "lavalink-client";
+import {
+  LavalinkManager,
+  type ManagerOptions,
+  type Player,
+  type Track,
+  type UnresolvedTrack,
+} from "lavalink-client";
 import {
   nodeOptions,
   type RawLoadResult,
   rawTracksOf,
+  resumePosition,
+  retryDelayAfter,
   toIdentifier,
   toMusicTrack,
   toPlayerState,
@@ -23,6 +31,8 @@ export interface LavalinkPlayerOptions {
   url: string;
   password: string;
   logger: Logger;
+  /** Builds the client library's manager; the tests pass a stub. */
+  createManager?: (options: ManagerOptions) => LavalinkManager;
 }
 
 /** Searched tracks kept to enqueue without asking the node again; older ones are decoded on demand. */
@@ -36,8 +46,9 @@ export function createLavalinkMusicPlayer({
   url,
   password,
   logger,
+  createManager = (options) => new LavalinkManager(options),
 }: LavalinkPlayerOptions): LavalinkMusicPlayer {
-  const manager = new LavalinkManager({
+  const manager = createManager({
     nodes: [nodeOptions(url, password)],
     sendToShard: (guildId, payload) => client.guilds.cache.get(guildId)?.shard.send(payload),
     autoSkip: true,
@@ -89,24 +100,64 @@ export function createLavalinkMusicPlayer({
     return manager.utils.buildTrack(known, requester);
   }
 
-  // A restarted node forgets its sessions: the client keeps the players but nothing plays any more. The
-  // track is replayed from where it was when the node went away once the node is back (spike DZAJ-10).
+  // A restarted node forgets its sessions: the client keeps the players but nothing plays any more. Every
+  // player is rejoined once the node is back, and its track replayed from where it was (spike DZAJ-10).
   const resumeAt = new Map<string, number>();
+  /** The track a skip was sent for, until the next track starts: a second skip of it is a no-op. */
+  const skipping = new Map<string, string>();
+  /** Guilds whose bot leaves and rejoins voice on purpose (recovery); their disconnect is not a kick. */
+  const rejoining = new Map<string, () => void>();
+
+  function playerGone(guildId: string, reason: unknown): void {
+    resumeAt.delete(guildId);
+    skipping.delete(guildId);
+    logger.info("Music player destroyed", { guildId, reason });
+    emit("playerDestroyed", (listener) => listener.playerDestroyed(guildId));
+  }
+
+  /** The voice state update `Player#disconnect` sends, straight through the gateway. */
+  async function leaveVoice(guildId: string): Promise<void> {
+    await client.guilds.cache.get(guildId)?.shard.send({
+      op: 4,
+      d: { guild_id: guildId, channel_id: null, self_mute: false, self_deaf: false },
+    });
+  }
+
+  /**
+   * Destroys a player, also while the node is away. The client leaves voice and drops the player before it
+   * asks the node to delete it; when that request fails the client never emits `playerDestroy`, so the
+   * player is finished here: voice left through the gateway if it got no further, player forgotten,
+   * listeners told. Never rejects.
+   */
+  async function destroyPlayer(player: Player, reason: string, disconnect = true): Promise<void> {
+    const { guildId } = player;
+    try {
+      await player.destroy(reason, disconnect);
+      return;
+    } catch (error) {
+      logger.warn("Destroying a music player on the node failed", { guildId, reason, error });
+    }
+    if (manager.getPlayer(guildId) === player) {
+      if (disconnect) {
+        await leaveVoice(guildId).catch((error: unknown) =>
+          logger.warn("Leaving voice failed", { guildId, error }),
+        );
+      }
+      manager.players.delete(guildId);
+    }
+    playerGone(guildId, reason);
+  }
 
   manager.on("trackStart", (player, track) => {
+    skipping.delete(player.guildId);
     if (track)
       emit("trackStart", (listener) => listener.trackStart(player.guildId, toMusicTrack(track)));
   });
   manager.on("queueEnd", (player) => {
+    skipping.delete(player.guildId);
     emit("queueEnd", (listener) => listener.queueEnd(player.guildId));
   });
-  manager.on("playerDestroy", (player, reason) => {
-    resumeAt.delete(player.guildId);
-    logger.info("Music player destroyed", { guildId: player.guildId, reason });
-    emit("playerDestroyed", (listener) => listener.playerDestroyed(player.guildId));
-  });
-  /** Guilds whose bot leaves and rejoins voice on purpose (recovery); their disconnect is not a kick. */
-  const rejoining = new Map<string, () => void>();
+  manager.on("playerDestroy", (player, reason) => playerGone(player.guildId, reason));
   manager.on("playerDisconnect", (player) => {
     const resolve = rejoining.get(player.guildId);
     if (resolve) {
@@ -114,72 +165,96 @@ export function createLavalinkMusicPlayer({
       return;
     }
     // Someone disconnected the bot: there is nothing left to play into.
-    player
-      .destroy("Disconnected", false)
-      .catch((error: unknown) =>
-        logger.warn("Destroying a disconnected player failed", { guildId: player.guildId, error }),
-      );
+    void destroyPlayer(player, "Disconnected", false);
   });
 
   /**
-   * Plays the current track again from `position` after a node restart. The voice session died with the
-   * old node (Discord answers a reused one with close code 4006), and re-sending the same channel does not
-   * produce new credentials, so the bot leaves and joins the channel again first.
+   * Brings a player back after a node restart. The voice session died with the old node (Discord answers
+   * a reused one with close code 4006), and re-sending the same channel does not produce new credentials,
+   * so the bot leaves and joins the channel again first. Then the current track plays from `position`, or
+   * the next one when it would have ended meanwhile. A player that cannot be brought back is destroyed.
    */
-  async function replay(player: Player, position: number): Promise<void> {
+  async function recover(player: Player, position: number): Promise<void> {
     const { guildId } = player;
-    const channelId = player.voiceChannelId;
-    const current = player.queue.current;
-    if (!channelId || !current) return;
-    const paused = player.paused;
-    const left = new Promise<void>((resolve) => {
-      rejoining.set(guildId, resolve);
-      setTimeout(resolve, REJOIN_TIMEOUT_MS);
-    });
     try {
-      await player.disconnect(true);
-      await left;
-    } finally {
-      rejoining.delete(guildId);
+      const channelId = player.voiceChannelId ?? player.options.voiceChannelId;
+      if (!channelId) throw new Error("The player has no voice channel to rejoin");
+      const current = player.queue.current;
+      const paused = player.paused;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const left = new Promise<void>((resolve) => {
+        rejoining.set(guildId, resolve);
+        timer = setTimeout(resolve, REJOIN_TIMEOUT_MS);
+      });
+      try {
+        await player.disconnect(true);
+        await left;
+      } finally {
+        clearTimeout(timer);
+        rejoining.delete(guildId);
+      }
+      player.options.voiceChannelId = channelId;
+      await player.connect();
+      if (!current) return;
+      const at = resumePosition(current.info, position);
+      if (at !== null) {
+        await player.play({ clientTrack: current, position: at, paused });
+        return;
+      }
+      // The track would have ended during the outage.
+      player.queue.current = null;
+      if (player.queue.tracks.length > 0) await player.play({ paused });
+      else emit("queueEnd", (listener) => listener.queueEnd(guildId));
+    } catch (error) {
+      logger.warn("Recovering a music player failed", { guildId, error });
+      await destroyPlayer(player, "RecoveryFailed");
     }
-    player.options.voiceChannelId = channelId;
-    await player.connect();
-    await player.play({ clientTrack: current, position, paused });
   }
 
+  function trackFailed(
+    player: Player,
+    track: Track | UnresolvedTrack | null,
+    log: string,
+    error?: string,
+  ): void {
+    logger.warn(log, { guildId: player.guildId, title: track?.info.title, error });
+    // The client skips to the next track by itself (autoSkip); members only get a note.
+    if (track)
+      emit("trackFailed", (listener) => listener.trackFailed(player.guildId, toMusicTrack(track)));
+  }
   manager.on("trackError", (player, track, payload) => {
-    logger.warn("Track failed", {
-      guildId: player.guildId,
-      title: track?.info.title,
-      error: payload.exception?.message,
-    });
+    trackFailed(player, track, "Track failed", payload.exception?.message);
   });
   manager.on("trackStuck", (player, track) => {
-    logger.warn("Track stuck", { guildId: player.guildId, title: track?.info.title });
+    trackFailed(player, track, "Track stuck");
   });
 
   manager.nodeManager.on("disconnect", (node, reason) => {
     logger.warn("Lavalink node disconnected", { node: node.id, reason });
     for (const player of manager.players.values()) {
-      if (player.queue.current && !resumeAt.has(player.guildId)) {
-        resumeAt.set(player.guildId, player.position);
+      if (!resumeAt.has(player.guildId)) {
+        resumeAt.set(player.guildId, player.queue.current ? player.position : 0);
       }
     }
   });
   manager.nodeManager.on("connect", (node) => {
     logger.info("Lavalink node connected", { node: node.id });
-    for (const [guildId, position] of resumeAt) {
-      resumeAt.delete(guildId);
+    node.options.retryDelay = retryDelayAfter(0);
+    const recovering = [...resumeAt];
+    resumeAt.clear();
+    for (const [guildId, position] of recovering) {
       const player = manager.getPlayer(guildId);
-      if (player?.queue.current) {
-        replay(player, position).catch((error: unknown) =>
-          logger.warn("Resuming playback failed", { guildId, error }),
-        );
-      }
+      if (player) void recover(player, position);
     }
   });
   manager.nodeManager.on("reconnecting", (node) => {
-    logger.info("Lavalink node reconnecting", { node: node.id });
+    const attempts = node.reconnectionAttemptCount;
+    const delay = retryDelayAfter(attempts);
+    if (node.options.retryDelay !== delay) {
+      node.options.retryDelay = delay;
+      logger.warn("Lavalink node still down, retrying less often", { node: node.id, delay });
+    }
+    logger.info("Lavalink node reconnecting", { node: node.id, attempts });
   });
   manager.nodeManager.on("error", (node, error) => {
     logger.warn("Lavalink node error", { node: node.id, error });
@@ -202,16 +277,19 @@ export function createLavalinkMusicPlayer({
       const node = connectedNode();
       if (!node) throw new Error("No Lavalink node is connected");
       const identifier = toIdentifier(query);
-      let result: RawLoadResult;
+      // A failed request and a response of an unexpected shape both end as an error result.
       try {
-        result = await node.request(`/loadtracks?identifier=${encodeURIComponent(identifier)}`);
+        const result: RawLoadResult = await node.request(
+          `/loadtracks?identifier=${encodeURIComponent(identifier)}`,
+        );
+        const requester = { id: requesterId };
+        const tracks = rawTracksOf(result).map((raw) => manager.utils.buildTrack(raw, requester));
+        const found = toSearchResult(result, tracks.map(toMusicTrack));
+        for (const track of tracks) remember(track);
+        return found;
       } catch (error) {
         return { kind: "error", message: error instanceof Error ? error.message : String(error) };
       }
-      const requester = { id: requesterId };
-      const tracks = rawTracksOf(result).map((raw) => manager.utils.buildTrack(raw, requester));
-      for (const track of tracks) remember(track);
-      return toSearchResult(result, tracks.map(toMusicTrack));
     },
 
     state(guildId) {
@@ -227,18 +305,35 @@ export function createLavalinkMusicPlayer({
         selfDeaf: true,
         volume: VOLUME,
       });
+      // createPlayer returns an existing player as it is; one that lost its channel (a rejoin that never
+      // finished) would otherwise connect to nothing.
+      if (!player.voiceChannelId) {
+        player.options.voiceChannelId = voiceChannelId;
+        player.options.textChannelId = textChannelId;
+        player.textChannelId = textChannelId;
+      }
       if (!player.connected) await player.connect();
     },
 
     async enqueue(guildId, tracks) {
       const player = playerOf(guildId);
       await player.queue.add(await Promise.all(tracks.map((track) => toTrack(player, track))));
-      if (!player.playing && !player.paused) await player.play();
+      // `current` is set as soon as play() starts, unlike `playing`, which waits for the node.
+      if (!player.queue.current) await player.play();
     },
 
-    async skip(guildId) {
-      // With nothing queued this stops the track, which ends the queue (queueEnd).
-      await playerOf(guildId).skip(0, false);
+    async skip(guildId, expectedTrackId) {
+      const player = playerOf(guildId);
+      const current = player.queue.current;
+      if (current?.encoded !== expectedTrackId || skipping.get(guildId) === expectedTrackId) return;
+      skipping.set(guildId, expectedTrackId);
+      try {
+        // With nothing queued this stops the track, which ends the queue (queueEnd).
+        await player.skip(0, false);
+      } catch (error) {
+        skipping.delete(guildId);
+        throw error;
+      }
     },
 
     async pause(guildId) {
@@ -252,7 +347,8 @@ export function createLavalinkMusicPlayer({
     },
 
     async leave(guildId) {
-      await manager.getPlayer(guildId)?.destroy("left", true);
+      const player = manager.getPlayer(guildId);
+      if (player) await destroyPlayer(player, "left");
     },
 
     subscribe(listener) {
@@ -263,11 +359,7 @@ export function createLavalinkMusicPlayer({
     async destroy() {
       client.off(Events.Raw, forwardVoice);
       listeners.clear();
-      for (const player of [...manager.players.values()]) {
-        await player.destroy("shutdown", true).catch((error: unknown) => {
-          logger.warn("Destroying a music player failed", { guildId: player.guildId, error });
-        });
-      }
+      for (const player of [...manager.players.values()]) await destroyPlayer(player, "shutdown");
       for (const node of manager.nodeManager.nodes.values()) node.destroy("shutdown", true);
     },
   };

@@ -3,18 +3,51 @@ import type { MusicQuery } from "./ports.ts";
 /** Longest search text sent to YouTube; longer input is cut, not refused. */
 export const MAX_SEARCH_LENGTH = 200;
 
+/** Hosts whose links `/play` loads (exact names; Bandcamp artists also get their own subdomain). */
+const LINK_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "youtu.be",
+  "soundcloud.com",
+  "m.soundcloud.com",
+  "on.soundcloud.com",
+  "bandcamp.com",
+  "twitch.tv",
+  "www.twitch.tv",
+  "m.twitch.tv",
+  "vimeo.com",
+  "www.vimeo.com",
+  "player.vimeo.com",
+]);
+
+/** `hostname` as the URL parser gives it: lowercase, IDN already in punycode. */
+function isSupportedHost(hostname: string): boolean {
+  return LINK_HOSTS.has(hostname) || hostname.endsWith(".bandcamp.com");
+}
+
+/** What a member typed: a query, or a link to a site the bot does not load. */
+export type ParsedQuery = MusicQuery | { kind: "unsupported" };
+
 /**
- * Turns what a member typed into a query. Only http(s) links stay links; everything else, including text
- * that looks like a Lavalink prefix (`local:`, `scsearch:`), is search text. Discord's `<link>` form (which
- * hides the preview) is unwrapped. Null when nothing is left.
+ * Turns what a member typed into a query. An http(s) link stays a link only on a supported host, without
+ * credentials or a port, and goes on in the parser's normalised form (so the node sees the host that was
+ * checked); any other link is `unsupported`. Everything else, including text that looks like a Lavalink
+ * prefix (`local:`, `scsearch:`), is search text. Discord's `<link>` form (which hides the preview) is
+ * unwrapped. Null when nothing is left.
  */
-export function parseQuery(input: string): MusicQuery | null {
+export function parseQuery(input: string): ParsedQuery | null {
   let text = input.trim();
   if (text.startsWith("<") && text.endsWith(">")) text = text.slice(1, -1).trim();
   if (text === "") return null;
-  if (/^https?:\/\//i.test(text) && !/\s/.test(text) && URL.canParse(text)) {
-    const { protocol } = new URL(text);
-    if (protocol === "http:" || protocol === "https:") return { kind: "url", url: text };
+  if (/^https?:\/\//i.test(text) && !/\s/.test(text)) {
+    if (!URL.canParse(text)) return { kind: "unsupported" };
+    const url = new URL(text);
+    const plain = url.username === "" && url.password === "" && url.port === "";
+    return plain && isSupportedHost(url.hostname)
+      ? { kind: "url", url: url.href }
+      : { kind: "unsupported" };
   }
   return { kind: "search", text: [...text].slice(0, MAX_SEARCH_LENGTH).join("") };
 }
@@ -52,9 +85,16 @@ export function truncate(text: string, max: number): string {
   return points.length <= max ? text : `${points.slice(0, max - 1).join("")}…`;
 }
 
-/** Only http(s) links may become embed links or thumbnails; Discord rejects the rest. */
+/** Longest link put into an embed; Discord refuses the whole message over its limit. */
+export const MAX_URL_LENGTH = 2048;
+
+/**
+ * Only http(s) links may become embed links or thumbnails; Discord rejects the rest. Returns the parsed,
+ * normalised form, or nothing when that is too long.
+ */
 export function httpUrl(url: string | null): string | undefined {
   if (url === null || !URL.canParse(url)) return undefined;
-  const { protocol } = new URL(url);
-  return protocol === "http:" || protocol === "https:" ? url : undefined;
+  const { protocol, href } = new URL(url);
+  if (protocol !== "http:" && protocol !== "https:") return undefined;
+  return href.length <= MAX_URL_LENGTH ? href : undefined;
 }

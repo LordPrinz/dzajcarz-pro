@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { Track } from "lavalink-client";
 import {
+  FAST_RETRIES,
+  FAST_RETRY_MS,
   nodeOptions,
   type RawLoadResult,
   type RawTrack,
   rawTracksOf,
+  resumePosition,
+  retryDelayAfter,
+  SLOW_RETRY_MS,
   toIdentifier,
   toMusicTrack,
   toPlayerState,
@@ -44,14 +49,33 @@ describe("nodeOptions", () => {
       port: 2333,
       secure: false,
       authorization: "pw",
-      retryAmount: 20,
-      retryDelay: 3000,
+      retryAmount: Number.MAX_SAFE_INTEGER,
+      retryDelay: FAST_RETRY_MS,
     });
     expect(nodeOptions("https://lava.example.com", "pw")).toMatchObject({
       port: 443,
       secure: true,
     });
     expect(nodeOptions("http://lava.example.com", "pw").port).toBe(80);
+  });
+});
+
+describe("reconnecting", () => {
+  test("retries fast for about a minute, then every 30 s forever", () => {
+    expect(retryDelayAfter(0)).toBe(FAST_RETRY_MS);
+    expect(retryDelayAfter(FAST_RETRIES - 1)).toBe(FAST_RETRY_MS);
+    expect(retryDelayAfter(FAST_RETRIES)).toBe(SLOW_RETRY_MS);
+    expect(retryDelayAfter(10_000)).toBe(SLOW_RETRY_MS);
+    expect(FAST_RETRIES * FAST_RETRY_MS).toBe(60_000);
+  });
+
+  test("a track resumes where it was unless it would have ended", () => {
+    const song = { duration: 213_000, isStream: false };
+    expect(resumePosition(song, 60_000)).toBe(60_000);
+    expect(resumePosition(song, -5)).toBe(0);
+    expect(resumePosition(song, 213_000)).toBeNull();
+    expect(resumePosition(song, 500_000)).toBeNull();
+    expect(resumePosition({ duration: 0, isStream: true }, 500_000)).toBe(0);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   formatDuration,
   httpUrl,
   MAX_SEARCH_LENGTH,
+  MAX_URL_LENGTH,
   parseQuery,
   progressLine,
   truncate,
@@ -11,12 +12,53 @@ import {
 import { tracksWord } from "./panel.ts";
 
 describe("parseQuery", () => {
-  test("keeps only http(s) links as links", () => {
+  test("keeps links to supported sites as links, in normalised form", () => {
     expect(parseQuery(" https://youtu.be/x ")).toEqual({ kind: "url", url: "https://youtu.be/x" });
-    expect(parseQuery("HTTP://example.com/a.mp3")).toEqual({
-      kind: "url",
-      url: "HTTP://example.com/a.mp3",
-    });
+    for (const [input, url] of [
+      ["HTTPS://WWW.YOUTUBE.COM/watch?v=x", "https://www.youtube.com/watch?v=x"],
+      ["https://m.youtube.com/watch?v=x", "https://m.youtube.com/watch?v=x"],
+      ["https://music.youtube.com/watch?v=x", "https://music.youtube.com/watch?v=x"],
+      ["http://youtube.com:80/watch?v=x", "http://youtube.com/watch?v=x"],
+      ["https://soundcloud.com/a/b", "https://soundcloud.com/a/b"],
+      ["https://m.soundcloud.com/a/b", "https://m.soundcloud.com/a/b"],
+      ["https://on.soundcloud.com/abc", "https://on.soundcloud.com/abc"],
+      ["https://bandcamp.com/discover", "https://bandcamp.com/discover"],
+      ["https://artist.bandcamp.com/album/a", "https://artist.bandcamp.com/album/a"],
+      ["https://www.twitch.tv/someone", "https://www.twitch.tv/someone"],
+      ["https://m.twitch.tv/someone", "https://m.twitch.tv/someone"],
+      ["https://twitch.tv/someone", "https://twitch.tv/someone"],
+      ["https://vimeo.com/1", "https://vimeo.com/1"],
+      ["https://www.vimeo.com/1", "https://www.vimeo.com/1"],
+      ["https://player.vimeo.com/video/1", "https://player.vimeo.com/video/1"],
+      // Full-width letters map to ASCII in the parser; the node gets the checked host.
+      ["https://ｙｏｕｔｕｂｅ.com/watch?v=x", "https://youtube.com/watch?v=x"],
+    ]) {
+      expect(parseQuery(input as string)).toEqual({ kind: "url", url: url as string });
+    }
+  });
+
+  test("refuses links to any other host", () => {
+    for (const text of [
+      "https://example.com/a.mp3",
+      "http://127.0.0.1:2333/x",
+      "https://youtube.com.evil.com/x",
+      "https://evilyoutube.com/x",
+      "https://notbandcamp.com/x",
+      "https://youtube.com./x",
+      "https://user@youtube.com/x",
+      "https://user:pass@youtube.com/x",
+      "https://youtube.com:8443/x",
+      "https://xn--youtube-5ya.com/x",
+      "https://yοutube.com/x",
+      "https://gaming.youtube.com/x",
+      "https://www.soundcloud.com/x",
+      "https://",
+    ]) {
+      expect(parseQuery(text)).toEqual({ kind: "unsupported" });
+    }
+  });
+
+  test("everything that is not an http(s) link is search text", () => {
     for (const text of ["ftp://x/y", "local:song.mp3", "/opt/music/a.mp3", "scsearch:daft punk"]) {
       expect(parseQuery(text)).toEqual({ kind: "search", text });
     }
@@ -67,6 +109,14 @@ describe("formatting", () => {
     expect(httpUrl("https://i.ytimg.com/a.jpg")).toBe("https://i.ytimg.com/a.jpg");
     expect(httpUrl("javascript:alert(1)")).toBeUndefined();
     expect(httpUrl(null)).toBeUndefined();
+  });
+
+  test("URLs go out in the parser's form and only up to Discord's length", () => {
+    expect(httpUrl("HTTPS://I.YTIMG.COM/a b.jpg")).toBe("https://i.ytimg.com/a%20b.jpg");
+    const long = `https://i.ytimg.com/${"a".repeat(MAX_URL_LENGTH)}`;
+    expect(httpUrl(long)).toBeUndefined();
+    const fits = `https://i.ytimg.com/${"a".repeat(MAX_URL_LENGTH - 20)}`;
+    expect(httpUrl(fits)).toBe(fits);
   });
 
   test("Polish plural of utwór", () => {

@@ -14,7 +14,7 @@ import {
   createFakeScheduler,
   replyText,
 } from "@dzajcarz/core/testing";
-import type { VoiceState } from "discord.js";
+import type { Guild, VoiceState } from "discord.js";
 import {
   createFakePanels,
   createFakePlayer,
@@ -31,7 +31,9 @@ import {
   NOT_IN_VOICE,
   NOTHING_PLAYING,
   otherChannel,
+  trackFailedText,
   UNAVAILABLE,
+  UNSUPPORTED_LINK,
 } from "./index.ts";
 
 const GUILD = "100000000000000001";
@@ -85,6 +87,11 @@ function setup() {
     return ctx;
   }
 
+  function guildDelete() {
+    const handler = module.events?.find((event) => event.event === "guildDelete");
+    return handler?.run({ id: GUILD } as Guild);
+  }
+
   function voiceUpdate() {
     const handler = module.events?.find((event) => event.event === "voiceStateUpdate");
     const state = { guild: { id: GUILD } } as VoiceState;
@@ -103,6 +110,7 @@ function setup() {
     panelButton,
     click,
     voiceUpdate,
+    guildDelete,
   };
 }
 
@@ -185,6 +193,66 @@ describe("music module", () => {
       expect(player.searches).toHaveLength(0);
     });
 
+    test("refuses links to other sites before searching", async () => {
+      const { run, player } = setup();
+      for (const query of ["https://example.com/a.mp3", "https://youtube.com.evil.com/x"]) {
+        expect(lastText(await run("play", { query }))).toBe(UNSUPPORTED_LINK);
+        expect(lastText(await run("search", { query }))).toBe(UNSUPPORTED_LINK);
+      }
+      expect(player.searches).toHaveLength(0);
+    });
+
+    test("joins the channel the caller is in after the search, not before", async () => {
+      const { run, player, voice, panel } = setup();
+      player.duringSearch = () => voice.members.set(CALLER, OTHER_VOICE);
+      await run("play", { query: "a" });
+      expect(player.joins.map((join) => join.voiceChannelId)).toEqual([OTHER_VOICE]);
+      expect(player.state(GUILD)?.voiceChannelId).toBe(OTHER_VOICE);
+      expect(panel()?.embeds?.[0]?.title).toBe("Pierwszy");
+    });
+
+    test("two quick /play calls join once and only the first one says it plays", async () => {
+      const { registry, player } = setup();
+      player.nextResult = { kind: "tracks", tracks: [track("A")] };
+      const command = registry.find("play") as AnyCommand;
+      const first = createFakeContext({ args: { query: "a" }, userId: CALLER, guildId: GUILD });
+      const second = createFakeContext({ args: { query: "a" }, userId: CALLER, guildId: GUILD });
+      await Promise.all([
+        executeCommand(command, first, silentLogger),
+        executeCommand(command, second, silentLogger),
+      ]);
+      await settle();
+      expect(player.joins).toHaveLength(1);
+      expect(lastText(first)).toBe("Gram: **A** (3:20).");
+      expect(lastText(second)).toBe("Dodano do kolejki na miejsce 1: **A** (3:20).");
+      expect(player.state(GUILD)?.upcoming.map((t) => t.title)).toEqual(["A"]);
+    });
+
+    test("the queue cap holds for additions that overlap", async () => {
+      const { registry, player, run } = setup();
+      const tracks = (n: number) => Array.from({ length: n }, (_, i) => track(`T${i}`));
+      for (let i = 0; i < 4; i++) {
+        player.nextResult = { kind: "playlist", name: "Lista", tracks: tracks(100) };
+        await run("play", { query: "https://www.youtube.com/playlist?list=x" });
+      }
+      player.nextResult = { kind: "playlist", name: "Lista", tracks: tracks(100) };
+      const command = registry.find("play") as AnyCommand;
+      const ctxs = [0, 1].map(() =>
+        createFakeContext({
+          args: { query: "https://www.youtube.com/playlist?list=x" },
+          userId: CALLER,
+          guildId: GUILD,
+        }),
+      );
+      await Promise.all(ctxs.map((ctx) => executeCommand(command, ctx, silentLogger)));
+      await settle();
+      const state = player.state(GUILD);
+      expect((state?.upcoming.length ?? 0) + 1).toBe(MAX_QUEUE_LENGTH);
+      expect(lastText(ctxs[1] as { replies: Reply[] })).toBe(
+        `Kolejka jest pełna (${MAX_QUEUE_LENGTH} utworów).`,
+      );
+    });
+
     test("adds a playlist up to the cap and says how many were left out", async () => {
       const { run, player } = setup();
       const tracks = Array.from({ length: 120 }, (_, i) => track(`T${i}`));
@@ -200,7 +268,7 @@ describe("music module", () => {
       const tracks = (n: number) => Array.from({ length: n }, (_, i) => track(`T${i}`));
       for (let i = 0; i < MAX_QUEUE_LENGTH / MAX_PLAYLIST_TRACKS; i++) {
         player.nextResult = { kind: "playlist", name: "Lista", tracks: tracks(100) };
-        await run("play", { query: "https://x.example/list" });
+        await run("play", { query: "https://www.youtube.com/playlist?list=x" });
       }
       const ctx = await run("play", { query: "jeszcze" });
       expect(lastText(ctx)).toBe(`Kolejka jest pełna (${MAX_QUEUE_LENGTH} utworów).`);
@@ -267,7 +335,7 @@ describe("music module", () => {
         name: "Lista",
         tracks: Array.from({ length: 26 }, (_, i) => track(`T${i}`)),
       };
-      await run("play", { query: "https://x.example/list" });
+      await run("play", { query: "https://www.youtube.com/playlist?list=x" });
       const ctx = await run("queue");
       const page = ctx.replies[0] as Exclude<Reply, string>;
       expect(page.ephemeral).toBe(true);
@@ -319,6 +387,31 @@ describe("music module", () => {
       expect(player.state(GUILD)?.current?.title).toBe("Pierwszy");
     });
 
+    test("/stop clears the queue and leaves", async () => {
+      const { run, player, panels } = setup();
+      player.nextResult = { kind: "tracks", tracks: [track("A")] };
+      for (let i = 0; i < 3; i++) await run("play", { query: "a" });
+      expect(player.state(GUILD)?.upcoming).toHaveLength(2);
+      await run("stop");
+      expect(player.state(GUILD)).toBeNull();
+      expect(panels.messages.size).toBe(0);
+      // A new /play starts from an empty queue in a fresh player.
+      await run("play", { query: "a" });
+      expect(player.state(GUILD)?.upcoming).toHaveLength(0);
+      expect(player.joins).toHaveLength(2);
+    });
+
+    test("/skip passes the track it saw, so a second skip of it does nothing", async () => {
+      const { run, player } = setup();
+      player.nextResult = { kind: "tracks", tracks: [track("A")] };
+      await run("play", { query: "a" });
+      player.nextResult = { kind: "tracks", tracks: [track("B")] };
+      await run("play", { query: "b" });
+      await run("skip");
+      expect(player.skips).toEqual([{ guildId: GUILD, expectedTrackId: "encoded-A" }]);
+      expect(player.state(GUILD)?.current?.title).toBe("B");
+    });
+
     test("say when nothing plays", async () => {
       const { run } = setup();
       for (const name of ["skip", "stop", "pause", "resume", "nowplaying"]) {
@@ -340,19 +433,50 @@ describe("music module", () => {
       expect(embed?.description).toContain("🔘");
       expect(embed?.description).toContain("1:40 / 3:20");
     });
+
+    test("/nowplaying keeps the queue length when paused", async () => {
+      const { run, player } = setup();
+      await run("play", { query: "a" });
+      await run("play", { query: "b" });
+      await run("pause");
+      const reply = (await run("nowplaying")).replies[0] as Exclude<Reply, string>;
+      expect(reply.embeds?.[0]?.footer).toBe("Wstrzymane · W kolejce: 1");
+      player.finishTrack(GUILD);
+      await run("pause");
+      const alone = (await run("nowplaying")).replies[0] as Exclude<Reply, string>;
+      expect(alone.embeds?.[0]?.footer).toBe("Wstrzymane · Kolejka jest pusta");
+    });
   });
 
   describe("node down", () => {
-    test("every command answers that the player is unavailable", async () => {
+    test("every command but stop answers that the player is unavailable", async () => {
       const { run, player } = setup();
       player.up = false;
       for (const name of ["play", "search"]) {
         expect(lastText(await run(name, { query: "a" }))).toBe(UNAVAILABLE);
       }
-      for (const name of ["skip", "stop", "pause", "resume"]) {
+      for (const name of ["skip", "pause", "resume"]) {
         expect(lastText(await run(name))).toBe(UNAVAILABLE);
       }
+      expect(lastText(await run("stop"))).toBe(NOTHING_PLAYING);
       expect(player.searches).toHaveLength(0);
+    });
+
+    test("/stop and the stop button still make the bot leave", async () => {
+      const first = setup();
+      await first.run("play", { query: "a" });
+      first.player.up = false;
+      expect(lastText(await first.run("skip"))).toBe(UNAVAILABLE);
+      expect(lastText(await first.run("stop"))).toBe("Zatrzymano muzykę i wyczyszczono kolejkę.");
+      expect(first.player.state(GUILD)).toBeNull();
+
+      const second = setup();
+      await second.run("play", { query: "a" });
+      const stop = second.panelButton("panel-stop").customId;
+      second.player.up = false;
+      await second.click(stop);
+      expect(second.player.state(GUILD)).toBeNull();
+      expect(second.panels.messages.size).toBe(0);
     });
   });
 
@@ -389,6 +513,23 @@ describe("music module", () => {
       expect(panels.posts).toEqual(["panel-1", "panel-2"]);
     });
 
+    test("stays when an edit fails for another reason, and is edited again next time", async () => {
+      const { run, player, panels } = setup();
+      player.nextResult = { kind: "tracks", tracks: [track("A"), track("B")] };
+      await run("play", { query: "a" });
+      await run("play", { query: "b" });
+      await run("play", { query: "b" });
+      panels.editError = new Error("Service Unavailable");
+      player.finishTrack(GUILD);
+      await settle();
+      expect(panels.posts).toEqual(["panel-1"]);
+      panels.editError = null;
+      player.finishTrack(GUILD);
+      await settle();
+      expect(panels.posts).toEqual(["panel-1"]);
+      expect(panels.edits.at(-1)).toBe("panel-1");
+    });
+
     test("is removed when the player goes away", async () => {
       const { run, player, panels } = setup();
       await run("play", { query: "a" });
@@ -421,6 +562,34 @@ describe("music module", () => {
       expect(player.state(GUILD)?.paused).toBe(false);
     });
 
+    test("a double click on skip skips one track", async () => {
+      const { run, click, panelButton, player } = setup();
+      for (const title of ["A", "B", "C"]) {
+        player.nextResult = { kind: "tracks", tracks: [track(title)] };
+        await run("play", { query: title });
+      }
+      const skip = panelButton("panel-skip").customId;
+      const clicks = await Promise.all([click(skip), click(skip)]);
+      expect(clicks.every((ctx) => ctx.deferred)).toBe(true);
+      expect(player.state(GUILD)?.current?.title).toBe("B");
+      expect(player.state(GUILD)?.upcoming.map((t) => t.title)).toEqual(["C"]);
+    });
+
+    test("stop answers the click before the panel is deleted", async () => {
+      const { run, click, panelButton, panels } = setup();
+      await run("play", { query: "a" });
+      const order: string[] = [];
+      const remove = panels.delete;
+      panels.delete = async (channelId, messageId) => {
+        order.push("delete");
+        await remove(channelId, messageId);
+      };
+      const ctx = await click(panelButton("panel-stop").customId);
+      expect(ctx.deferred).toBe(true);
+      expect(ctx.replies).toHaveLength(0);
+      expect(order).toEqual(["delete"]);
+    });
+
     test("skip and stop buttons control playback", async () => {
       const { run, click, panelButton, player, panels } = setup();
       player.nextResult = { kind: "tracks", tracks: [track("A"), track("B")] };
@@ -444,6 +613,36 @@ describe("music module", () => {
       expect(reply.embeds?.[0]?.title).toBe("Kolejka");
       const nav = reply.components?.at(-1) as ButtonSpec[];
       expect(nav[0]?.customId).toContain(`:${FRIEND}:`);
+    });
+  });
+
+  describe("player events", () => {
+    test("a failed track gets a short note in the panel's channel", async () => {
+      const { run, player, panels } = setup();
+      player.nextResult = { kind: "tracks", tracks: [track("Zły *tytuł* @everyone")] };
+      await run("play", { query: "a" });
+      player.nextResult = { kind: "tracks", tracks: [track("B")] };
+      await run("play", { query: "b" });
+      player.failTrack(GUILD);
+      await settle();
+      const notes = [...panels.messages.values()].filter((m) => m.message.content);
+      expect(notes).toEqual([
+        { channelId: TEXT, message: { content: trackFailedText("Zły *tytuł* @everyone") } },
+      ]);
+      expect(trackFailedText("Zły *tytuł*")).toBe(
+        "Nie udało się odtworzyć **Zły \\*tytuł\\***, gram dalej.",
+      );
+      expect(player.state(GUILD)?.current?.title).toBe("B");
+    });
+
+    test("leaving a server destroys its player", async () => {
+      const { run, player, guildDelete, panels } = setup();
+      await run("play", { query: "a" });
+      await guildDelete();
+      await settle();
+      expect(player.state(GUILD)).toBeNull();
+      expect(panels.messages.size).toBe(0);
+      expect(await guildDelete()).toBeUndefined();
     });
   });
 

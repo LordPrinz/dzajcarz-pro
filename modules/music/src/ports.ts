@@ -46,11 +46,14 @@ export interface MusicListener {
   queueEnd(guildId: string): void;
   /** The player is gone (left, kicked from the channel, shut down); the bot is no longer in voice there. */
   playerDestroyed(guildId: string): void;
+  /** A track could not be played (load failure, stuck stream); the player moves on by itself. */
+  trackFailed(guildId: string, track: MusicTrack): void;
 }
 
 /**
- * Audio playback, one player per guild. Every method except `available`, `state` and `subscribe` rejects
- * when no audio node is reachable, so callers check `available()` first.
+ * Audio playback, one player per guild. Every method except `available`, `state`, `leave` and `subscribe`
+ * rejects when no audio node is reachable, so callers check `available()` first. `leave` works without a
+ * node: the bot still leaves voice and the player is dropped.
  */
 export interface MusicPlayer {
   /** False while no audio node is connected (not configured, down, restarting). */
@@ -62,8 +65,11 @@ export interface MusicPlayer {
   join(guildId: string, voiceChannelId: string, textChannelId: string): Promise<void>;
   /** Appends to the queue and starts playing when nothing is. */
   enqueue(guildId: string, tracks: readonly MusicTrack[]): Promise<void>;
-  /** Ends the current track; with an empty queue that ends the queue. */
-  skip(guildId: string): Promise<void>;
+  /**
+   * Ends the current track if it is still `expectedTrackId` (a `MusicTrack.id`) and was not skipped already;
+   * with an empty queue that ends the queue. Two quick skips of the same track skip it once.
+   */
+  skip(guildId: string, expectedTrackId: string): Promise<void>;
   pause(guildId: string): Promise<void>;
   resume(guildId: string): Promise<void>;
   /** Stops playback, clears the queue and leaves the voice channel. */
@@ -80,12 +86,15 @@ export interface VoiceChannels {
   humanCount(guildId: string, channelId: string): Promise<number>;
 }
 
-/** Messages of the now playing panel. Every method rejects when Discord refuses. */
+/**
+ * Messages of the now playing panel, and short notes in its channel. Every method rejects when Discord
+ * refuses.
+ */
 export interface PanelMessages {
   /** Posts the message and returns its id. */
   post(channelId: string, message: PanelMessage): Promise<string>;
-  /** Rejects when the message is gone, so the caller posts a new one. */
-  edit(channelId: string, messageId: string, message: PanelMessage): Promise<void>;
+  /** "gone" when the message or its channel no longer exists, so the caller posts a new one. */
+  edit(channelId: string, messageId: string, message: PanelMessage): Promise<"edited" | "gone">;
   /** A message that is already gone counts as deleted. */
   delete(channelId: string, messageId: string): Promise<void>;
 }

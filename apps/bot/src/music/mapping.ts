@@ -2,6 +2,17 @@
 import type { MusicQuery, MusicTrack, PlayerState, SearchResult } from "@dzajcarz/module-music";
 import type { LavalinkNodeOptions, Track, UnresolvedTrack } from "lavalink-client";
 
+/** A restarted node is back within seconds; fast retries cover about a minute (spike DZAJ-10). */
+export const FAST_RETRIES = 20;
+export const FAST_RETRY_MS = 3000;
+/** After that the node is retried this often, forever: music comes back without a bot restart. */
+export const SLOW_RETRY_MS = 30_000;
+
+/** How long to wait before the next reconnect, given how many attempts were made since the drop. */
+export function retryDelayAfter(attempts: number): number {
+  return attempts >= FAST_RETRIES ? SLOW_RETRY_MS : FAST_RETRY_MS;
+}
+
 /** Node options from `LAVALINK_URL` (`http://host:2333`, `https://…` for TLS). */
 export function nodeOptions(url: string, password: string): LavalinkNodeOptions {
   const parsed = new URL(url);
@@ -12,9 +23,10 @@ export function nodeOptions(url: string, password: string): LavalinkNodeOptions 
     port: parsed.port === "" ? (secure ? 443 : 80) : Number(parsed.port),
     authorization: password,
     secure,
-    // A restarted node is back within seconds; this covers about a minute of downtime (spike DZAJ-10).
-    retryAmount: 20,
-    retryDelay: 3000,
+    // The client destroys the node and every player once it runs out of attempts, so it never may: the
+    // adapter stretches the delay instead (retryDelayAfter).
+    retryAmount: Number.MAX_SAFE_INTEGER,
+    retryDelay: FAST_RETRY_MS,
   };
 }
 
@@ -53,7 +65,10 @@ export function rawTracksOf(result: RawLoadResult): RawTrack[] {
           ? result.data.tracks
           : [];
   return (Array.isArray(tracks) ? tracks : []).filter(
-    (track) => typeof track?.encoded === "string" && track.encoded !== "" && track.info,
+    (track) =>
+      typeof track?.encoded === "string" &&
+      track.encoded !== "" &&
+      typeof track.info?.title === "string",
   );
 }
 
@@ -94,6 +109,19 @@ export function toMusicTrack(track: Track | UnresolvedTrack): MusicTrack {
     isStream: info.isStream ?? false,
     requesterId: requesterOf(track),
   };
+}
+
+/**
+ * Where to resume a track after a node restart: the stored position, or null when the track would have
+ * ended during the outage (then the next one plays). A stream resumes live, from 0.
+ */
+export function resumePosition(
+  info: Pick<Track["info"], "duration" | "isStream">,
+  positionMs: number,
+): number | null {
+  if (info.isStream) return 0;
+  const position = Math.max(0, positionMs);
+  return info.duration > 0 && position >= info.duration ? null : position;
 }
 
 /** The slice of a lavalink-client Player the state needs. */

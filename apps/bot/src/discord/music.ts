@@ -46,13 +46,19 @@ export function createPanelMessages(client: Client): PanelMessages {
 
     async edit(channelId, messageId, message) {
       const { content, embeds, components } = toReplyPayload(message);
-      const channel = await channelOf(channelId);
-      await channel.messages.edit(messageId, {
-        content: content ?? null,
-        embeds,
-        components,
-        allowedMentions: NO_MENTIONS,
-      });
+      try {
+        const channel = await channelOf(channelId);
+        await channel.messages.edit(messageId, {
+          content: content ?? null,
+          embeds,
+          components,
+          allowedMentions: NO_MENTIONS,
+        });
+        return "edited";
+      } catch (error) {
+        if (isUnknown(error)) return "gone";
+        throw error;
+      }
     },
 
     async delete(channelId, messageId) {

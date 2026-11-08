@@ -38,7 +38,7 @@ describe("createVoiceChannels", () => {
   });
 });
 
-function textClient(deleteError?: unknown) {
+function textClient(deleteError?: unknown, editError?: unknown) {
   const sent: unknown[] = [];
   const edited: unknown[] = [];
   const channel = {
@@ -48,7 +48,10 @@ function textClient(deleteError?: unknown) {
       return { id: "500000000000000005" };
     },
     messages: {
-      edit: async (id: string, payload: unknown) => void edited.push({ id, payload }),
+      edit: async (id: string, payload: unknown) => {
+        if (editError) throw editError;
+        edited.push({ id, payload });
+      },
       delete: async () => {
         if (deleteError) throw deleteError;
       },
@@ -64,7 +67,7 @@ describe("createPanelMessages", () => {
     const panels = createPanelMessages(client);
     expect(await panels.post(TEXT, { embeds: [{ title: "Song" }] })).toBe("500000000000000005");
     expect(sent[0]).toMatchObject({ embeds: [{ title: "Song" }], allowedMentions: { parse: [] } });
-    await panels.edit(TEXT, "5", { embeds: [{ title: "Next" }] });
+    expect(await panels.edit(TEXT, "5", { embeds: [{ title: "Next" }] })).toBe("edited");
     expect(edited[0]).toMatchObject({
       id: "5",
       payload: { content: null, embeds: [{ title: "Next" }] },
@@ -80,5 +83,15 @@ describe("createPanelMessages", () => {
       textClient({ code: RESTJSONErrorCodes.MissingPermissions }).client,
     );
     await expect(refused.delete(TEXT, "5")).rejects.toMatchObject({ code: 50013 });
+  });
+
+  test("an edit reports a gone panel or channel and rejects on anything else", async () => {
+    const panel = { embeds: [{ title: "Next" }] };
+    for (const code of [RESTJSONErrorCodes.UnknownMessage, RESTJSONErrorCodes.UnknownChannel]) {
+      const panels = createPanelMessages(textClient(undefined, { code }).client);
+      expect(await panels.edit(TEXT, "5", panel)).toBe("gone");
+    }
+    const limited = createPanelMessages(textClient(undefined, { code: 0, status: 503 }).client);
+    await expect(limited.edit(TEXT, "5", panel)).rejects.toMatchObject({ status: 503 });
   });
 });
