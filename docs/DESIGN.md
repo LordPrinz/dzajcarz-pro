@@ -333,16 +333,21 @@ the client library can be swapped:
 - `MusicPlayer`: `available()`, `search(query, requesterId)` (tracks, a playlist, empty or an error),
   per guild `state()` (voice and text channel, current track, upcoming tracks, position, paused), `join`,
   `enqueue`, `skip(guildId, expectedTrackId)` (a no-op once that track is no longer current or was already
-  skipped, so a double click skips one track), `pause`, `resume`, `leave` (works without a node), and
-  `subscribe` for `trackStart`, `queueEnd`, `playerDestroyed` and `trackFailed`.
+  skipped, so a double click skips one track), `pause`, `resume`, the controls `setLoop`, `shuffle`,
+  `seek(guildId, position, expectedTrackId)`, `setVolume`, `setFilter`, `remove`/`jump` (zero-based place plus
+  the id the module saw there, so a queue that moved meanwhile is left alone), `previous` (the track, `"none"`
+  or `"changed"`) and `clear`, `leave` (works without a node), and `subscribe` for `trackStart`, `queueEnd`,
+  `playerDestroyed` and `trackFailed`. `jump`, `previous` and `seek` also answer "changed" (false) while a
+  skip is on its way, since the track they act on is about to end; the module tells the member to try again.
 - `VoiceChannels`: the member's voice channel and the number of people (bots excluded) in a channel, read
   from the gateway's voice state cache.
 - `PanelMessages`: post, edit and delete the now playing panel; `edit` answers `"gone"` when Discord says
   the message or channel is unknown, and rejects on any other failure.
+- `DirectMessages`: `send(userId, message)`, false when the member's DMs are closed to the bot.
 - `Scheduler` (idle timeout) and the component state storage (search results).
 
 Commands are guild-only and answer in Polish: `/play <query>` (`p`), `/search <query>`, `/queue`, `/skip`,
-`/stop`, `/pause`, `/resume`, `/nowplaying` (`np`). A query that is an http(s) link (Discord's `<link>`
+`/stop`, `/pause`, `/resume`, `/nowplaying` (`np`) and the controls below. A query that is an http(s) link (Discord's `<link>`
 form is unwrapped) is loaded as a link only when its host is one of youtube.com (plus `www.`, `m.`,
 `music.`), youtu.be, soundcloud.com (plus `m.`, `on.`), bandcamp.com and its subdomains, twitch.tv (plus
 `www.`, `m.`) or vimeo.com (plus `www.`, `player.`), compared exactly on the parsed, punycode hostname,
@@ -378,8 +383,40 @@ the panel and is logged. `/nowplaying` while paused says "Wstrzymane · W kolejc
 cannot play gets a note in the panel's channel, "Nie udało się odtworzyć **<title>**, gram dalej.", and the
 next one plays. When the bot is removed from a server (`guildDelete`, `alwaysRun`) its player there is
 destroyed. It is removed when the queue ends, the player is destroyed and
-on shutdown. Panel work runs one at a time per guild, so quick track changes never post two panels. Loop and
-shuffle buttons come with the controls ticket (#12).
+on shutdown. Panel work runs one at a time per guild, so quick track changes never post two panels.
+
+Controls (same access rules as `/skip`; queue edits, `/loop`, `/filter`, `/seek` and the loop button run in
+the per-guild chain that serialises additions, and read the state inside it):
+`/loop <off|track|queue>` (the prefix form also takes `wyłącz`/`wyłączona`, `utwór` and `kolejka`; slash
+choices have Polish names), `/shuffle` (needs two tracks waiting), `/seek <time>` (`90`, `1:30`, `1:02:03`,
+`1m30s`, `1m30`, `1 m 30 s`, `1h2m3s`, up to 99:59:59; in both forms a part after a larger one stays under 60,
+and minutes go up to 99 without hours; refused for a stream, for a track whose source cannot seek and past
+the track's length, while the end itself is allowed and simply ends the track; when another track plays by
+the time the seek arrives, nothing moves and the member is asked to try again), `/volume <0-150>` (`vol`; 100
+is the source's own level and the level the bot joins at), `/filter <bassboost|nightcore|vaporwave|8d|off>`
+(the prefix form also takes `bas` and `wyłącz`), `/remove <n>` and `/jump <n>` (n is the place shown by
+`/queue`; `/jump` drops the tracks before it, or with the queue loop moves them to the end of the queue),
+`/back` (the previous track plays again, the current one waits at the front of the queue), `/clear` (the
+current track keeps playing) and `/save` (`sv`: the title, author and link as a DM; anyone in the server may
+use it while something plays, like `/queue` and `/nowplaying`; closed DMs are reported ephemerally). The
+panel footer shows `Pętla`, `Głośność` and `Filtr`, and a second button row has Pętla (cycles off, utwór,
+kolejka and names the current mode) and Losowo (shuffle), checked against the bot's channel like the other
+buttons.
+
+Filters are applied by the adapter. It writes the client's filter data directly (timescale, rotation and
+the equalizer bands) and sends it in one player update (`applyPlayerFilters`); Lavalink replaces all filters
+with what an update carries, so the previous effect goes away in the same request. The client's `toggle*`
+helpers are not used: they flip state, so a repeated or interrupted change could switch an effect off.
+Bassboost is the `BassboostMedium` equalizer preset, nightcore and vaporwave are the client's timescale
+presets, 8d is rotation at 0.2 Hz. The active name is kept per guild and forgotten with the player; it reads
+"off" while an update is in flight, so a refused update never leaves a footer naming an effect that is not
+on. A restarted node starts its sessions without filters, so recovery sends the effect again (a refusal
+there drops it, and the music goes on).
+
+`/back` uses the client's own previous-track history (25 tracks). With the track loop every repeat adds the
+current track to that history, so `/back` passes over those copies and plays the track before them. With the
+queue loop the back track already waits at the end of the queue; that copy is removed, so the loop does not
+play it twice per turn.
 
 Idle: the bot leaves 3 minutes after the queue ran out or the last person (bots do not count) left its
 channel. The check runs on `trackStart`, `queueEnd`, after tracks are added and on `voiceStateUpdate`

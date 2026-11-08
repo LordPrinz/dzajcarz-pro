@@ -16,6 +16,7 @@ import {
 } from "@dzajcarz/core/testing";
 import type { Guild, VoiceState } from "discord.js";
 import {
+  createFakeDirectMessages,
   createFakePanels,
   createFakePlayer,
   createFakeVoice,
@@ -25,12 +26,14 @@ import {
 } from "./fakes.test-support.ts";
 import {
   createMusicModule,
+  EMPTY_QUEUE,
   IDLE_MS,
   MAX_PLAYLIST_TRACKS,
   MAX_QUEUE_LENGTH,
   NOT_IN_VOICE,
   NOTHING_PLAYING,
   otherChannel,
+  queueChanged,
   trackFailedText,
   UNAVAILABLE,
   UNSUPPORTED_LINK,
@@ -47,11 +50,13 @@ function setup() {
   const player = createFakePlayer();
   const voice = createFakeVoice();
   const panels = createFakePanels();
+  const directMessages = createFakeDirectMessages();
   const scheduler = createFakeScheduler();
   const module = createMusicModule({
     player,
     voice,
     panels,
+    directMessages,
     scheduler,
     stateStorage: createMemoryStorage(),
     logger: silentLogger,
@@ -102,6 +107,7 @@ function setup() {
     player,
     voice,
     panels,
+    directMessages,
     scheduler,
     module,
     registry,
@@ -440,11 +446,15 @@ describe("music module", () => {
       await run("play", { query: "b" });
       await run("pause");
       const reply = (await run("nowplaying")).replies[0] as Exclude<Reply, string>;
-      expect(reply.embeds?.[0]?.footer).toBe("Wstrzymane · W kolejce: 1");
+      expect(reply.embeds?.[0]?.footer).toBe(
+        "Wstrzymane · W kolejce: 1 · Pętla: wył. · Głośność: 100% · Filtr: brak",
+      );
       player.finishTrack(GUILD);
       await run("pause");
       const alone = (await run("nowplaying")).replies[0] as Exclude<Reply, string>;
-      expect(alone.embeds?.[0]?.footer).toBe("Wstrzymane · Kolejka jest pusta");
+      expect(alone.embeds?.[0]?.footer).toBe(
+        "Wstrzymane · Kolejka jest pusta · Pętla: wył. · Głośność: 100% · Filtr: brak",
+      );
     });
   });
 
@@ -488,7 +498,9 @@ describe("music module", () => {
       player.nextResult = { kind: "tracks", tracks: [track("B")] };
       await run("play", { query: "b" });
       expect(panels.posts).toEqual(["panel-1"]);
-      expect(panel()?.embeds?.[0]?.footer).toBe("W kolejce: 1");
+      expect(panel()?.embeds?.[0]?.footer).toBe(
+        "W kolejce: 1 · Pętla: wył. · Głośność: 100% · Filtr: brak",
+      );
 
       player.finishTrack(GUILD);
       await settle();
@@ -705,6 +717,494 @@ describe("music module", () => {
       expect(scheduler.pending).toBe(1);
       await run("stop");
       expect(scheduler.pending).toBe(0);
+    });
+  });
+
+  describe("controls", () => {
+    /** Plays the titles in order: the first one starts, the rest wait in the queue. */
+    async function playing(titles: string[]) {
+      const ctx = setup();
+      for (const title of titles) {
+        ctx.player.nextResult = { kind: "tracks", tracks: [track(title)] };
+        await ctx.run("play", { query: title });
+      }
+      return ctx;
+    }
+    const upcoming = (ctx: Awaited<ReturnType<typeof playing>>) =>
+      ctx.player.state(GUILD)?.upcoming.map((t) => t.title);
+
+    test("every control command is registered", () => {
+      const { registry } = setup();
+      for (const name of [
+        "loop",
+        "shuffle",
+        "seek",
+        "volume",
+        "vol",
+        "filter",
+        "remove",
+        "jump",
+        "back",
+        "clear",
+        "save",
+        "sv",
+      ]) {
+        expect(registry.find(name)).toBeDefined();
+      }
+    });
+
+    test("they need a voice channel, the bot's channel and a player", async () => {
+      const { run, voice, player } = setup();
+      const commands: [string, Record<string, unknown>][] = [
+        ["loop", { mode: "track" }],
+        ["shuffle", {}],
+        ["seek", { time: "10" }],
+        ["volume", { percent: 80 }],
+        ["filter", { name: "nightcore" }],
+        ["remove", { place: 1 }],
+        ["jump", { place: 1 }],
+        ["back", {}],
+        ["clear", {}],
+      ];
+      for (const [name, args] of commands) {
+        expect(lastText(await run(name, args))).toBe(NOTHING_PLAYING);
+      }
+      await run("play", { query: "a" });
+      voice.members.set(FRIEND, OTHER_VOICE);
+      for (const [name, args] of commands) {
+        expect(lastText(await run(name, args, FRIEND))).toBe(otherChannel(VOICE));
+      }
+      voice.members.delete(FRIEND);
+      for (const [name, args] of commands) {
+        expect(lastText(await run(name, args, FRIEND))).toBe(NOT_IN_VOICE);
+      }
+      player.up = false;
+      for (const [name, args] of commands) {
+        expect(lastText(await run(name, args))).toBe(UNAVAILABLE);
+      }
+    });
+
+    describe("/loop", () => {
+      test("sets the mode and shows it on the panel", async () => {
+        const ctx = await playing(["A"]);
+        expect(lastText(await ctx.run("loop", { mode: "track" }))).toBe("Powtarzanie: **utwór**.");
+        expect(ctx.player.state(GUILD)?.loop).toBe("track");
+        expect(ctx.panel()?.embeds?.[0]?.footer).toContain("Pętla: utwór");
+        await ctx.run("loop", { mode: "queue" });
+        expect(ctx.player.state(GUILD)?.loop).toBe("queue");
+        await ctx.run("loop", { mode: "off" });
+        expect(ctx.player.state(GUILD)?.loop).toBe("off");
+      });
+
+      test("reads Polish and English words, as the prefix form gets them", async () => {
+        const ctx = await playing(["A"]);
+        for (const [mode, loop] of [
+          ["utwór", "track"],
+          ["wyłącz", "off"],
+          ["KOLEJKA", "queue"],
+          ["wyłączona", "off"],
+          [" track ", "track"],
+          ["off", "off"],
+          ["queue", "queue"],
+        ] as const) {
+          await ctx.run("loop", { mode });
+          expect(ctx.player.state(GUILD)?.loop).toBe(loop);
+        }
+      });
+
+      test("refuses an unknown mode", async () => {
+        const ctx = await playing(["A"]);
+        for (const mode of ["forever", "constructor", "toString"]) {
+          expect(lastText(await ctx.run("loop", { mode }))).toContain("`wyłącz`");
+        }
+        expect(ctx.player.state(GUILD)?.loop).toBe("off");
+      });
+    });
+
+    describe("/shuffle", () => {
+      test("mixes the queue and keeps the current track", async () => {
+        const ctx = await playing(["A", "B", "C", "D"]);
+        expect(lastText(await ctx.run("shuffle"))).toBe("Pomieszano kolejkę.");
+        expect(ctx.player.shuffles).toEqual([GUILD]);
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
+        expect(upcoming(ctx)).toEqual(["D", "C", "B"]);
+      });
+
+      test("needs at least two tracks waiting", async () => {
+        const ctx = await playing(["A", "B"]);
+        expect(lastText(await ctx.run("shuffle"))).toContain("za mało utworów");
+        expect(ctx.player.shuffles).toEqual([]);
+      });
+    });
+
+    describe("/seek", () => {
+      test("moves within the track and accepts the three time forms", async () => {
+        const ctx = await playing(["A"]);
+        for (const [time, ms] of [
+          ["1:30", 90_000],
+          ["90", 90_000],
+          ["1m30s", 90_000],
+          ["0", 0],
+        ] as const) {
+          const reply = lastText(await ctx.run("seek", { time }));
+          expect(reply).toContain("Przewinięto");
+          expect(ctx.player.state(GUILD)?.positionMs).toBe(ms);
+        }
+      });
+
+      test("refuses a time it cannot read", async () => {
+        const ctx = await playing(["A"]);
+        for (const time of ["", "abc", "-5", "1:75", "1.5"]) {
+          expect(lastText(await ctx.run("seek", { time }))).toContain("Nie rozumiem czasu");
+        }
+        expect(ctx.player.state(GUILD)?.positionMs).toBe(0);
+      });
+
+      test("refuses a time past the end, but accepts the end itself", async () => {
+        const ctx = await playing(["A"]);
+        expect(lastText(await ctx.run("seek", { time: "3:21" }))).toBe(
+          "Utwór trwa tylko 3:20, nie przewinę dalej.",
+        );
+        expect(ctx.player.state(GUILD)?.positionMs).toBe(0);
+        await ctx.run("seek", { time: "3:20" });
+        expect(ctx.player.state(GUILD)?.positionMs).toBe(200_000);
+      });
+
+      test("refuses a track whose source cannot seek", async () => {
+        const ctx = setup();
+        ctx.player.nextResult = { kind: "tracks", tracks: [track("A", { isSeekable: false })] };
+        await ctx.run("play", { query: "a" });
+        expect(lastText(await ctx.run("seek", { time: "10" }))).toBe(
+          "Tego utworu nie da się przewijać.",
+        );
+      });
+
+      test("leaves a track that changed meanwhile alone and asks to try again", async () => {
+        const ctx = await playing(["A", "B"]);
+        ctx.player.skipInFlight = true;
+        expect(lastText(await ctx.run("seek", { time: "10" }))).toBe(
+          "Utwór zmienił się w międzyczasie, spróbuj jeszcze raz.",
+        );
+        expect(ctx.player.state(GUILD)?.positionMs).toBe(0);
+      });
+
+      test("refuses a stream", async () => {
+        const ctx = setup();
+        ctx.player.nextResult = {
+          kind: "tracks",
+          tracks: [track("Radio", { isStream: true, durationMs: 0 })],
+        };
+        await ctx.run("play", { query: "radio" });
+        expect(lastText(await ctx.run("seek", { time: "10" }))).toBe(
+          "Transmisji na żywo nie da się przewijać.",
+        );
+      });
+    });
+
+    describe("/volume", () => {
+      test("starts at 100%, the source's own level", async () => {
+        const ctx = await playing(["A"]);
+        expect(ctx.player.state(GUILD)?.volume).toBe(100);
+        expect(ctx.panel()?.embeds?.[0]?.footer).toContain("Głośność: 100%");
+      });
+
+      test("sets the level and shows it on the panel", async () => {
+        const ctx = await playing(["A"]);
+        expect(lastText(await ctx.run("volume", { percent: 120 }))).toBe("Głośność: **120%**.");
+        expect(ctx.player.state(GUILD)?.volume).toBe(120);
+        expect(ctx.panel()?.embeds?.[0]?.footer).toContain("Głośność: 120%");
+      });
+
+      test("takes 0 and 150, refuses anything outside", async () => {
+        const ctx = await playing(["A"]);
+        await ctx.run("volume", { percent: 0 });
+        expect(ctx.player.state(GUILD)?.volume).toBe(0);
+        await ctx.run("volume", { percent: 150 });
+        expect(ctx.player.state(GUILD)?.volume).toBe(150);
+        for (const percent of [-1, 151, 10.5, Number.NaN]) {
+          expect(lastText(await ctx.run("volume", { percent }))).toBe(
+            "Głośność musi być liczbą od 0 do 150.",
+          );
+        }
+        expect(ctx.player.state(GUILD)?.volume).toBe(150);
+      });
+    });
+
+    describe("/filter", () => {
+      test("switches between effects and off", async () => {
+        const ctx = await playing(["A"]);
+        for (const name of ["bassboost", "nightcore", "vaporwave", "8d"] as const) {
+          expect(lastText(await ctx.run("filter", { name }))).toContain("Efekt:");
+          expect(ctx.player.state(GUILD)?.filter).toBe(name);
+        }
+        expect(ctx.panel()?.embeds?.[0]?.footer).toContain("Filtr: 8D");
+        expect(lastText(await ctx.run("filter", { name: "off" }))).toBe("Wyłączono efekty.");
+        expect(ctx.player.state(GUILD)?.filter).toBe("off");
+      });
+
+      test("setting the active effect again keeps it on", async () => {
+        const ctx = await playing(["A"]);
+        await ctx.run("filter", { name: "nightcore" });
+        await ctx.run("filter", { name: "nightcore" });
+        expect(ctx.player.state(GUILD)?.filter).toBe("nightcore");
+      });
+
+      test("reads Polish and English words, as the prefix form gets them", async () => {
+        const ctx = await playing(["A"]);
+        for (const [name, filter] of [
+          ["bas", "bassboost"],
+          ["wyłącz", "off"],
+          ["8D", "8d"],
+          ["Vaporwave", "vaporwave"],
+          ["off", "off"],
+        ] as const) {
+          await ctx.run("filter", { name });
+          expect(ctx.player.state(GUILD)?.filter).toBe(filter);
+        }
+      });
+
+      test("two changes at once run one after the other", async () => {
+        const ctx = await playing(["A"]);
+        const order: string[] = [];
+        const setFilter = ctx.player.setFilter;
+        ctx.player.setFilter = async (guildId, filter) => {
+          order.push(`start ${filter}`);
+          await settle();
+          await setFilter(guildId, filter);
+          order.push(`end ${filter}`);
+        };
+        await Promise.all([
+          ctx.run("filter", { name: "nightcore" }),
+          ctx.run("filter", { name: "8d" }),
+        ]);
+        expect(order).toEqual(["start nightcore", "end nightcore", "start 8d", "end 8d"]);
+        expect(ctx.player.state(GUILD)?.filter).toBe("8d");
+      });
+
+      test("refuses an unknown effect", async () => {
+        const ctx = await playing(["A"]);
+        for (const name of ["reverb", "constructor"]) {
+          expect(lastText(await ctx.run("filter", { name }))).toContain("`bassboost`");
+        }
+        expect(ctx.player.state(GUILD)?.filter).toBe("off");
+      });
+    });
+
+    describe("/remove and /jump", () => {
+      test("remove takes the track at that place of /queue", async () => {
+        const ctx = await playing(["A", "B", "C", "D"]);
+        expect(lastText(await ctx.run("remove", { place: 2 }))).toBe("Usunięto z kolejki: **C**.");
+        expect(upcoming(ctx)).toEqual(["B", "D"]);
+      });
+
+      test("jump plays that track and drops the ones before it", async () => {
+        const ctx = await playing(["A", "B", "C", "D"]);
+        expect(lastText(await ctx.run("jump", { place: 2 }))).toBe("Przeskoczono do: **C**.");
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("C");
+        expect(upcoming(ctx)).toEqual(["D"]);
+        expect(ctx.panel()?.embeds?.[0]?.title).toBe("C");
+      });
+
+      test("jump with the queue loop moves the passed tracks to the end", async () => {
+        const ctx = await playing(["A", "B", "C", "D"]);
+        await ctx.run("loop", { mode: "queue" });
+        expect(lastText(await ctx.run("jump", { place: 3 }))).toBe("Przeskoczono do: **D**.");
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("D");
+        expect(upcoming(ctx)).toEqual(["B", "C"]);
+      });
+
+      test("jump while a skip is on its way asks to try again", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        ctx.player.skipInFlight = true;
+        expect(lastText(await ctx.run("jump", { place: 2 }))).toBe(queueChanged);
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
+      });
+
+      test("both refuse an empty queue and a place outside it", async () => {
+        const ctx = await playing(["A"]);
+        for (const name of ["remove", "jump"]) {
+          expect(lastText(await ctx.run(name, { place: 1 }))).toBe(EMPTY_QUEUE);
+        }
+        await ctx.run("play", { query: "B" });
+        for (const name of ["remove", "jump"]) {
+          for (const place of [0, -2, 2, 1.5]) {
+            expect(lastText(await ctx.run(name, { place }))).toContain("Nie ma utworu na miejscu");
+          }
+        }
+        expect(upcoming(ctx)).toEqual(["A"]);
+      });
+
+      test("a track that moved since the check is left alone", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        // The queue changes between the module reading it and the player acting on it.
+        const remove = ctx.player.remove;
+        ctx.player.remove = async (guildId, index) => remove(guildId, index, "someone-else");
+        expect(lastText(await ctx.run("remove", { place: 1 }))).toBe(queueChanged);
+        expect(upcoming(ctx)).toEqual(["B", "C"]);
+        const jump = ctx.player.jump;
+        ctx.player.jump = async (guildId, index) => jump(guildId, index, "someone-else");
+        expect(lastText(await ctx.run("jump", { place: 2 }))).toBe(queueChanged);
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
+      });
+
+      test("two removals at once take two different tracks", async () => {
+        const ctx = await playing(["A", "B", "C", "D"]);
+        await Promise.all([ctx.run("remove", { place: 1 }), ctx.run("remove", { place: 1 })]);
+        expect(upcoming(ctx)).toEqual(["D"]);
+      });
+    });
+
+    describe("/back", () => {
+      test("plays the previous track again and keeps the current one next", async () => {
+        const ctx = await playing(["A", "B"]);
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+        expect(lastText(await ctx.run("back"))).toBe("Wracam do: **A**.");
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
+        expect(upcoming(ctx)).toEqual(["B"]);
+        expect(ctx.panel()?.embeds?.[0]?.title).toBe("A");
+      });
+
+      test("says so when nothing played before", async () => {
+        const ctx = await playing(["A"]);
+        expect(lastText(await ctx.run("back"))).toBe("Nie ma poprzedniego utworu.");
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
+      });
+
+      test("asks to try again while a skip is on its way", async () => {
+        const ctx = await playing(["A", "B"]);
+        ctx.player.finishTrack(GUILD);
+        ctx.player.skipInFlight = true;
+        expect(lastText(await ctx.run("back"))).toBe(queueChanged);
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+      });
+    });
+
+    describe("/clear", () => {
+      test("empties the queue and lets the current track play", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        expect(lastText(await ctx.run("clear"))).toBe("Wyczyszczono kolejkę (2 utwory).");
+        expect(upcoming(ctx)).toEqual([]);
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
+        expect(ctx.panel()?.embeds?.[0]?.footer).toStartWith("Kolejka jest pusta");
+      });
+
+      test("refuses an empty queue", async () => {
+        const ctx = await playing(["A"]);
+        expect(lastText(await ctx.run("clear"))).toBe(EMPTY_QUEUE);
+      });
+    });
+
+    describe("/save", () => {
+      test("sends the track to the caller in a DM and confirms privately", async () => {
+        const ctx = await playing(["A_b"]);
+        const reply = (await ctx.run("save")).replies[0] as Exclude<Reply, string>;
+        expect(reply.ephemeral).toBe(true);
+        expect(reply.content).toBe("Wysłałem Ci ten utwór w wiadomości prywatnej.");
+        expect(ctx.directMessages.sent).toHaveLength(1);
+        const [dm] = ctx.directMessages.sent;
+        expect(dm?.userId).toBe(CALLER);
+        expect(dm?.message.content).toBe(
+          "**A\\_b**\n**Autor:** Autor\n<https://www.youtube.com/watch?v=A_b>",
+        );
+      });
+
+      test("works for anyone in the server, in voice or not", async () => {
+        const ctx = await playing(["A"]);
+        ctx.player.up = false;
+        const reply = (await ctx.run("save", {}, FRIEND)).replies[0] as Exclude<Reply, string>;
+        expect(reply.content).toBe("Wysłałem Ci ten utwór w wiadomości prywatnej.");
+        expect(ctx.directMessages.sent.map((dm) => dm.userId)).toEqual([FRIEND]);
+      });
+
+      test("says nothing plays when nothing does", async () => {
+        const ctx = setup();
+        expect(lastText(await ctx.run("save", {}, FRIEND))).toBe(NOTHING_PLAYING);
+        expect(ctx.directMessages.sent).toEqual([]);
+      });
+
+      test("works through the sv alias", async () => {
+        const ctx = await playing(["A"]);
+        await ctx.run("sv");
+        expect(ctx.directMessages.sent).toHaveLength(1);
+      });
+
+      test("tells the caller privately when DMs are closed", async () => {
+        const ctx = await playing(["A"]);
+        ctx.directMessages.open = false;
+        const reply = (await ctx.run("save")).replies[0] as Exclude<Reply, string>;
+        expect(reply.ephemeral).toBe(true);
+        expect(reply.content).toContain("Nie mogę Ci wysłać wiadomości prywatnej");
+        expect(ctx.directMessages.sent).toHaveLength(0);
+      });
+
+      test("leaves out a link the source does not have", async () => {
+        const ctx = setup();
+        ctx.player.nextResult = { kind: "tracks", tracks: [track("A", { uri: null })] };
+        await ctx.run("play", { query: "a" });
+        await ctx.run("save");
+        expect(ctx.directMessages.sent[0]?.message.content).toBe("**A**\n**Autor:** Autor");
+      });
+    });
+
+    describe("panel buttons", () => {
+      test("loop cycles off, track, queue and shows the mode on the button", async () => {
+        const ctx = await playing(["A"]);
+        const loop = ctx.panelButton("panel-loop");
+        expect(loop.label).toBe("Pętla: wył.");
+        const modes: string[] = [];
+        const labels: (string | undefined)[] = [];
+        for (let i = 0; i < 3; i++) {
+          const clicked = await ctx.click(ctx.panelButton("panel-loop").customId, CALLER);
+          modes.push(ctx.player.state(GUILD)?.loop ?? "");
+          const redrawn = clicked.updates[0] as Exclude<Reply, string>;
+          labels.push((redrawn.components?.[1]?.[0] as ButtonSpec | undefined)?.label);
+        }
+        expect(modes).toEqual(["track", "queue", "off"]);
+        expect(labels).toEqual(["Pętla: utwór", "Pętla: kolejka", "Pętla: wył."]);
+      });
+
+      test("a double click on loop moves two steps, not one", async () => {
+        const ctx = await playing(["A"]);
+        const id = ctx.panelButton("panel-loop").customId;
+        await Promise.all([ctx.click(id), ctx.click(id)]);
+        expect(ctx.player.state(GUILD)?.loop).toBe("queue");
+      });
+
+      test("shuffle mixes the queue and redraws the panel", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        const clicked = await ctx.click(ctx.panelButton("panel-shuffle").customId);
+        expect(upcoming(ctx)).toEqual(["C", "B"]);
+        expect(clicked.updates).toHaveLength(1);
+      });
+
+      test("shuffle on a short queue answers privately and changes nothing", async () => {
+        const ctx = await playing(["A", "B"]);
+        const clicked = await ctx.click(ctx.panelButton("panel-shuffle").customId);
+        expect(replyText(clicked.replies[0])).toContain("za mało utworów");
+        expect(ctx.player.shuffles).toEqual([]);
+      });
+
+      test("both refuse members outside the bot's channel", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        ctx.voice.members.set(FRIEND, OTHER_VOICE);
+        for (const name of ["panel-loop", "panel-shuffle"]) {
+          const clicked = await ctx.click(ctx.panelButton(name).customId, FRIEND);
+          expect(replyText(clicked.replies[0])).toBe(otherChannel(VOICE));
+        }
+        expect(ctx.player.state(GUILD)?.loop).toBe("off");
+        expect(ctx.player.shuffles).toEqual([]);
+      });
+
+      test("both answer when nothing plays anymore", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        const ids = ["panel-loop", "panel-shuffle"].map((n) => ctx.panelButton(n).customId);
+        ctx.player.destroy(GUILD);
+        for (const id of ids) {
+          expect(replyText((await ctx.click(id)).replies[0])).toBe(NOTHING_PLAYING);
+        }
+      });
     });
   });
 

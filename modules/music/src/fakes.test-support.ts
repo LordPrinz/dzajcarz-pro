@@ -1,6 +1,9 @@
 /** In-memory ports for the module tests; nothing here talks to Lavalink or Discord. */
 import type { StateStorage } from "@dzajcarz/core";
 import type {
+  DirectMessages,
+  LoopMode,
+  MusicFilter,
   MusicListener,
   MusicPlayer,
   MusicQuery,
@@ -21,6 +24,7 @@ export function track(title: string, overrides: Partial<MusicTrack> = {}): Music
     uri: `https://www.youtube.com/watch?v=${encodeURIComponent(title)}`,
     artworkUrl: "https://i.ytimg.com/vi/x/hqdefault.jpg",
     isStream: false,
+    isSeekable: !overrides.isStream,
     requesterId: "200000000000000002",
     ...overrides,
   };
@@ -33,6 +37,11 @@ interface GuildPlayer {
   upcoming: MusicTrack[];
   positionMs: number;
   paused: boolean;
+  loop: LoopMode;
+  volume: number;
+  filter: MusicFilter;
+  /** Tracks that played before the current one, newest first. */
+  history: MusicTrack[];
 }
 
 export interface FakePlayer extends MusicPlayer {
@@ -41,10 +50,13 @@ export interface FakePlayer extends MusicPlayer {
   nextResult: SearchResult;
   /** Runs while a search is in flight (a member moving channels meanwhile). */
   duringSearch: (() => void) | null;
+  readonly shuffles: string[];
   readonly skips: { guildId: string; expectedTrackId: string }[];
   readonly searches: { query: MusicQuery; requesterId: string }[];
   readonly joins: { guildId: string; voiceChannelId: string; textChannelId: string }[];
   readonly players: Map<string, GuildPlayer>;
+  /** A skip was sent and the next track has not started yet: jump, previous and seek answer "changed". */
+  skipInFlight: boolean;
   /** The current track ends on its own (autoplay of the next one). */
   finishTrack(guildId: string): void;
   /** The bot was kicked from voice or the node dropped the player. */
@@ -62,6 +74,7 @@ export function createFakePlayer(): FakePlayer {
   };
 
   function advance(guildId: string, guild: GuildPlayer): void {
+    if (guild.current) guild.history.unshift(guild.current);
     const next = guild.upcoming.shift() ?? null;
     guild.current = next;
     guild.positionMs = 0;
@@ -80,10 +93,12 @@ export function createFakePlayer(): FakePlayer {
     up: true,
     nextResult: { kind: "tracks", tracks: [track("Pierwszy")] },
     duringSearch: null,
+    shuffles: [],
     skips: [],
     searches: [],
     joins: [],
     players,
+    skipInFlight: false,
     available: () => fake.up,
     async search(query, requesterId) {
       fake.searches.push({ query, requesterId });
@@ -92,7 +107,9 @@ export function createFakePlayer(): FakePlayer {
     },
     state(guildId): PlayerState | null {
       const guild = players.get(guildId);
-      return guild ? { ...guild, upcoming: [...guild.upcoming] } : null;
+      if (!guild) return null;
+      const { history: _history, ...state } = guild;
+      return { ...state, upcoming: [...guild.upcoming] };
     },
     async join(guildId, voiceChannelId, textChannelId) {
       fake.joins.push({ guildId, voiceChannelId, textChannelId });
@@ -106,6 +123,10 @@ export function createFakePlayer(): FakePlayer {
         upcoming: [],
         positionMs: 0,
         paused: false,
+        loop: "off",
+        volume: 100,
+        filter: "off",
+        history: [],
       });
     },
     async enqueue(guildId, tracks) {
@@ -123,6 +144,53 @@ export function createFakePlayer(): FakePlayer {
     },
     async resume(guildId) {
       need(guildId).paused = false;
+    },
+    async setLoop(guildId, mode) {
+      need(guildId).loop = mode;
+    },
+    async shuffle(guildId) {
+      fake.shuffles.push(guildId);
+      need(guildId).upcoming.reverse();
+    },
+    async seek(guildId, positionMs, expectedTrackId) {
+      const guild = need(guildId);
+      if (guild.current?.id !== expectedTrackId || fake.skipInFlight) return false;
+      if (!guild.current.isSeekable) throw new Error("Current track is not seekable");
+      guild.positionMs = positionMs;
+      return true;
+    },
+    async setVolume(guildId, percent) {
+      need(guildId).volume = percent;
+    },
+    async setFilter(guildId, filter) {
+      need(guildId).filter = filter;
+    },
+    async remove(guildId, index, expectedTrackId) {
+      const guild = need(guildId);
+      if (guild.upcoming[index]?.id !== expectedTrackId) return null;
+      return guild.upcoming.splice(index, 1)[0] ?? null;
+    },
+    async jump(guildId, index, expectedTrackId) {
+      const guild = need(guildId);
+      if (guild.upcoming[index]?.id !== expectedTrackId || fake.skipInFlight) return false;
+      const passed = guild.upcoming.splice(0, index);
+      if (guild.loop === "queue") guild.upcoming.push(...passed);
+      advance(guildId, guild);
+      return true;
+    },
+    async previous(guildId) {
+      const guild = need(guildId);
+      if (fake.skipInFlight) return "changed";
+      const back = guild.history.shift();
+      if (!back) return "none";
+      if (guild.current) guild.upcoming.unshift(guild.current);
+      guild.current = back;
+      guild.positionMs = 0;
+      emit((listener) => listener.trackStart(guildId, back));
+      return back;
+    },
+    async clear(guildId) {
+      need(guildId).upcoming.length = 0;
     },
     async leave(guildId) {
       fake.destroy(guildId);
@@ -201,6 +269,26 @@ export function createFakePanels(): FakePanels {
     },
   };
   return panels;
+}
+
+export interface FakeDirectMessages extends DirectMessages {
+  /** Direct messages received, oldest first. */
+  readonly sent: { userId: string; message: PanelMessage }[];
+  /** Direct messages fail (closed DMs) while false. */
+  open: boolean;
+}
+
+export function createFakeDirectMessages(): FakeDirectMessages {
+  const dms: FakeDirectMessages = {
+    sent: [],
+    open: true,
+    async send(userId, message) {
+      if (!dms.open) return false;
+      dms.sent.push({ userId, message });
+      return true;
+    },
+  };
+  return dms;
 }
 
 export function createMemoryStorage(): StateStorage {

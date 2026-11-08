@@ -139,26 +139,38 @@ describe("toMusicTrack", () => {
       uri: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       artworkUrl: "https://i.ytimg.com/vi/x/mqdefault.jpg",
       isStream: false,
+      isSeekable: true,
       requesterId: "200000000000000002",
     });
   });
 
-  test("a stream has no duration", () => {
-    const stream = toMusicTrack(built(raw("live", { isStream: true, duration: 9_999_999 })));
-    expect(stream).toMatchObject({ isStream: true, durationMs: 0 });
+  test("a stream has no duration and is never seekable", () => {
+    const stream = toMusicTrack(
+      built(raw("live", { isStream: true, isSeekable: true, duration: 9_999_999 })),
+    );
+    expect(stream).toMatchObject({ isStream: true, durationMs: 0, isSeekable: false });
+  });
+
+  test("a source that cannot seek stays unseekable", () => {
+    expect(toMusicTrack(built(raw("a", { isSeekable: false }))).isSeekable).toBe(false);
   });
 });
 
 describe("toPlayerState", () => {
   test("maps the player and its queue", () => {
-    const state = toPlayerState({
-      voiceChannelId: "400000000000000004",
-      textChannelId: "300000000000000003",
-      playing: true,
-      paused: false,
-      position: 12_345,
-      queue: { current: built(raw("a")), tracks: [built(raw("b"))] },
-    });
+    const state = toPlayerState(
+      {
+        voiceChannelId: "400000000000000004",
+        textChannelId: "300000000000000003",
+        playing: true,
+        paused: false,
+        position: 12_345,
+        volume: 80,
+        repeatMode: "queue",
+        queue: { current: built(raw("a")), tracks: [built(raw("b"))] },
+      },
+      "nightcore",
+    );
     expect(state).toMatchObject({
       voiceChannelId: "400000000000000004",
       textChannelId: "300000000000000003",
@@ -166,6 +178,9 @@ describe("toPlayerState", () => {
       upcoming: [{ title: "b" }],
       positionMs: 12_345,
       paused: false,
+      loop: "queue",
+      volume: 80,
+      filter: "nightcore",
     });
   });
 
@@ -175,9 +190,11 @@ describe("toPlayerState", () => {
       playing: false,
       paused: false,
       position: 5000,
+      volume: 100,
+      repeatMode: "off" as const,
       queue: { current: null, tracks: [] },
     };
-    expect(toPlayerState({ ...base, voiceChannelId: "4" })?.positionMs).toBe(0);
-    expect(toPlayerState({ ...base, voiceChannelId: null })).toBeNull();
+    expect(toPlayerState({ ...base, voiceChannelId: "4" }, "off")?.positionMs).toBe(0);
+    expect(toPlayerState({ ...base, voiceChannelId: null }, "off")).toBeNull();
   });
 });

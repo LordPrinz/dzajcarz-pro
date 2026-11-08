@@ -39,7 +39,7 @@ modules/
   welcome/          welcome (set through a form, off, test), greets new members
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, special invite with a message and attachment, block, hide, show), a voice channel per member who joins the party area
   status/           rotates the bot's activity (the old bot's song)
-  music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), a now playing panel with buttons
+  music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), loop, shuffle, seek, volume, filter, remove, jump, back, clear, save (sv), a now playing panel with buttons
   …                 moderation, fun (see the board)
 infra/              docker-compose: Postgres, Redis, Lavalink and yt-cipher (profile "music")
 scripts/            git hooks and GitHub automation (Bun scripts)

@@ -6,6 +6,7 @@ import {
   MAX_SEARCH_LENGTH,
   MAX_URL_LENGTH,
   parseQuery,
+  parseTime,
   progressLine,
   truncate,
 } from "./format.ts";
@@ -133,5 +134,89 @@ describe("formatting", () => {
       "utworów",
       "utwory",
     ]);
+  });
+});
+
+describe("parseTime", () => {
+  test("reads seconds, clock times and unit times", () => {
+    expect(parseTime("90")).toBe(90_000);
+    expect(parseTime("0")).toBe(0);
+    expect(parseTime("1:30")).toBe(90_000);
+    expect(parseTime("0:05")).toBe(5000);
+    expect(parseTime("90:00")).toBe(5_400_000);
+    expect(parseTime("1:02:03")).toBe(3_723_000);
+    expect(parseTime("1m30s")).toBe(90_000);
+    expect(parseTime("1m30")).toBe(90_000);
+    expect(parseTime("1m")).toBe(60_000);
+    expect(parseTime("45s")).toBe(45_000);
+    expect(parseTime("90s")).toBe(90_000);
+    expect(parseTime("90m")).toBe(5_400_000);
+    expect(parseTime("1h2m3s")).toBe(3_723_000);
+    expect(parseTime("1h2m3")).toBe(3_723_000);
+    expect(parseTime("2h")).toBe(7_200_000);
+  });
+
+  test("ignores case and spaces", () => {
+    expect(parseTime("  1M 30S ")).toBe(90_000);
+    expect(parseTime("1 m 30 s")).toBe(90_000);
+    expect(parseTime("1 h 2 m 3 s")).toBe(3_723_000);
+    expect(parseTime(" 1:30 ")).toBe(90_000);
+  });
+
+  test("a part after a larger one stays under 60 in both forms", () => {
+    expect(parseTime("1:59")).toBe(119_000);
+    expect(parseTime("1m59s")).toBe(119_000);
+    expect(parseTime("1h59m")).toBe(7_140_000);
+    for (const bad of [
+      "1:60",
+      "1:75",
+      "1:99:00",
+      "1m60s",
+      "1m90s",
+      "1m90",
+      "1h60m",
+      "1h75m",
+      "1h90s",
+    ]) {
+      expect(parseTime(bad)).toBeNull();
+    }
+  });
+
+  test("minutes go up to 99 without hours", () => {
+    expect(parseTime("99:59")).toBe(5_999_000);
+    expect(parseTime("99m")).toBe(5_940_000);
+    expect(parseTime("100:00")).toBeNull();
+    expect(parseTime("100m")).toBeNull();
+    expect(parseTime("1:40:00")).toBe(6_000_000);
+  });
+
+  test("refuses everything else", () => {
+    for (const bad of [
+      "",
+      "   ",
+      "abc",
+      "-5",
+      "1.5",
+      "1:5",
+      "1:2:3:4",
+      "30s1m",
+      "1m 1m",
+      "m",
+      "s",
+      "1h30",
+      "30ms",
+      "99999999",
+      "999h",
+      "1e3",
+    ]) {
+      expect(parseTime(bad)).toBeNull();
+    }
+  });
+
+  test("stops at 99:59:59", () => {
+    expect(parseTime("359999")).toBe(359_999_000);
+    expect(parseTime("99:59:59")).toBe(359_999_000);
+    expect(parseTime("99h59m59s")).toBe(359_999_000);
+    expect(parseTime("360000")).toBeNull();
   });
 });
