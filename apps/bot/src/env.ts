@@ -17,6 +17,15 @@ const flag = z.preprocess(
   z.boolean(),
 );
 
+function isTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const EnvFields = z.object({
   DISCORD_TOKEN: z.string().min(50),
   DISCORD_CLIENT_ID: snowflake,
@@ -28,6 +37,15 @@ const EnvFields = z.object({
   // Optional: without them the bot runs and music commands say the player is unavailable.
   LAVALINK_URL: optional(z.url({ protocol: /^https?$/ })),
   LAVALINK_PASSWORD: optional(z.string().min(1)),
+  // When the scheduled song plays (five-field cron, read in the time zone below).
+  SCHEDULED_SONG_CRON: z
+    .string()
+    .default("0 9,21 * * *")
+    .refine((value) => Bun.cron.parse(value) !== null, "expected a cron expression that fires"),
+  SCHEDULED_SONG_TIMEZONE: z
+    .string()
+    .default("Europe/Warsaw")
+    .refine(isTimeZone, "expected an IANA time zone, e.g. Europe/Warsaw"),
   // On unless set to 0/false: the bot registers its slash commands at startup. Turn it off when several
   // instances share the application.
   COMMANDS_AUTO_DEPLOY: z.preprocess(

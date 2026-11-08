@@ -3,6 +3,7 @@ import { type RESTPostAPIChatInputApplicationCommandsJSONBody, Routes } from "di
 import { toSlashCommand } from "./discord/slash.ts";
 import type { DeployEnv } from "./env.ts";
 import { createModules } from "./modules.ts";
+import { SCHEDULED_SONGS } from "./music/scheduled-songs.ts";
 import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
 
 /** One PUT to Discord: set or empty the commands of the application or of one guild. */
@@ -298,6 +299,13 @@ export const createDeployRegistry = () =>
       componentState: unusedServices(),
       presence: unusedServices(),
       clock: unusedServices(),
+      // The schedule module registers its cron job when it is created; nothing must fire while deploying.
+      cron: { every: () => () => {} },
+      scheduleSettings: unusedServices(),
+      scheduleVoice: unusedServices(),
+      scheduledSongPlayer: unusedServices(),
+      scheduledSongs: SCHEDULED_SONGS,
+      scheduledSongCron: { expression: "0 9,21 * * *", timeZone: "Europe/Warsaw" },
       logger: silentLogger,
     }),
   );

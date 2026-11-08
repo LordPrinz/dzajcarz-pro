@@ -1,7 +1,7 @@
 # 4. Lavalink for audio
 
 - **Status:** accepted
-- **Date:** 2026-11-06, amended 2026-11-08 (DZAJ-50)
+- **Date:** 2026-11-06, amended 2026-11-08 (DZAJ-50, DZAJ-13)
 
 ## Context
 
@@ -87,6 +87,24 @@ track starts right away):
   source stays enabled so it starts working again with a fixed Lavalink release.
 - Vimeo: does not work. Loading succeeds, playback fails inside the Lavaplayer bundled with Lavalink
   4.2.2, the latest release.
+
+## Local files (DZAJ-13)
+
+The scheduled songs ("Lato z Radiem", `icona_pop`) are mp3 files in `infra/lavalink/music`, mounted read-only
+at `/opt/Lavalink/music` in the Lavalink container, and `lavalink.server.sources.local` is on. That source
+loads any path the node can read, so it is only safe while no member can choose the path:
+
+- `/play` and `/search` turn everything a member types into a `ytsearch:` query or one of the allowed
+  links (`parseQuery`, `toIdentifier`). `local:/etc/passwd` and `/etc/passwd` become search words, and tests
+  in `mapping.test.ts` and `lavalink.test.ts` assert the identifiers the node receives.
+- Only the schedule module reaches `playLocalFile`, through a name from a list in the code. The adapter looks
+  the name up and refuses an unknown one, so the path is never built from input.
+- The source is not limited to the music directory: it would also read the container's `application.yml`
+  (with the node password). That is why the list in the code is the only safeguard that counts, and why the
+  rule above is a hard one. The node is published on `127.0.0.1:2333` only and needs the password.
+
+The `http` source stays off for the reason given in `application.yml`. Adding a song means adding the file,
+and a line in `scheduled-songs.ts`; the directory is mounted, so Lavalink needs no restart for a new file.
 
 ## Consequences
 

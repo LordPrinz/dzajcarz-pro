@@ -1,4 +1,4 @@
-import type { BotModule, CommandSummary, Logger, Scheduler } from "@dzajcarz/core";
+import type { BotModule, CommandSummary, CronScheduler, Logger, Scheduler } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
@@ -15,6 +15,13 @@ import {
   type PartyPermissions,
   type PartyRepository,
 } from "@dzajcarz/module-party";
+import {
+  createScheduleModule,
+  type ScheduledSong,
+  type ScheduledSongPlayer,
+  type ScheduleSettings,
+  type ScheduleVoice,
+} from "@dzajcarz/module-schedule";
 import {
   createSettingsModule,
   type GuildChannels,
@@ -58,6 +65,12 @@ export interface ModuleServices {
   voiceChannels: VoiceChannels;
   musicPanels: PanelMessages;
   componentState: Pick<KeyValueStore, "get" | "set">;
+  cron: CronScheduler;
+  scheduleSettings: ScheduleSettings;
+  scheduleVoice: ScheduleVoice;
+  scheduledSongPlayer: ScheduledSongPlayer;
+  scheduledSongs: readonly [ScheduledSong, ...ScheduledSong[]];
+  scheduledSongCron: { expression: string; timeZone: string };
   logger: Logger;
 }
 
@@ -95,6 +108,17 @@ export function createModules(services: ModuleServices): BotModule[] {
       scheduler: services.scheduler,
       stateStorage: services.componentState,
       logger: services.logger.child({ module: "music" }),
+    }),
+    createScheduleModule({
+      settings: services.scheduleSettings,
+      voice: services.scheduleVoice,
+      player: services.scheduledSongPlayer,
+      cron: services.cron,
+      moduleEnabled: services.moduleEnabled,
+      songs: services.scheduledSongs,
+      expression: services.scheduledSongCron.expression,
+      timeZone: services.scheduledSongCron.timeZone,
+      logger: services.logger.child({ module: "schedule" }),
     }),
     createStatusModule({
       presence: services.presence,

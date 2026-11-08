@@ -142,12 +142,15 @@ class StubManager extends EventEmitter {
   /** What `/loadtracks` answers; an Error is thrown. */
   response: unknown = { loadType: "empty" };
   readonly leftVoice: string[] = [];
+  /** Every `/loadtracks` path the adapter asked for. */
+  readonly requests: string[] = [];
   readonly players = new Map<string, StubPlayer>();
   readonly node = {
     id: "main",
     options: { retryDelay: FAST_RETRY_MS },
     reconnectionAttemptCount: 0,
-    request: async () => {
+    request: async (path: string) => {
+      this.requests.push(path);
       if (this.response instanceof Error) throw this.response;
       return this.response;
     },
@@ -287,6 +290,95 @@ describe("lavalink music player", () => {
       manager.nodeManager.emit("connect", manager.node);
       await settle();
       expect(player.calls).toEqual(["destroy left"]);
+    });
+  });
+
+  describe("playing a local file", () => {
+    const FILE = "/opt/Lavalink/music/lato_z_radiem.mp3";
+
+    test("loads the file through the local source, joins and plays it", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      void music.playLocalFile(GUILD, VOICE, FILE);
+      await settle();
+      expect(manager.requests).toEqual([
+        `/loadtracks?identifier=${encodeURIComponent(`local:${FILE}`)}`,
+      ]);
+      const player = manager.players.get(GUILD);
+      expect(player?.calls).toEqual([`connect ${VOICE}`, "play Lato z Radiem"]);
+      expect(music.state(GUILD)?.current?.title).toBe("Lato z Radiem");
+    });
+
+    test("resolves without a queue when the file was the last track", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      const done = music.playLocalFile(GUILD, VOICE, FILE);
+      await settle();
+      manager.emit("queueEnd", manager.players.get(GUILD));
+      expect(await done).toEqual({ queued: false });
+    });
+
+    test("resolves with a queue when another track follows the file", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      const done = music.playLocalFile(GUILD, VOICE, FILE);
+      await settle();
+      manager.emit("trackEnd", manager.players.get(GUILD), song("Lato z Radiem"), {});
+      expect(await done).toEqual({ queued: true });
+    });
+
+    test("an unrelated track ending does not finish it", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      let finished = false;
+      void music.playLocalFile(GUILD, VOICE, FILE).then(() => {
+        finished = true;
+      });
+      await settle();
+      manager.emit("trackEnd", manager.players.get(GUILD), song("Other"), {});
+      await settle();
+      expect(finished).toBe(false);
+    });
+
+    test("resolves when the player is destroyed meanwhile", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      const done = music.playLocalFile(GUILD, VOICE, FILE);
+      await settle();
+      await music.leave(GUILD);
+      expect(await done).toEqual({ queued: false });
+    });
+
+    test("replaces an idle player of the guild", async () => {
+      const { manager, music } = setup();
+      const idle = manager.playing(GUILD, null);
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      void music.playLocalFile(GUILD, "400000000000000009", FILE);
+      await settle();
+      expect(idle.calls).toEqual(["destroy scheduled song"]);
+      expect(manager.players.get(GUILD)?.calls).toEqual([
+        "connect 400000000000000009",
+        "play Lato z Radiem",
+      ]);
+    });
+
+    test("rejects and joins nothing when the node cannot load the file", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "empty" };
+      await expect(music.playLocalFile(GUILD, VOICE, FILE)).rejects.toThrow("could not load");
+      expect(manager.players.size).toBe(0);
+    });
+
+    test("a /play search typed like a local identifier or a path never selects the local source", async () => {
+      const { manager, music } = setup();
+      for (const text of [`local:${FILE}`, FILE, "../../etc/passwd", "file:///etc/passwd"]) {
+        await music.search({ kind: "search", text }, CALLER);
+      }
+      expect(manager.requests).toEqual(
+        [`local:${FILE}`, FILE, "../../etc/passwd", "file:///etc/passwd"].map(
+          (text) => `/loadtracks?identifier=${encodeURIComponent(`ytsearch:${text}`)}`,
+        ),
+      );
     });
   });
 

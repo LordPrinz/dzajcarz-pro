@@ -1,10 +1,16 @@
 // Composition root: creates the real adapters once and hands them to the modules.
-import { createJsonLogger, createRegistry, createScheduler } from "@dzajcarz/core";
+import {
+  createCronScheduler,
+  createJsonLogger,
+  createRegistry,
+  createScheduler,
+} from "@dzajcarz/core";
 import {
   createDb,
   createGuildSettingsRepository,
   createModuleToggleRepository,
   createPartyRepository,
+  createScheduledSongRepository,
   createWelcomeRepository,
 } from "@dzajcarz/db";
 import { createRedisStore, keepConnected } from "@dzajcarz/kv";
@@ -23,6 +29,7 @@ import {
 } from "./discord/party.ts";
 import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
+import { createScheduleVoice } from "./discord/schedule.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleEnabled } from "./event-scope.ts";
@@ -30,6 +37,8 @@ import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
 import { createModules } from "./modules.ts";
 import { createLavalinkMusicPlayer } from "./music/lavalink.ts";
+import { createScheduledSongPlayer } from "./music/scheduled.ts";
+import { SCHEDULED_SONGS } from "./music/scheduled-songs.ts";
 import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
 import { createPrefixResolver } from "./prefix-resolver.ts";
 import { createPrefixSettings } from "./prefix-settings.ts";
@@ -117,6 +126,12 @@ const modules = createModules({
   voiceChannels: createVoiceChannels(client),
   musicPanels: createPanelMessages(client),
   componentState: createRedisStore(redis),
+  cron: createCronScheduler(),
+  scheduleSettings: createScheduledSongRepository(sql),
+  scheduleVoice: createScheduleVoice(client),
+  scheduledSongPlayer: createScheduledSongPlayer(musicPlayer),
+  scheduledSongs: SCHEDULED_SONGS,
+  scheduledSongCron: { expression: env.SCHEDULED_SONG_CRON, timeZone: env.SCHEDULED_SONG_TIMEZONE },
   logger,
 });
 const registry = createRegistry(modules);

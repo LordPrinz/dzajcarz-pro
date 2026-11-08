@@ -17,6 +17,7 @@
     "@dzajcarz/module-general": "workspace:*",
     "@dzajcarz/module-music": "workspace:*",
     "@dzajcarz/module-party": "workspace:*",
+    "@dzajcarz/module-schedule": "workspace:*",
     "@dzajcarz/module-settings": "workspace:*",
     "@dzajcarz/module-status": "workspace:*",
     "@dzajcarz/module-welcome": "workspace:*",

@@ -10,6 +10,7 @@ export function createUnavailableMusicPlayer(): LavalinkMusicPlayer {
     search: unavailable,
     state: () => null,
     join: unavailable,
+    playLocalFile: unavailable,
     enqueue: unavailable,
     skip: unavailable,
     pause: unavailable,

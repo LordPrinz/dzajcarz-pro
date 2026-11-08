@@ -22,6 +22,16 @@ import {
 } from "./mapping.ts";
 
 export interface LavalinkMusicPlayer extends MusicPlayer {
+  /**
+   * Plays a file of the node's local source in the voice channel, replacing an idle player of the guild.
+   * Resolves when the file is over; `queued` tells whether other tracks follow it. `file` is a path the
+   * bot's own configuration lists, never member input: the node reads whatever path it gets.
+   */
+  playLocalFile(
+    guildId: string,
+    voiceChannelId: string,
+    file: string,
+  ): Promise<{ queued: boolean }>;
   /** Leaves every voice channel and closes the node connection. */
   destroy(): Promise<void>;
 }
@@ -108,7 +118,18 @@ export function createLavalinkMusicPlayer({
   /** Guilds whose bot leaves and rejoins voice on purpose (recovery); their disconnect is not a kick. */
   const rejoining = new Map<string, () => void>();
 
+  /** Local files being played: settled by the track's end, the queue's end or the player's end. */
+  const localPlays = new Map<
+    string,
+    { encoded: string; done: (result: { queued: boolean }) => void }
+  >();
+  function finishLocal(guildId: string, queued: boolean): void {
+    localPlays.get(guildId)?.done({ queued });
+    localPlays.delete(guildId);
+  }
+
   function playerGone(guildId: string, reason: unknown): void {
+    finishLocal(guildId, false);
     resumeAt.delete(guildId);
     skipping.delete(guildId);
     logger.info("Music player destroyed", { guildId, reason });
@@ -153,7 +174,13 @@ export function createLavalinkMusicPlayer({
     if (track)
       emit("trackStart", (listener) => listener.trackStart(player.guildId, toMusicTrack(track)));
   });
+  // Emitted only when another track follows; the end of the last one is queueEnd.
+  manager.on("trackEnd", (player, track) => {
+    if (track?.encoded === localPlays.get(player.guildId)?.encoded)
+      finishLocal(player.guildId, true);
+  });
   manager.on("queueEnd", (player) => {
+    finishLocal(player.guildId, false);
     skipping.delete(player.guildId);
     emit("queueEnd", (listener) => listener.queueEnd(player.guildId));
   });
@@ -270,6 +297,28 @@ export function createLavalinkMusicPlayer({
       .catch((error: unknown) => logger.error("Lavalink init failed", { error }));
   });
 
+  async function joinVoice(
+    guildId: string,
+    voiceChannelId: string,
+    textChannelId: string,
+  ): Promise<void> {
+    const player = manager.createPlayer({
+      guildId,
+      voiceChannelId,
+      textChannelId,
+      selfDeaf: true,
+      volume: VOLUME,
+    });
+    // createPlayer returns an existing player as it is; one that lost its channel (a rejoin that never
+    // finished) would otherwise connect to nothing.
+    if (!player.voiceChannelId) {
+      player.options.voiceChannelId = voiceChannelId;
+      player.options.textChannelId = textChannelId;
+      player.textChannelId = textChannelId;
+    }
+    if (!player.connected) await player.connect();
+  }
+
   return {
     available: () => manager.useable,
 
@@ -297,29 +346,40 @@ export function createLavalinkMusicPlayer({
       return player ? toPlayerState(player) : null;
     },
 
-    async join(guildId, voiceChannelId, textChannelId) {
-      const player = manager.createPlayer({
-        guildId,
-        voiceChannelId,
-        textChannelId,
-        selfDeaf: true,
-        volume: VOLUME,
-      });
-      // createPlayer returns an existing player as it is; one that lost its channel (a rejoin that never
-      // finished) would otherwise connect to nothing.
-      if (!player.voiceChannelId) {
-        player.options.voiceChannelId = voiceChannelId;
-        player.options.textChannelId = textChannelId;
-        player.textChannelId = textChannelId;
-      }
-      if (!player.connected) await player.connect();
-    },
+    join: joinVoice,
 
     async enqueue(guildId, tracks) {
       const player = playerOf(guildId);
       await player.queue.add(await Promise.all(tracks.map((track) => toTrack(player, track))));
       // `current` is set as soon as play() starts, unlike `playing`, which waits for the node.
       if (!player.queue.current) await player.play();
+    },
+
+    async playLocalFile(guildId, voiceChannelId, file) {
+      const node = connectedNode();
+      if (!node) throw new Error("No Lavalink node is connected");
+      const result: RawLoadResult = await node.request(
+        `/loadtracks?identifier=${encodeURIComponent(`local:${file}`)}`,
+      );
+      const [raw] = rawTracksOf(result);
+      if (!raw) throw new Error(`Lavalink could not load ${file}`);
+      const track = manager.utils.buildTrack(raw, { id: client.user?.id ?? "" });
+      const stale = manager.getPlayer(guildId);
+      if (stale) await destroyPlayer(stale, "scheduled song");
+      await joinVoice(guildId, voiceChannelId, voiceChannelId);
+      const player = playerOf(guildId);
+      const finished = new Promise<{ queued: boolean }>((done) => {
+        localPlays.set(guildId, { encoded: raw.encoded, done });
+      });
+      try {
+        await player.queue.add(track);
+        await player.play();
+      } catch (error) {
+        localPlays.delete(guildId);
+        await destroyPlayer(player, "scheduled song failed");
+        throw error;
+      }
+      return finished;
     },
 
     async skip(guildId, expectedTrackId) {
