@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ChannelType, type Client, PermissionFlagsBits } from "discord.js";
-import { createPartyChat, createPartyPermissions } from "./party.ts";
+import { createPartyChat, createPartyInvites, createPartyPermissions } from "./party.ts";
 
 const GUILD = "100000000000000001";
 const CHANNEL = "400000000000000004";
@@ -15,6 +15,9 @@ interface FakeMember {
   channelId: string | null;
   permissions?: bigint[];
   disconnects: string[];
+  bot?: boolean;
+  /** Whether the member's own overwrite on the channel denies Connect. */
+  blocked?: boolean;
 }
 
 function clientWith(member: FakeMember, parentOverwrite?: { allow: bigint[]; deny: bigint[] }) {
@@ -24,11 +27,19 @@ function clientWith(member: FakeMember, parentOverwrite?: { allow: bigint[]; den
       disconnect: async (reason: string) => void member.disconnects.push(reason),
     },
     permissions: { any: (flags: bigint[]) => flags.some((f) => member.permissions?.includes(f)) },
+    user: { bot: member.bot ?? false },
   };
   const channel = {
     type: ChannelType.GuildVoice,
     guildId: GUILD,
     guild: { roles: { everyone: { id: EVERYONE } } },
+    permissionOverwrites: {
+      cache: new Map(
+        member.blocked === undefined
+          ? []
+          : [["5", { deny: bitsOf(...(member.blocked ? [PermissionFlagsBits.Connect] : [])) }]],
+      ),
+    },
     parent: {
       permissionOverwrites: {
         cache: new Map(
@@ -81,11 +92,32 @@ describe("party permissions adapter", () => {
       createPartyPermissions(
         clientWith({ channelId: null, permissions, disconnects: [] }),
       ).lookupMember(GUILD, "5");
-    expect(await lookup([])).toEqual({ self: false, moderator: false });
+    expect(await lookup([])).toEqual({ self: false, moderator: false, bot: false });
     expect(await lookup([PermissionFlagsBits.MoveMembers])).toEqual({
       self: false,
       moderator: true,
+      bot: false,
     });
+  });
+
+  test("lookupMember tells bots apart", async () => {
+    const lookup = (bot: boolean) =>
+      createPartyPermissions(clientWith({ channelId: null, bot, disconnects: [] })).lookupMember(
+        GUILD,
+        "5",
+      );
+    expect((await lookup(true))?.bot).toBe(true);
+    expect((await lookup(false))?.bot).toBe(false);
+  });
+
+  test("isBlocked reads the member's own overwrite for Connect", async () => {
+    const blocked = (flag: boolean | undefined) =>
+      createPartyPermissions(
+        clientWith({ channelId: null, blocked: flag, disconnects: [] }),
+      ).isBlocked(CHANNEL, "5");
+    expect(await blocked(true)).toBe(true);
+    expect(await blocked(false)).toBe(false);
+    expect(await blocked(undefined)).toBe(false);
   });
 
   test("canManage asks the channel, overwrites included", async () => {
@@ -95,6 +127,109 @@ describe("party permissions adapter", () => {
     expect(
       await permissions([PermissionFlagsBits.ManageChannels]).canManage(GUILD, "5", CHANNEL),
     ).toBe(true);
+  });
+});
+
+describe("party invites adapter", () => {
+  function clientWithUser(send: (payload: unknown) => Promise<void>) {
+    return {
+      channels: {
+        fetch: async () => ({
+          type: ChannelType.GuildVoice,
+          name: "Kanał Ola",
+          guild: { name: "Ekipa" },
+        }),
+      },
+      users: {
+        fetch: async () => ({
+          send,
+          username: "ola_k",
+          displayAvatarURL: () => "https://cdn.discordapp.com/avatars/1/a.png",
+        }),
+      },
+    } as unknown as Client;
+  }
+
+  test("describe names the channel, the server and the sender", async () => {
+    const invites = createPartyInvites(clientWithUser(async () => {}));
+    expect(await invites.describe(CHANNEL, "5")).toEqual({
+      channelName: "Kanał Ola",
+      guildName: "Ekipa",
+      inviterUsername: "ola_k",
+      inviterAvatarUrl: "https://cdn.discordapp.com/avatars/1/a.png",
+    });
+  });
+
+  test("sendDirect uploads the files and maps the author", async () => {
+    const sent: unknown[] = [];
+    const invites = createPartyInvites(clientWithUser(async (payload) => void sent.push(payload)));
+    await invites.sendDirect("5", {
+      embeds: [
+        {
+          author: { name: "Zaproszenie od Ola", iconUrl: "https://cdn.discordapp.com/a.png" },
+          footer: "stopka",
+          image: "attachment://mapa.png",
+        },
+      ],
+      files: [{ name: "mapa.png", data: new Uint8Array([1, 2]) }],
+    });
+    expect(sent[0]).toMatchObject({
+      embeds: [
+        {
+          author: { name: "Zaproszenie od Ola", icon_url: "https://cdn.discordapp.com/a.png" },
+          footer: { text: "stopka" },
+          image: { url: "attachment://mapa.png" },
+        },
+      ],
+      files: [{ attachment: Buffer.from([1, 2]), name: "mapa.png" }],
+    });
+  });
+
+  test("downloadFile goes through the Discord-only downloader", async () => {
+    const asked: string[] = [];
+    const fetchFile = (async (url: string) => {
+      asked.push(url);
+      return new Response(new Uint8Array([7]));
+    }) as unknown as typeof fetch;
+    const invites = createPartyInvites(
+      clientWithUser(async () => {}),
+      fetchFile,
+    );
+    expect(await invites.downloadFile("https://cdn.discordapp.com/a.png", 5)).toEqual(
+      new Uint8Array([7]),
+    );
+    expect(await invites.downloadFile("https://evil.example/a.png", 5)).toBeNull();
+    expect(asked).toEqual(["https://cdn.discordapp.com/a.png"]);
+  });
+
+  test("sendDirect sends the embed and link button without mentions", async () => {
+    const sent: unknown[] = [];
+    const invites = createPartyInvites(clientWithUser(async (payload) => void sent.push(payload)));
+    const result = await invites.sendDirect("5", {
+      embeds: [{ title: "Hej", image: "https://cdn.discordapp.com/a.png" }],
+      components: [[{ type: "link", label: "Dołącz", url: "https://discord.com/channels/1/2" }]],
+    });
+    expect(result).toBe(true);
+    expect(sent[0]).toMatchObject({
+      embeds: [{ title: "Hej", image: { url: "https://cdn.discordapp.com/a.png" } }],
+      components: [{ components: [{ url: "https://discord.com/channels/1/2", label: "Dołącz" }] }],
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  test("closed DMs give false, other failures are thrown", async () => {
+    const closed = createPartyInvites(
+      clientWithUser(async () => {
+        throw Object.assign(new Error("Cannot send messages to this user"), { code: 50007 });
+      }),
+    );
+    expect(await closed.sendDirect("5", "hej")).toBe(false);
+    const broken = createPartyInvites(
+      clientWithUser(async () => {
+        throw Object.assign(new Error("Server error"), { code: 0 });
+      }),
+    );
+    await expect(broken.sendDirect("5", "hej")).rejects.toThrow("Server error");
   });
 });
 

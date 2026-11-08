@@ -1,8 +1,9 @@
-import type { AnyModal, ModalRawValues } from "@dzajcarz/core";
+import type { AnyModal, ModalRawValue, ModalRawValues } from "@dzajcarz/core";
 import {
   type ChannelFieldDef,
   type ModalChannelKind,
   type ModalFieldSpec,
+  type ModalFile,
   type ModalSpec,
   REJECTED_MODAL_VALUE,
   validateModal,
@@ -12,6 +13,8 @@ import {
   type APIModalInteractionResponseCallbackData,
   ChannelType,
   ComponentType,
+  type FileUploadType,
+  type ModalData,
   type ModalSubmitInteraction,
   SelectMenuDefaultValueType,
   type SelectMenuModalData,
@@ -87,13 +90,48 @@ function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
       return {
         ...base,
         type: ComponentType.UserSelect,
-        min_values: field.required ? 1 : 0,
-        max_values: 1,
+        // An optional select may always be left empty, whatever `minValues` says (core still enforces it
+        // when something is picked), so the client never asks for a pick the field does not require.
+        min_values: field.required ? Math.max(field.minValues ?? 1, 1) : 0,
+        max_values: field.maxValues ?? 1,
         default_values: field.value
           ? [{ id: field.value, type: SelectMenuDefaultValueType.User }]
           : undefined,
       };
+    case "file":
+      return {
+        type: ComponentType.FileUpload,
+        custom_id: field.customId,
+        required: field.required,
+        min_values: field.required ? 1 : 0,
+        max_values: 1,
+        file_types: toFileTypes(field.contentTypes),
+      };
   }
+}
+
+/** Extensions for the exact types Discord's filter names by extension only. */
+const FILE_TYPE_EXTENSIONS: Record<string, FileUploadType> = { "application/pdf": ".pdf" };
+const FILE_TYPE_FAMILIES = ["image", "video", "audio"];
+const MAX_FILE_TYPES = 10;
+
+/**
+ * The picker's file-type filter for a field's `contentTypes`: `image/*` becomes `image`, `application/pdf`
+ * becomes `.pdf`. A type with no equivalent would make the filter stricter than the field, so then no
+ * filter is sent and the check on submit is the only one.
+ */
+function toFileTypes(contentTypes: readonly string[] | undefined): FileUploadType[] | undefined {
+  if (!contentTypes) return undefined;
+  const types = new Set<FileUploadType>();
+  for (const raw of contentTypes) {
+    const type = raw.toLowerCase();
+    const family = type.endsWith("/*") ? type.slice(0, -2) : null;
+    const known = family !== null && FILE_TYPE_FAMILIES.includes(family) ? family : null;
+    const mapped = known ? (known as FileUploadType) : FILE_TYPE_EXTENSIONS[type];
+    if (!mapped) return undefined;
+    types.add(mapped);
+  }
+  return types.size <= MAX_FILE_TYPES ? [...types] : undefined;
 }
 
 /**
@@ -106,7 +144,7 @@ export function readModalValues(
   modal: AnyModal,
   interaction: ModalSubmitInteraction,
 ): ModalRawValues {
-  const raw: Record<string, string | readonly string[] | undefined> = {};
+  const raw: Record<string, ModalRawValue> = {};
   for (const [key, def] of Object.entries(modal.fields)) {
     const field = interaction.fields.fields.get(key);
     if (!field) continue;
@@ -119,6 +157,8 @@ export function readModalValues(
     } else if (def.type === "channel") {
       if (field.type !== ComponentType.ChannelSelect) raw[key] = REJECTED_MODAL_VALUE;
       else raw[key] = field.values.map((id) => acceptChannel(def, field, id, interaction));
+    } else if (def.type === "file") {
+      raw[key] = readUploads(field);
     } else if (field.type !== ComponentType.UserSelect) {
       raw[key] = REJECTED_MODAL_VALUE;
     } else {
@@ -126,6 +166,23 @@ export function readModalValues(
     }
   }
   return raw;
+}
+
+/** The attachments Discord resolved for an upload; an id without one, or another component type, is rejected. */
+function readUploads(field: ModalData): ModalRawValue {
+  if (field.type !== ComponentType.FileUpload) return REJECTED_MODAL_VALUE;
+  const files: ModalFile[] = [];
+  for (const id of field.values) {
+    const attachment = field.attachments.get(id);
+    if (!attachment) return REJECTED_MODAL_VALUE;
+    files.push({
+      url: attachment.url,
+      name: attachment.name,
+      contentType: attachment.contentType,
+      size: attachment.size,
+    });
+  }
+  return files;
 }
 
 function acceptChannel(

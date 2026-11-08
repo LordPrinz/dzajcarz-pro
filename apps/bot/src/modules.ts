@@ -11,6 +11,7 @@ import {
   createPartyModule,
   type PartyChannels,
   type PartyChat,
+  type PartyInvites,
   type PartyPermissions,
   type PartyRepository,
 } from "@dzajcarz/module-party";
@@ -48,8 +49,9 @@ export interface ModuleServices {
   partyChannels: PartyChannels;
   partyPermissions: PartyPermissions;
   partyChat: PartyChat;
+  partyInvites: PartyInvites;
   scheduler: Scheduler;
-  partyLock: Pick<KeyValueStore, "setIfAbsent" | "delIfEquals" | "increment">;
+  partyLock: Pick<KeyValueStore, "get" | "setIfAbsent" | "delIfEquals" | "increment">;
   presence: Presence;
   clock: Clock;
   musicPlayer: MusicPlayer;
@@ -81,6 +83,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       channels: services.partyChannels,
       permissions: services.partyPermissions,
       chat: services.partyChat,
+      invites: services.partyInvites,
       scheduler: services.scheduler,
       lock: services.partyLock,
       logger: services.logger.child({ module: "party" }),

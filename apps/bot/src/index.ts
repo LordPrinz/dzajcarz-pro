@@ -15,7 +15,12 @@ import { deployOnStartup } from "./deploy.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
 import { createPanelMessages, createVoiceChannels } from "./discord/music.ts";
-import { createPartyChannels, createPartyChat, createPartyPermissions } from "./discord/party.ts";
+import {
+  createPartyChannels,
+  createPartyChat,
+  createPartyInvites,
+  createPartyPermissions,
+} from "./discord/party.ts";
 import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
@@ -103,6 +108,7 @@ const modules = createModules({
   partyChannels: createPartyChannels(client),
   partyPermissions: createPartyPermissions(client),
   partyChat: createPartyChat(client),
+  partyInvites: createPartyInvites(client),
   scheduler: createScheduler(),
   partyLock: createRedisStore(redis),
   presence: createPresence(client),
