@@ -29,9 +29,9 @@ export function trackEmbed(track: MusicTrack, positionMs: number, upcoming: numb
   };
 }
 
-/** The now playing panel; null when nothing is playing. */
+/** The now playing panel; null when nothing is playing or the bot plays its own track. */
 export function panelMessage(state: PlayerState, buttons: PanelButtons): PanelMessage | null {
-  if (!state.current) return null;
+  if (!state.current || state.current.byBot) return null;
   return {
     embeds: [trackEmbed(state.current, state.positionMs, state.upcoming.length)],
     components: [[buttons.pause(state.paused), buttons.skip, buttons.stop, buttons.queue]],

@@ -28,7 +28,7 @@ interface StubTrack {
     isrc: null;
   };
   pluginInfo: Record<string, never>;
-  requester?: { id: string };
+  requester?: { id: string; byBot?: true };
 }
 
 function song(title: string, duration = 200_000): StubTrack {
@@ -62,11 +62,13 @@ class StubPlayer {
   position = 0;
   connected = false;
   readonly calls: string[] = [];
+  /** Runs while the player joins, before Discord answers (a member's /play landing meanwhile). */
+  duringConnect: (() => Promise<void>) | null = null;
   readonly queue = {
     current: null as StubTrack | null,
     tracks: [] as StubTrack[],
-    add: async (tracks: StubTrack | StubTrack[]) => {
-      this.queue.tracks.push(...[tracks].flat());
+    add: async (tracks: StubTrack | StubTrack[], index?: number) => {
+      this.queue.tracks.splice(index ?? this.queue.tracks.length, 0, ...[tracks].flat());
     },
   };
 
@@ -86,6 +88,7 @@ class StubPlayer {
 
   async connect() {
     this.calls.push(`connect ${this.options.voiceChannelId}`);
+    await this.duringConnect?.();
     this.voiceChannelId = this.options.voiceChannelId ?? null;
     this.connected = true;
   }
@@ -166,7 +169,10 @@ class StubManager extends EventEmitter {
     leastUsedNodes: () => (this.nodeUp ? [this.node] : []),
   });
   readonly utils = {
-    buildTrack: (raw: StubTrack, requester: { id: string }) => ({ ...raw, requester }),
+    buildTrack: (raw: StubTrack, requester: { id: string; byBot?: true }) => ({
+      ...raw,
+      requester,
+    }),
   };
 
   get useable() {
@@ -301,12 +307,58 @@ describe("lavalink music player", () => {
       manager.response = { loadType: "track", data: song("Lato z Radiem") };
       void music.playLocalFile(GUILD, VOICE, FILE);
       await settle();
-      expect(manager.requests).toEqual([
-        `/loadtracks?identifier=${encodeURIComponent(`local:${FILE}`)}`,
-      ]);
+      // The bare path: the local source opens `new File(identifier)` and knows no prefix.
+      expect(manager.requests).toEqual([`/loadtracks?identifier=${encodeURIComponent(FILE)}`]);
       const player = manager.players.get(GUILD);
       expect(player?.calls).toEqual([`connect ${VOICE}`, "play Lato z Radiem"]);
-      expect(music.state(GUILD)?.current?.title).toBe("Lato z Radiem");
+      expect(music.state(GUILD)?.current).toMatchObject({ title: "Lato z Radiem", byBot: true });
+    });
+
+    test("refuses any path outside the music directory or not named like a song file", async () => {
+      const { manager, music } = setup();
+      for (const file of [
+        "/etc/passwd",
+        `local:${FILE}`,
+        "/opt/Lavalink/music/../application.yml",
+        "/opt/Lavalink/music/sub/song.mp3",
+        "/opt/Lavalink/musicx/song.mp3",
+        "/opt/Lavalink/music/Song.mp3",
+        "/opt/Lavalink/music/.mp3",
+      ]) {
+        await expect(music.playLocalFile(GUILD, VOICE, file)).rejects.toThrow(
+          "not a song file of the music directory",
+        );
+      }
+      expect(manager.requests).toEqual([]);
+    });
+
+    test("is busy and touches nothing while members' music plays or waits", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      const playing = manager.playing(GUILD, song("A"));
+      expect(await music.playLocalFile(GUILD, VOICE, FILE)).toEqual({ status: "busy" });
+      playing.queue.current = null;
+      playing.queue.tracks.push(song("B"));
+      expect(await music.playLocalFile(GUILD, VOICE, FILE)).toEqual({ status: "busy" });
+      expect(playing.calls).toEqual([]);
+      expect(playing.queue.tracks.map((track) => track.info.title)).toEqual(["B"]);
+    });
+
+    test("a member's track queued while the bot joins plays after the file", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "search", data: [song("B")] };
+      const found = await music.search({ kind: "search", text: "b" }, CALLER);
+      const memberTrack = found.kind === "tracks" ? found.tracks[0] : undefined;
+      const idle = manager.playing(GUILD, null);
+      idle.duringConnect = async () => {
+        idle.duringConnect = null;
+        await music.enqueue(GUILD, [memberTrack as MusicTrack]);
+      };
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      void music.playLocalFile(GUILD, "400000000000000009", FILE);
+      await settle();
+      expect(idle.calls).toEqual(["connect 400000000000000009", "play Lato z Radiem"]);
+      expect(idle.queue.tracks.map((track) => track.info.title)).toEqual(["B"]);
     });
 
     test("resolves without a queue when the file was the last track", async () => {
@@ -315,7 +367,7 @@ describe("lavalink music player", () => {
       const done = music.playLocalFile(GUILD, VOICE, FILE);
       await settle();
       manager.emit("queueEnd", manager.players.get(GUILD));
-      expect(await done).toEqual({ queued: false });
+      expect(await done).toEqual({ status: "played", queued: false });
     });
 
     test("resolves with a queue when another track follows the file", async () => {
@@ -324,7 +376,7 @@ describe("lavalink music player", () => {
       const done = music.playLocalFile(GUILD, VOICE, FILE);
       await settle();
       manager.emit("trackEnd", manager.players.get(GUILD), song("Lato z Radiem"), {});
-      expect(await done).toEqual({ queued: true });
+      expect(await done).toEqual({ status: "played", queued: true });
     });
 
     test("an unrelated track ending does not finish it", async () => {
@@ -346,20 +398,62 @@ describe("lavalink music player", () => {
       const done = music.playLocalFile(GUILD, VOICE, FILE);
       await settle();
       await music.leave(GUILD);
-      expect(await done).toEqual({ queued: false });
+      expect(await done).toEqual({ status: "played", queued: false });
     });
 
-    test("replaces an idle player of the guild", async () => {
-      const { manager, music } = setup();
+    test("moves an idle player of the guild instead of recreating it", async () => {
+      const { manager, music, events } = setup();
       const idle = manager.playing(GUILD, null);
       manager.response = { loadType: "track", data: song("Lato z Radiem") };
       void music.playLocalFile(GUILD, "400000000000000009", FILE);
       await settle();
-      expect(idle.calls).toEqual(["destroy scheduled song"]);
-      expect(manager.players.get(GUILD)?.calls).toEqual([
-        "connect 400000000000000009",
-        "play Lato z Radiem",
-      ]);
+      expect(manager.players.get(GUILD)).toBe(idle);
+      expect(idle.calls).toEqual(["connect 400000000000000009", "play Lato z Radiem"]);
+      expect(events).toEqual([]);
+    });
+
+    test("the first member to join the bot's player makes their channel its text channel", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      void music.playLocalFile(GUILD, VOICE, FILE);
+      await settle();
+      expect(music.state(GUILD)?.textChannelId).toBe(VOICE);
+      await music.join(GUILD, VOICE, TEXT);
+      await music.join(GUILD, VOICE, "300000000000000008");
+      expect(music.state(GUILD)?.textChannelId).toBe(TEXT);
+      expect(manager.players.get(GUILD)?.calls).toEqual([`connect ${VOICE}`, "play Lato z Radiem"]);
+    });
+
+    test("an encoded local track can never be queued by a member", async () => {
+      const { manager, music } = setup();
+      const local = { ...song("passwd"), info: { ...song("passwd").info, sourceName: "local" } };
+      manager.node.decode.singleTrack = async () => local as never;
+      await music.join(GUILD, VOICE, TEXT);
+      const forged: MusicTrack = {
+        id: local.encoded,
+        title: "x",
+        author: "",
+        durationMs: 0,
+        uri: null,
+        artworkUrl: null,
+        isStream: false,
+        requesterId: CALLER,
+      };
+      await expect(music.enqueue(GUILD, [forged])).rejects.toThrow("Local files cannot be queued");
+      expect(manager.players.get(GUILD)?.queue.tracks).toEqual([]);
+    });
+
+    test("music counts as playing from the client's queue, also while the player rejoins", () => {
+      const { manager, music } = setup();
+      expect(music.isPlaying(GUILD)).toBe(false);
+      const player = manager.playing(GUILD, song("A"));
+      player.voiceChannelId = null;
+      expect(music.state(GUILD)).toBeNull();
+      expect(music.isPlaying(GUILD)).toBe(true);
+      player.queue.current = null;
+      expect(music.isPlaying(GUILD)).toBe(false);
+      player.queue.tracks.push(song("B"));
+      expect(music.isPlaying(GUILD)).toBe(true);
     });
 
     test("rejects and joins nothing when the node cannot load the file", async () => {

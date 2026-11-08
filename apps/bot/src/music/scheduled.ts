@@ -9,7 +9,7 @@ export function createScheduledSongPlayer(
 ): ScheduledSongPlayer {
   return {
     available: () => music.available(),
-    isPlaying: (guildId) => music.state(guildId)?.current != null,
+    isPlaying: (guildId) => music.isPlaying(guildId),
     async play(guildId, voiceChannelId, song) {
       const file = pathOf(song);
       if (file === undefined) throw new Error(`"${song}" is not a scheduled song`);

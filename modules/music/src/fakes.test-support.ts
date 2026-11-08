@@ -51,11 +51,18 @@ export interface FakePlayer extends MusicPlayer {
   destroy(guildId: string): void;
   /** The node could not play the current track; it moves on to the next one. */
   failTrack(guildId: string): void;
+  /**
+   * The bot plays its own track (a scheduled song) in `voiceChannelId`, with the voice channel as its
+   * text channel until a member joins the player.
+   */
+  playByBot(guildId: string, voiceChannelId: string, title: string): void;
 }
 
 export function createFakePlayer(): FakePlayer {
   const listeners = new Set<MusicListener>();
   const players = new Map<string, GuildPlayer>();
+  /** Players the bot started; the next member join gives them its text channel. */
+  const unclaimed = new Set<string>();
 
   const emit = (fn: (listener: MusicListener) => void) => {
     for (const listener of listeners) fn(listener);
@@ -98,7 +105,11 @@ export function createFakePlayer(): FakePlayer {
       fake.joins.push({ guildId, voiceChannelId, textChannelId });
       // Joining waits for Discord, which is where two quick additions used to overlap.
       await new Promise((resolve) => setTimeout(resolve, 0));
-      if (players.has(guildId)) return;
+      const existing = players.get(guildId);
+      if (existing) {
+        if (unclaimed.delete(guildId)) existing.textChannelId = textChannelId;
+        return;
+      }
       players.set(guildId, {
         voiceChannelId,
         textChannelId,
@@ -135,6 +146,7 @@ export function createFakePlayer(): FakePlayer {
       advance(guildId, need(guildId));
     },
     destroy(guildId) {
+      unclaimed.delete(guildId);
       if (!players.delete(guildId)) return;
       emit((listener) => listener.playerDestroyed(guildId));
     },
@@ -143,6 +155,19 @@ export function createFakePlayer(): FakePlayer {
       const failed = guild.current;
       if (failed) emit((listener) => listener.trackFailed(guildId, failed));
       advance(guildId, guild);
+    },
+    playByBot(guildId, voiceChannelId, title) {
+      const song = track(title, { requesterId: "100000000000000099", byBot: true });
+      players.set(guildId, {
+        voiceChannelId,
+        textChannelId: voiceChannelId,
+        current: song,
+        upcoming: [],
+        positionMs: 0,
+        paused: false,
+      });
+      unclaimed.add(guildId);
+      emit((listener) => listener.trackStart(guildId, song));
     },
   };
   return fake;

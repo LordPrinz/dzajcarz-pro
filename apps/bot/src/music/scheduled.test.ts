@@ -3,14 +3,14 @@ import type { LavalinkMusicPlayer } from "./lavalink.ts";
 import { createScheduledSongPlayer } from "./scheduled.ts";
 import { LAVALINK_MUSIC_DIR, SCHEDULED_SONG_FILES, scheduledSongPath } from "./scheduled-songs.ts";
 
-function fakeMusic(current: object | null = null) {
+function fakeMusic(playing = false) {
   const plays: string[][] = [];
   const music = {
     available: () => true,
-    state: () => (current ? { current } : null),
+    isPlaying: () => playing,
     playLocalFile: async (guildId: string, channelId: string, file: string) => {
       plays.push([guildId, channelId, file]);
-      return { queued: false };
+      return { status: "played", queued: false };
     },
     leave: async () => {},
   } as unknown as LavalinkMusicPlayer;
@@ -39,9 +39,9 @@ describe("scheduled song player", () => {
     expect(plays).toEqual([]);
   });
 
-  test("music is playing only while a track is current", () => {
-    expect(createScheduledSongPlayer(fakeMusic({}).music).isPlaying("g")).toBe(true);
-    expect(createScheduledSongPlayer(fakeMusic(null).music).isPlaying("g")).toBe(false);
+  test("asks the player's own queue whether music is playing", () => {
+    expect(createScheduledSongPlayer(fakeMusic(true).music).isPlaying("g")).toBe(true);
+    expect(createScheduledSongPlayer(fakeMusic(false).music).isPlaying("g")).toBe(false);
   });
 
   test("every listed file name stays inside the music directory", () => {

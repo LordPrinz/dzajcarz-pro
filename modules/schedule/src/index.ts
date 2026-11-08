@@ -18,6 +18,8 @@ export interface ScheduleSettings {
   /** The song the server chose, or null for the default. */
   getSong(guildId: string): Promise<string | null>;
   setSong(guildId: string, song: string): Promise<void>;
+  /** Back to the default song; false when none was chosen. */
+  clearSong(guildId: string): Promise<boolean>;
   listExcluded(guildId: string): Promise<string[]>;
   /** False when the channel was already excluded. */
   addExcluded(guildId: string, channelId: string): Promise<boolean>;
@@ -37,9 +39,14 @@ export interface ScheduleVoice {
   guildIds(): readonly string[];
   /** The voice channels the bot may join and speak in, with their listeners. */
   crowds(guildId: string): Promise<VoiceCrowd[]>;
+  /** The server's AFK channel, or null; the song never plays there. */
+  afkChannelId(guildId: string): string | null;
   /** Whether the channel is a voice channel of this server. */
   isVoiceChannelOf(guildId: string, channelId: string): Promise<boolean>;
 }
+
+/** `busy`: a member's music started before the song could take over, so the song was not played. */
+export type ScheduledPlayResult = { status: "busy" } | { status: "played"; queued: boolean };
 
 /**
  * Plays the schedule's songs. The song is always a `ScheduledSong.name` from the fixed list: the adapter
@@ -48,13 +55,14 @@ export interface ScheduleVoice {
 export interface ScheduledSongPlayer {
   /** False while no audio node is connected. */
   available(): boolean;
-  /** Whether music is playing in the server right now (paused counts). */
+  /** Whether the server has music playing or queued right now (paused counts). */
   isPlaying(guildId: string): boolean;
   /**
-   * Joins the voice channel (leaving a lingering idle player elsewhere first) and plays the song. Resolves
-   * when the song is over; `queued` tells whether the server's queue still holds tracks by then.
+   * Joins the voice channel (moving a lingering idle player there) and plays the song, without a now
+   * playing panel. Resolves `busy` at once when members' music got there first; otherwise when the song
+   * is over, with `queued` telling whether the server's queue still holds tracks by then.
    */
-  play(guildId: string, voiceChannelId: string, song: string): Promise<{ queued: boolean }>;
+  play(guildId: string, voiceChannelId: string, song: string): Promise<ScheduledPlayResult>;
   leave(guildId: string): Promise<void>;
 }
 
@@ -78,6 +86,8 @@ export interface ScheduleModuleDeps {
 const MANAGE_GUILD = 1n << 5n;
 
 const MODULE_NAME = "schedule";
+/** The `/schedule song` value that goes back to the default song; no listed song may use it. */
+const RESET = "reset";
 
 /** The most crowded channel; a tie goes to the older channel (smaller snowflake) so the pick is stable. */
 export function pickChannel(crowds: readonly VoiceCrowd[]): VoiceCrowd | null {
@@ -106,6 +116,9 @@ export function createScheduleModule({
   expression,
   timeZone,
 }: ScheduleModuleDeps): BotModule {
+  if (songs.some((song) => song.name === RESET)) {
+    throw new Error(`"${RESET}" is reserved for /schedule song and cannot name a song`);
+  }
   const defaultSong = songs[0];
   const songByName = new Map(songs.map((song) => [song.name, song]));
   /** Servers whose song is on right now, so an overlapping run cannot start a second one. */
@@ -124,32 +137,39 @@ export function createScheduleModule({
   /** Plays the song in one server's busiest allowed channel. Does nothing when there is no such channel. */
   async function playIn(guildId: string): Promise<void> {
     if (running.has(guildId) || player.isPlaying(guildId)) return;
-    const [excluded, crowds] = await Promise.all([
-      settings.listExcluded(guildId),
-      voice.crowds(guildId),
-    ]);
-    const allowed = crowds.filter(
-      (crowd) => crowd.humans > 0 && !excluded.includes(crowd.channelId),
-    );
-    // The toggle is per channel, so a switched-off channel is as good as an excluded one.
-    const enabled: VoiceCrowd[] = [];
-    for (const crowd of allowed) {
-      if (await moduleEnabled(guildId, crowd.channelId, MODULE_NAME)) enabled.push(crowd);
-    }
-    const target = pickChannel(enabled);
-    if (!target) return;
-
-    const song = await chosenSong(guildId);
+    // Claimed before the first await, so a run that overlaps this one sees the server as taken.
     running.add(guildId);
     try {
+      const [excluded, crowds] = await Promise.all([
+        settings.listExcluded(guildId),
+        voice.crowds(guildId),
+      ]);
+      const afk = voice.afkChannelId(guildId);
+      const allowed = crowds.filter(
+        (crowd) =>
+          crowd.humans > 0 && crowd.channelId !== afk && !excluded.includes(crowd.channelId),
+      );
+      // The toggle is per channel, so a switched-off channel is as good as an excluded one.
+      const enabled: VoiceCrowd[] = [];
+      for (const crowd of allowed) {
+        if (await moduleEnabled(guildId, crowd.channelId, MODULE_NAME)) enabled.push(crowd);
+      }
+      const target = pickChannel(enabled);
+      if (!target) return;
+
+      const song = await chosenSong(guildId);
       logger.info("Playing the scheduled song", {
         guildId,
         channelId: target.channelId,
         song: song.name,
       });
-      const { queued } = await player.play(guildId, target.channelId, song.name);
+      const result = await player.play(guildId, target.channelId, song.name);
+      if (result.status === "busy") {
+        logger.info("Skipping the scheduled song: music started meanwhile", { guildId });
+        return;
+      }
       // Something else was queued meanwhile: it is the music module's now, and so is leaving.
-      if (!queued) await player.leave(guildId);
+      if (!result.queued) await player.leave(guildId);
     } finally {
       running.delete(guildId);
     }
@@ -160,11 +180,13 @@ export function createScheduleModule({
       logger.warn("Skipping the scheduled song: the audio node is unavailable");
       return;
     }
-    const results = await Promise.allSettled(voice.guildIds().map((guildId) => playIn(guildId)));
+    // One snapshot: a server joined or left during the run must not shift the indexes logged below.
+    const guildIds = [...voice.guildIds()];
+    const results = await Promise.allSettled(guildIds.map((guildId) => playIn(guildId)));
     results.forEach((result, index) => {
       if (result.status === "rejected") {
         logger.warn("The scheduled song failed", {
-          guildId: voice.guildIds()[index],
+          guildId: guildIds[index],
           error: result.reason,
         });
       }
@@ -237,13 +259,16 @@ export function createScheduleModule({
         },
       }),
       song: defineSubcommand({
-        description: "Wybiera piosenkę (bez nazwy: pokazuje dostępne)",
+        description: "Wybiera piosenkę (bez nazwy: pokazuje dostępne, reset: domyślna)",
         options: {
           name: {
             type: "string",
             description: "Nazwa piosenki",
             required: false,
-            choices: songs.map((song) => ({ name: song.title, value: song.name })),
+            choices: [
+              ...songs.map((song) => ({ name: song.title, value: song.name })),
+              { name: `Domyślna (${defaultSong.title})`, value: RESET },
+            ],
           },
         },
         run: async (ctx) => {
@@ -253,7 +278,17 @@ export function createScheduleModule({
             const current = await chosenSong(guildId);
             const available = songs.map((song) => `\`${song.name}\` (${song.title})`).join(", ");
             await ctx.reply({
-              content: `Teraz: **${current.title}**. Dostępne: ${available}.`,
+              content: `Teraz: **${current.title}**. Dostępne: ${available}. \`${RESET}\` przywraca domyślną.`,
+              ephemeral: true,
+            });
+            return;
+          }
+          if (name === RESET) {
+            const cleared = await settings.clearSong(guildId);
+            await ctx.reply({
+              content: cleared
+                ? `Przywrócono domyślną piosenkę: **${defaultSong.title}**.`
+                : `Już gra domyślna piosenka: **${defaultSong.title}**.`,
               ephemeral: true,
             });
             return;

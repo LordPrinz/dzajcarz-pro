@@ -603,6 +603,33 @@ describe("music module", () => {
       expect(panels.messages.size).toBe(0);
     });
 
+    test("is not posted for a song the bot plays on its own", async () => {
+      const { player, panels } = setup();
+      player.playByBot(GUILD, VOICE, "Lato z Radiem");
+      await settle();
+      player.finishTrack(GUILD);
+      await settle();
+      expect(panels.posts).toEqual([]);
+    });
+
+    test("a member's /play during the bot's song brings the panel to their channel", async () => {
+      const { run, player, panels, panel } = setup();
+      player.playByBot(GUILD, VOICE, "Lato z Radiem");
+      await settle();
+      player.nextResult = { kind: "tracks", tracks: [track("A")] };
+      const ctx = await run("play", { query: "a" });
+      expect(lastText(ctx)).toContain("Dodano do kolejki na miejsce 1");
+      // Still the bot's song: no panel for it, even with a track queued behind it.
+      expect(panels.posts).toEqual([]);
+      expect(player.state(GUILD)?.textChannelId).toBe(TEXT);
+
+      player.finishTrack(GUILD);
+      await settle();
+      expect(panels.posts).toEqual(["panel-1"]);
+      expect(panels.messages.get("panel-1")?.channelId).toBe(TEXT);
+      expect(panel()?.embeds?.[0]?.title).toBe("A");
+    });
+
     test("queue button opens the queue for the clicker only", async () => {
       const { run, click, panelButton, voice } = setup();
       await run("play", { query: "a" });
@@ -633,6 +660,14 @@ describe("music module", () => {
         "Nie udało się odtworzyć **Zły \\*tytuł\\***, gram dalej.",
       );
       expect(player.state(GUILD)?.current?.title).toBe("B");
+    });
+
+    test("a failed track the bot played on its own gets no note", async () => {
+      const { player, panels } = setup();
+      player.playByBot(GUILD, VOICE, "Lato z Radiem");
+      player.failTrack(GUILD);
+      await settle();
+      expect(panels.posts).toEqual([]);
     });
 
     test("leaving a server destroys its player", async () => {

@@ -19,8 +19,8 @@ lavalink:
       vimeo: true
       # Off: any user could make the node fetch internal URLs (cloud metadata, Redis).
       http: false
-      # On for the scheduled songs in infra/lavalink/music. Safe only because the bot builds `local:` paths
-      # itself from a fixed list; /play turns everything a member types into a YouTube search (ADR 0004).
+      # On for the scheduled songs in infra/lavalink/music. Safe only because the bot sends the file paths
+      # itself, from a fixed list; /play turns everything a member types into a YouTube search (ADR 0004).
       local: true
     filters:
       volume: true

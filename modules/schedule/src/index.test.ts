@@ -42,6 +42,10 @@ function setup(
     playing?: string[];
     available?: boolean;
     failFor?: string[];
+    busy?: string[];
+    afk?: Record<string, string>;
+    /** Delays the first settings read, so a test can fire a second run in between. */
+    slowSettings?: Promise<void>;
   } = {},
 ) {
   const crowds = options.crowds ?? {};
@@ -50,7 +54,11 @@ function setup(
   const settings: ScheduleSettings = {
     getSong: async (guildId) => songChoice.get(guildId) ?? null,
     setSong: async (guildId, song) => void songChoice.set(guildId, song),
-    listExcluded: async (guildId) => excluded.get(guildId) ?? [],
+    clearSong: async (guildId) => songChoice.delete(guildId),
+    listExcluded: async (guildId) => {
+      await options.slowSettings;
+      return excluded.get(guildId) ?? [];
+    },
     addExcluded: async (guildId, channelId) => {
       const list = excluded.get(guildId) ?? [];
       if (list.includes(channelId)) return false;
@@ -69,6 +77,7 @@ function setup(
   const voice: ScheduleVoice = {
     guildIds: () => Object.keys(crowds),
     crowds: async (guildId) => crowds[guildId] ?? [],
+    afkChannelId: (guildId) => options.afk?.[guildId] ?? null,
     isVoiceChannelOf: async (guildId, channelId) =>
       (crowds[guildId] ?? []).some((crowd) => crowd.channelId === channelId),
   };
@@ -82,8 +91,9 @@ function setup(
     play(guildId, voiceChannelId, song) {
       if (options.failFor?.includes(guildId)) return Promise.reject(new Error("Join failed"));
       playCalls.push({ guildId, voiceChannelId, song });
+      if (options.busy?.includes(guildId)) return Promise.resolve({ status: "busy" });
       return new Promise((resolve) => {
-        finishers.set(guildId, (queued) => resolve({ queued }));
+        finishers.set(guildId, (queued) => resolve({ status: "played", queued }));
       });
     },
     leave: async (guildId) => void leaves.push(guildId),
@@ -345,6 +355,46 @@ describe("the schedule", () => {
     expect(s.warnings).toHaveLength(1);
   });
 
+  test("never plays in the server's AFK channel, however full it is", async () => {
+    const s = setup({
+      crowds: {
+        [GUILD]: [
+          { channelId: QUIET, humans: 9 },
+          { channelId: LOUNGE, humans: 1 },
+        ],
+      },
+      afk: { [GUILD]: QUIET },
+    });
+    const done = fireAndStart(s);
+    await s.settle();
+    expect(s.playCalls.map((call) => call.voiceChannelId)).toEqual([LOUNGE]);
+    s.finishers.get(GUILD)?.(false);
+    await done;
+  });
+
+  test("skips the song without leaving when members' music got there first", async () => {
+    const s = setup({ crowds: { [GUILD]: [{ channelId: LOUNGE, humans: 1 }] }, busy: [GUILD] });
+    await s.fire();
+    expect(s.playCalls).toHaveLength(1);
+    expect(s.leaves).toEqual([]);
+    expect(s.warnings).toEqual([]);
+  });
+
+  test("a second run during the first one's lookups does not play twice", async () => {
+    let release = () => {};
+    const slowSettings = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const s = setup({ crowds: { [GUILD]: [{ channelId: LOUNGE, humans: 1 }] }, slowSettings });
+    const first = s.fire();
+    await s.fire();
+    release();
+    await s.settle();
+    expect(s.playCalls).toHaveLength(1);
+    s.finishers.get(GUILD)?.(false);
+    await first;
+  });
+
   test("a run that starts while the song is still on does not start a second one", async () => {
     const s = setup({ crowds: { [GUILD]: [{ channelId: LOUNGE, humans: 1 }] } });
     const first = fireAndStart(s);
@@ -404,5 +454,35 @@ describe("/schedule", () => {
     const [shown] = await run("song");
     expect(shown).toContain("Icona Pop");
     expect(shown).toContain("lato_z_radiem");
+  });
+
+  test("song reset goes back to the default song", async () => {
+    const { run, songChoice } = setup({ crowds });
+    songChoice.set(GUILD, "icona_pop");
+    expect(await run("song", { name: "reset" })).toEqual([
+      "Przywrócono domyślną piosenkę: **Lato z Radiem**.",
+    ]);
+    expect(songChoice.has(GUILD)).toBe(false);
+    expect(await run("song", { name: "reset" })).toEqual([
+      "Już gra domyślna piosenka: **Lato z Radiem**.",
+    ]);
+    const [shown] = await run("song");
+    expect(shown).toContain("Teraz: **Lato z Radiem**");
+  });
+
+  test("a song may not be named like the reset value", () => {
+    expect(() =>
+      createScheduleModule({
+        settings: {} as ScheduleSettings,
+        voice: {} as ScheduleVoice,
+        player: {} as ScheduledSongPlayer,
+        cron: { every: () => () => {} },
+        moduleEnabled: async () => true,
+        logger: silentLogger,
+        songs: [{ name: "reset", title: "Reset" }],
+        expression: "0 9 * * *",
+        timeZone: "Europe/Warsaw",
+      }),
+    ).toThrow("reserved");
   });
 });

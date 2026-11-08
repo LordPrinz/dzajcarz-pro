@@ -318,24 +318,36 @@ narrow ports only.
 - `CronScheduler` (`@dzajcarz/core`, `createCronScheduler()` on `Bun.cron` with its `tz` option). The zone
   is part of the schedule, so a run stays at 9:00 local time across the March and October clock changes
   (`cron.test.ts` checks both). Tests fire the schedule by hand.
-- `ScheduleVoice`: the servers the bot is in, each voice channel it may join with its human count, and
-  whether an id is a voice channel of the server.
-- `ScheduledSongPlayer`: `available()`, `isPlaying(guildId)`, `play(guildId, voiceChannelId, song)` (resolves
-  when the song is over, with whether the queue still holds tracks) and `leave(guildId)`. `song` is a name from
-  the fixed list in `apps/bot/src/music/scheduled-songs.ts`; the adapter maps it to a path under
-  `/opt/Lavalink/music` and rejects any other string. It is the only caller of the node's `local:` source
-  (ADR 4).
+- `ScheduleVoice`: the servers the bot is in, each voice channel it may join and speak in with its human
+  count, the server's AFK channel, and whether an id is a voice channel of the server.
+- `ScheduledSongPlayer`: `available()`, `isPlaying(guildId)` (a current or queued track in the player's own
+  queue, so a player rejoining after a node restart counts), `play(guildId, voiceChannelId, song)` and
+  `leave(guildId)`. `play` resolves `busy` at once when members' music got there first, otherwise once the
+  song is over, with whether the queue still holds tracks. `song` is a name from the fixed list in
+  `apps/bot/src/music/scheduled-songs.ts`; the adapter maps it to a path under `/opt/Lavalink/music` and
+  rejects any other string. It is the only caller of the node's local source (ADR 4).
 
 A run goes through the servers in parallel and handles each on its own: skip it when the audio node is down or
-music is playing in it (paused counts; nothing is interrupted), drop empty channels, excluded ones and ones
-where the module is switched off, then take the channel with the most humans (ties go to the older channel).
-After the song the bot leaves, unless something was queued in the meantime; then the music module's idle
-timeout takes over. A player that was only lingering idle in another channel is replaced. A failure in one
-server is logged and does not stop the others.
+music is playing in it (paused counts; nothing is interrupted), drop empty channels, the AFK channel, excluded
+ones and ones where the module is switched off, then take the channel with the most humans (ties go to the
+older channel). A server is claimed before the first lookup, so two overlapping runs never both play there.
+The player checks the queue once more right before it takes over, with no await in between: a `/play` that
+landed during the lookups wins and the song is skipped. After the song the bot leaves, unless something was
+queued in the meantime; then the music module's idle timeout takes over. A player that was only lingering
+idle in another channel is moved to the target channel, not destroyed and created again: Discord's "left
+voice" for the old player would arrive after the new one exists and end it. A failure in one server is
+logged and does not stop the others.
+
+The song plays quietly: its track is marked `byBot` (`MusicTrack.byBot`, set by the adapter from the
+track's requester), and the music module posts no now playing panel and no failure note for such a track.
+The player's text channel is the voice channel until a member joins in. A member who runs `/play` during the
+song gets their track queued behind it, and the first such `/play` makes its channel the panel's: once the
+member's track starts, the panel appears there as usual. The schedule module and the music module never
+import each other; the flag on the track is all they share.
 
 Settings (`scheduled_song_config`, `scheduled_song_exclusion`) belong to the server and need Manage Server:
 `/schedule list`, `exclude <channel>` (voice channels of the server only), `include <channel>` (also accepts a
-deleted channel) and `song [name]` (the fixed list). The module toggle (`/modules disable schedule`) switches
+deleted channel) and `song [name]` (the fixed list; `song reset` goes back to the default song). The module toggle (`/modules disable schedule`) switches
 the song off per server or channel. The schedule defaults to `0 9,21 * * *` in `Europe/Warsaw`; set
 `SCHEDULED_SONG_CRON` and `SCHEDULED_SONG_TIMEZONE` to change it. Both are checked at startup.
 

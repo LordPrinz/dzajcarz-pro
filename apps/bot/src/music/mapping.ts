@@ -88,17 +88,19 @@ export function toSearchResult(result: RawLoadResult, tracks: MusicTrack[]): Sea
   }
 }
 
+/** What the adapter stores as a track's requester; `byBot` marks a file the bot plays on its own. */
 interface TrackRequester {
   id?: unknown;
+  byBot?: unknown;
 }
 
-function requesterOf(track: Track | UnresolvedTrack): string {
-  const requester = track.requester as TrackRequester | undefined;
-  return typeof requester?.id === "string" ? requester.id : "";
+function requesterOf(track: Track | UnresolvedTrack): TrackRequester | undefined {
+  return track.requester as TrackRequester | undefined;
 }
 
 export function toMusicTrack(track: Track | UnresolvedTrack): MusicTrack {
   const { info } = track;
+  const requester = requesterOf(track);
   return {
     id: track.encoded ?? "",
     title: info.title,
@@ -107,7 +109,8 @@ export function toMusicTrack(track: Track | UnresolvedTrack): MusicTrack {
     uri: info.uri ?? null,
     artworkUrl: info.artworkUrl ?? track.pluginInfo?.artworkUrl ?? null,
     isStream: info.isStream ?? false,
-    requesterId: requesterOf(track),
+    requesterId: typeof requester?.id === "string" ? requester.id : "",
+    ...(requester?.byBot === true ? { byBot: true as const } : {}),
   };
 }
 

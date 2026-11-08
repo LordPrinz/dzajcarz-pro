@@ -143,6 +143,14 @@ describe("toMusicTrack", () => {
     });
   });
 
+  test("marks a track the bot queued itself, and only that one", () => {
+    const own = { ...built(raw("a")), requester: { id: "100000000000000099", byBot: true } };
+    expect(toMusicTrack(own)).toMatchObject({ requesterId: "100000000000000099", byBot: true });
+    const forged = { ...built(raw("a")), requester: { id: "1", byBot: "yes" } };
+    expect("byBot" in toMusicTrack(forged)).toBe(false);
+    expect("byBot" in toMusicTrack(built(raw("a")))).toBe(false);
+  });
+
   test("a stream has no duration", () => {
     const stream = toMusicTrack(built(raw("live", { isStream: true, duration: 9_999_999 })));
     expect(stream).toMatchObject({ isStream: true, durationMs: 0 });
