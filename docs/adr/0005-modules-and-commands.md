@@ -46,5 +46,7 @@ tested on a live server, and features reached into each other's files.
 - The one exception is `prefixOnly: true` on an option: the slash command leaves it out (its input comes
   from a modal instead), `/help` prints the slash usage without it, and `ctx.args` types it as optional so
   `run` must check `canShowModal` or narrow before using it.
-- Removing a command requires `bun run commands:deploy`, or Discord keeps showing it (the bot logs a
-  warning when such a command is used).
+- The bot registers its slash commands on every start (one PUT of the whole set to the dev guild, or
+  globally without one; `DEPLOY_ON_START=0` turns it off), so added and removed commands follow the code.
+  `bun run commands:deploy` does the same without starting the bot. A command Discord still shows after a
+  removal answers nothing and the bot logs a warning.

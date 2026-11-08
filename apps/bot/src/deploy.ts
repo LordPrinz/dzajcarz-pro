@@ -1,4 +1,4 @@
-import { createRegistry, silentLogger } from "@dzajcarz/core";
+import { type CommandRegistry, createRegistry, type Logger, silentLogger } from "@dzajcarz/core";
 import { type RESTPostAPIChatInputApplicationCommandsJSONBody, Routes } from "discord.js";
 import { toSlashCommand } from "./discord/slash.ts";
 import type { DeployEnv } from "./env.ts";
@@ -42,6 +42,48 @@ export function buildDeployBody(
 ): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
   if (step.clear) return [];
   return registry.commands().map((command) => toSlashCommand(command, step.scope));
+}
+
+/** The slice of discord.js `REST` a deploy uses. */
+export interface CommandRest {
+  put(route: `/${string}`, options: { body: unknown }): Promise<unknown>;
+}
+
+export interface StartupDeployOptions {
+  rest: CommandRest;
+  clientId: string;
+  devGuildId: string | undefined;
+  registry: CommandRegistry;
+  logger: Logger;
+}
+
+/**
+ * Registers the commands of this build when the bot starts: in the dev guild when one is set, otherwise
+ * globally, like a plain `commands:deploy`. The PUT replaces the whole set, so it also repairs a guild
+ * emptied by `DEPLOY_GLOBAL` / `DEPLOY_CLEAR`; an unchanged set creates nothing new on Discord's side.
+ * Never throws: the bot keeps running with whatever Discord has, and the error is logged.
+ */
+export async function deployOnStartup({
+  rest,
+  clientId,
+  devGuildId,
+  registry,
+  logger,
+}: StartupDeployOptions): Promise<void> {
+  const [step] = deployTarget({
+    DISCORD_DEV_GUILD_ID: devGuildId,
+    DEPLOY_GLOBAL: false,
+    DEPLOY_CLEAR: false,
+  });
+  if (!step) return;
+  const where = step.scope === "global" ? "global" : step.guildId;
+  try {
+    const body = buildDeployBody(step, registry);
+    await rest.put(deployRoute(clientId, step), { body });
+    logger.info("Deployed slash commands", { where, count: body.length });
+  } catch (error) {
+    logger.error("Deploying slash commands failed", { where, error });
+  }
 }
 
 const NOT_AVAILABLE = "Module services are not available while deploying commands";

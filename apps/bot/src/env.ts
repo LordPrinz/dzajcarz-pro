@@ -25,6 +25,11 @@ const EnvFields = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   REDIS_URL: z.url({ protocol: /^rediss?$/ }),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  // On by default: the bot registers its slash commands at startup. "0" or "false" turns it off.
+  DEPLOY_ON_START: z.preprocess(
+    (value) => (value === undefined || value === "" ? true : value),
+    flag,
+  ),
   // Optional: without them the bot runs and music commands say the player is unavailable.
   LAVALINK_URL: optional(z.url({ protocol: /^https?$/ })),
   LAVALINK_PASSWORD: optional(z.string().min(1)),

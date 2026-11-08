@@ -11,6 +11,7 @@ import { createRedisStore, keepConnected } from "@dzajcarz/kv";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
+import { deployOnStartup } from "./deploy.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
 import { createPanelMessages, createVoiceChannels } from "./discord/music.ts";
@@ -121,6 +122,16 @@ client.once(Events.ClientReady, (ready) => {
     guilds: ready.guilds.cache.size,
     commands: registry.commands().length,
   });
+
+  if (env.DEPLOY_ON_START) {
+    void deployOnStartup({
+      rest: client.rest,
+      clientId: env.DISCORD_CLIENT_ID,
+      devGuildId: env.DISCORD_DEV_GUILD_ID,
+      registry,
+      logger: logger.child({ component: "deploy" }),
+    });
+  }
 });
 // A rejected promise nobody awaited (a failed Discord call in a listener) is logged, not fatal.
 process.on("unhandledRejection", (reason) =>
