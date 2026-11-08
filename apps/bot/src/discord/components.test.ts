@@ -96,6 +96,17 @@ describe("toComponentRows", () => {
     expect(payload.components).toHaveLength(1);
     expect(toReplyPayload("x").components).toEqual([]);
   });
+
+  test("embeds keep the title link and the thumbnail", () => {
+    const [embed] = toReplyPayload({
+      embeds: [
+        { title: "Song", url: "https://example.com/a", thumbnail: "https://example.com/a.jpg" },
+      ],
+    }).embeds;
+    expect(embed?.url).toBe("https://example.com/a");
+    expect(embed?.thumbnail).toEqual({ url: "https://example.com/a.jpg" });
+    expect(toReplyPayload({ embeds: [{ title: "x" }] }).embeds[0]?.thumbnail).toBeUndefined();
+  });
 });
 
 function fakeClick(overrides: Record<string, unknown> = {}) {
