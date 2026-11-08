@@ -288,6 +288,7 @@ export const createDeployRegistry = () =>
       partyChannels: unusedServices(),
       partyPermissions: unusedServices(),
       partyChat: unusedServices(),
+      partyInvites: unusedServices(),
       scheduler: unusedServices(),
       partyLock: unusedServices(),
       // The music module subscribes to its player when it is created.

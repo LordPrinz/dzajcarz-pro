@@ -76,12 +76,14 @@ select) matches the component's kind before running it.
 
 ### Modals
 
-`defineModal` describes a form (up to 5 text, select, channel or user fields) as plain data; the module opens it
+`defineModal` describes a form (up to 5 text, select, channel, user or file fields) as plain data; the module opens it
 with `ctx.showModal(modal.build(ctx.user.id, data))` from a slash command or a button/select handler and
 gets typed `ctx.values` in `run`. The submit is routed like a click (`<module>:<modal>:<owner>:<data>`,
 owner, permissions and module toggle checks), invalid input is answered with an ephemeral Polish message.
 Prefix commands cannot open modals: `ctx.canShowModal` is false and the argument form stays. Limits are
-checked at startup by the registry. See ADR 6.
+checked at startup by the registry. A user field can take several people (`minValues`/`maxValues`, handed over as
+`string[]`) and a `file` field is one upload whose type and size are checked on submit (`ModalFile`: url, name,
+contentType, size). See ADR 6.
 
 ### Private commands
 
@@ -195,6 +197,31 @@ member per minute (`party-ctl:{guild}:{user}`, fail open). Each Discord edit car
 `Party: <action> by <userId>`, and each successful control action is logged at info level with actor,
 action and channel. `/party` is guild-only.
 
+#### Special invite
+
+`/party invite-special` and the panel's Specjalne zaproszenie button open the same form: members (user select,
+1 to 10), title (optional, up to 256), message (optional paragraph, a default invite text when empty), colour
+(string select, fixed palette with Polish names, default blue) and an optional attachment (image, video or PDF,
+up to 10 MB). Only the **owner** of the party channel the caller is in may open or submit it (Manage Channels is not
+enough, the DM goes out in the owner's name); the prefix form answers that it needs the slash command. On submit
+the module defers with a private reply (also when the form came from the panel, whose message stays untouched; access
+changes and DMs take longer than three seconds), downloads the attachment once through the `PartyInvites` port
+(Discord CDN only, size and time limited; if that fails the invites go out without it and the summary says so),
+then per distinct member: skips the caller, bots, people who are not on the server, members blocked on the channel
+(`PartyPermissions.isBlocked`) and people over their limit, grants access with the same `allowMember` call as
+`/party invite`, and sends a DM through the port (the module never imports discord.js). The DM is an embed whose author
+line carries the sender's avatar and "Zaproszenie od <display name> (@username) z serwera <server>", then the title,
+the owner's message, the channel, and the footer "Treść napisał zapraszający, nie bot." A link button "Dołącz" leads
+to the voice channel. The file is a real DM attachment; an image (png, jpeg, gif, webp) is also shown in the embed
+through `attachment://<name>`. Closed DMs (the port answers false) and failed ones are collected, not thrown, and
+the owner gets an ephemeral summary: delivered, DMs failed, skipped with a neutral reason. A member whose DM failed
+**keeps their access** and the summary says so, so the owner can tell them.
+Limits (Redis, `party-special:min|hour:{guild}:{user}`, `party-special-to:{guild}:{recipient}`): per owner 1 a minute
+and 5 an hour, per recipient 3 an hour from one server. The form refuses to open while the owner is over a limit
+(read without counting); the send counts. This action **fails closed**: with Redis down it answers "Specjalne
+zaproszenia są chwilowo niedostępne.", unlike the control cooldown, because each use is a DM to up to ten people. All
+output uses NO_MENTIONS.
+
 `/party delete` defers first, ephemerally (it makes several Discord calls). `deleteArea` removes the area and its channel
 rows in one transaction and returns them; the module then deletes those Discord channels, the join channel
 and the category.
@@ -229,13 +256,13 @@ the join channel hands over or frees the old channel first.
 #### Command channel
 
 An area with `command_channel` on uses the text chat of its join voice channel as a command channel. The bot
-posts one panel there (an embed plus buttons Zamknij, Otwórz, Ukryj, Pokaż, Limit, Zmień nazwę and two user
+posts one panel there (an embed plus buttons Zamknij, Otwórz, Ukryj, Pokaż, Limit, Zmień nazwę, Specjalne zaproszenie and two user
 selects, Zaproś and Zablokuj) and stores its message id in `party_area.panel_message_id`. The panel is
 shared: its components are `public`, so anyone may press them, and each press acts on the presser's own
 party channel through the same functions the `/party lock|unlock|hide|show|limit|rename|invite|block`
 subcommands call (`controlledChannel`: in the channel, owner or Manage Channels, control cooldown, audit
 reason). Replies are ephemeral; a member without a party channel is told "Musisz być na swoim kanale party.".
-Limit and Zmień nazwę open a modal (owned by the presser, checked on submit like any modal) after the same
+Limit, Zmień nazwę and Specjalne zaproszenie open a modal (owned by the presser, checked on submit like any modal) after the same
 checks, cooldown included. That work runs inside the three seconds Discord gives for answering with a modal
 (a later answer fails with 10062), so it stays small: one Redis increment, the cached voice state, one row,
 and a member lookup only for someone who is not the owner. The cooldown also stops repeated presses from

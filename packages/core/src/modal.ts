@@ -42,12 +42,43 @@ export interface ChannelFieldDef extends FieldBase {
   defaultValue?: string;
 }
 
-/** A user select; the value is the user id. */
+/**
+ * A user select. With `maxValues` of 1 (the default) the value is the user id; with a larger `maxValues`
+ * it is a list of ids (`string[]`). `maxValues` must be a literal in the definition for the type to follow.
+ */
 export interface UserFieldDef extends FieldBase {
   type: "user";
   placeholder?: string;
+  /** Fewest people to pick, 0-25. Default 1 for a required field, 0 for an optional one. */
+  minValues?: number;
+  /** Most people to pick, 1-25. Default 1. */
+  maxValues?: number;
   /** Preselected user id. */
   defaultValue?: string;
+}
+
+/** What the handler gets for an uploaded file; the data comes from the attachment Discord resolved. */
+export interface ModalFile {
+  /** Discord CDN link to the file. */
+  url: string;
+  name: string;
+  /** MIME type as Discord reports it; null when Discord did not detect one. */
+  contentType: string | null;
+  /** Size in bytes. */
+  size: number;
+}
+
+/**
+ * A single file upload. The adapter hands `contentTypes` to Discord as the picker's file-type filter where it
+ * can (images, video, audio and listed extensions), but the payload is untrusted and Discord has no size
+ * limit per field, so type and size are checked again on submit.
+ */
+export interface FileFieldDef extends FieldBase {
+  type: "file";
+  /** Allowed MIME types: exact (`application/pdf`) or a family (`image/*`). Every type when omitted. */
+  contentTypes?: readonly string[];
+  /** Largest file in bytes, a positive integer. No limit of its own when omitted (Discord's upload limit still applies). */
+  maxBytes?: number;
 }
 
 /** One choice of a string select. */
@@ -69,7 +100,12 @@ export interface SelectFieldDef extends FieldBase {
   defaultValue?: string;
 }
 
-export type ModalFieldDef = TextFieldDef | ChannelFieldDef | UserFieldDef | SelectFieldDef;
+export type ModalFieldDef =
+  | TextFieldDef
+  | ChannelFieldDef
+  | UserFieldDef
+  | SelectFieldDef
+  | FileFieldDef;
 
 /** Key = field id inside the modal and key of the typed `values`; order = order on screen. */
 export type ModalFieldsDef = Record<string, ModalFieldDef>;
@@ -81,13 +117,22 @@ type FieldText<F extends ModalFieldDef> = F extends {
   ? O extends { value: infer V extends string }
     ? V
     : string
-  : string;
+  : F extends { type: "user"; maxValues: infer M extends number }
+    ? M extends 1
+      ? string
+      : string[]
+    : F extends { type: "file" }
+      ? ModalFile
+      : string;
 
 type FieldValue<F extends ModalFieldDef> = F extends { required: false }
   ? FieldText<F> | undefined
   : FieldText<F>;
 
-/** What `run` receives: text, or an id for channel and user selects; `undefined` only for `required: false`. */
+/**
+ * What `run` receives: text, an id for channel and user selects (a list of ids for a user select with
+ * `maxValues` above 1), a `ModalFile` for a file upload; `undefined` only for `required: false`.
+ */
 export type ModalValues<F extends ModalFieldsDef> = { [K in keyof F]: FieldValue<F[K]> };
 
 export interface ModalFieldSpec {
@@ -101,8 +146,15 @@ export interface ModalFieldSpec {
   maxLength?: number;
   /** Prefilled text, or the preselected channel / user id. */
   value?: string;
+  /** User select only: how many people may be picked. */
+  minValues?: number;
+  maxValues?: number;
   channelTypes?: readonly ModalChannelKind[];
   options?: readonly ModalSelectOption[];
+  /** File upload only: allowed MIME types (exact or `family/*`). */
+  contentTypes?: readonly string[];
+  /** File upload only: largest file in bytes. */
+  maxBytes?: number;
 }
 
 /** What `ctx.showModal` takes. */
@@ -120,6 +172,7 @@ export const MODAL_MAX_PLACEHOLDER = 100;
 export const MODAL_MAX_TEXT = 4000;
 export const MODAL_MAX_OPTIONS = 25;
 export const MODAL_MAX_OPTION_TEXT = 100;
+export const MODAL_MAX_SELECT_VALUES = 25;
 const SNOWFLAKE = /^\d{1,20}$/;
 const CHANNEL_KINDS: readonly ModalChannelKind[] = [
   "text",
@@ -167,7 +220,10 @@ function validateField(field: ModalFieldSpec, at: string): void {
     validateTextField(field, at);
   } else if (field.type === "select") {
     validateSelectField(field, at);
+  } else if (field.type === "file") {
+    validateFileField(field, at);
   } else {
+    if (field.type === "user") validateValueCount(field, at);
     if (field.value !== undefined && !SNOWFLAKE.test(field.value)) {
       throw new Error(`${at}: default value must be a channel or user id, got "${field.value}"`);
     }
@@ -176,6 +232,44 @@ function validateField(field: ModalFieldSpec, at: string): void {
         if (!CHANNEL_KINDS.includes(kind)) throw new Error(`${at}: unknown channel type "${kind}"`);
       }
     }
+  }
+}
+
+/** A MIME type (`application/pdf`) or a family (`image/*`): no spaces, no parameters. */
+const MIME_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]*)$/i;
+
+function validateFileField(field: ModalFieldSpec, at: string): void {
+  const { contentTypes, maxBytes } = field;
+  if (maxBytes !== undefined && (!Number.isInteger(maxBytes) || maxBytes <= 0)) {
+    throw new Error(`${at}: maxBytes must be a positive integer, got ${maxBytes}`);
+  }
+  if (contentTypes === undefined) return;
+  if (contentTypes.length === 0) {
+    throw new Error(
+      `${at}: contentTypes must list at least one type (omit it to allow every file)`,
+    );
+  }
+  for (const type of contentTypes) {
+    if (!MIME_PATTERN.test(type)) {
+      throw new Error(`${at}: "${type}" is not a content type like "application/pdf" or "image/*"`);
+    }
+  }
+}
+
+function validateValueCount(field: ModalFieldSpec, at: string): void {
+  const { minValues, maxValues } = field;
+  const inRange = (n: number | undefined, low: number) =>
+    n === undefined || (Number.isInteger(n) && n >= low && n <= MODAL_MAX_SELECT_VALUES);
+  if (!inRange(minValues, 0) || !inRange(maxValues, 1)) {
+    throw new Error(
+      `${at}: minValues must be 0–${MODAL_MAX_SELECT_VALUES} and maxValues 1–${MODAL_MAX_SELECT_VALUES}`,
+    );
+  }
+  if (minValues !== undefined && minValues > (maxValues ?? 1)) {
+    throw new Error(`${at}: minValues is greater than maxValues`);
+  }
+  if (field.required && minValues === 0) {
+    throw new Error(`${at}: a required field needs minValues of at least 1`);
   }
 }
 
@@ -228,8 +322,11 @@ function validateTextField(field: ModalFieldSpec, at: string): void {
   }
 }
 
-/** Raw answers of a submit: text for text inputs, a list of ids for selects. */
-export type ModalRawValues = Readonly<Record<string, string | readonly string[] | undefined>>;
+/** One raw answer: text, a list of ids (selects), or the files Discord resolved (file upload). */
+export type ModalRawValue = string | readonly string[] | readonly ModalFile[] | undefined;
+
+/** Raw answers of a submit: text for text inputs, a list of ids for selects, a list of files for uploads. */
+export type ModalRawValues = Readonly<Record<string, ModalRawValue>>;
 
 /**
  * What an adapter puts in a field it refuses (wrong component type, channel or user it did not resolve,
@@ -238,8 +335,17 @@ export type ModalRawValues = Readonly<Record<string, string | readonly string[] 
  */
 export const REJECTED_MODAL_VALUE = "rejected";
 
-function first(raw: string | readonly string[] | undefined): string | undefined {
-  return typeof raw === "string" ? raw : raw?.[0];
+function first(raw: ModalRawValue): string | undefined {
+  if (typeof raw === "string") return raw;
+  const head = raw?.[0];
+  return typeof head === "string" ? head : undefined;
+}
+
+/** The ids of a select answer; anything that is not a list of strings counts as a forged answer. */
+function ids(raw: ModalRawValue): readonly string[] | null {
+  if (raw === undefined) return [];
+  if (typeof raw === "string") return [raw];
+  return raw.every((item) => typeof item === "string") ? (raw as readonly string[]) : null;
 }
 
 /**
@@ -250,33 +356,120 @@ export function parseModalValues<F extends ModalFieldsDef>(
   fields: F,
   raw: ModalRawValues,
 ): ModalValues<F> {
-  const values: Record<string, string | undefined> = {};
+  const values: Record<string, unknown> = {};
   for (const [key, def] of Object.entries(fields)) {
     const required = def.required ?? true;
     const given = raw[key];
-    const isText = def.type === "short" || def.type === "paragraph";
-    const selected = isText ? given : first(given);
-    // Trimmed once here, so the length limits and the handler see the same text.
-    const text = typeof selected === "string" && isText ? selected.trim() : selected;
-    if (typeof text !== "string" || text.trim() === "") {
-      if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
-      values[key] = undefined;
-      continue;
+    if (def.type === "file") {
+      values[key] = parseFile(def, given, required);
+    } else if (def.type === "user" && (def.maxValues ?? 1) > 1) {
+      values[key] = parseUsers(def, given, required);
+    } else {
+      values[key] = parseSingle(def, given, required);
     }
-    if (isText) {
-      checkTextLength(def, text);
-    } else if (def.type === "select") {
-      if (!def.options.some((option) => option.value === text) || oneOf(given)) invalid(def);
-    } else if (!SNOWFLAKE.test(text) || oneOf(given)) {
-      invalid(def);
-    }
-    values[key] = text;
   }
   return values as ModalValues<F>;
 }
 
+function parseSingle(
+  def: Exclude<ModalFieldDef, FileFieldDef>,
+  given: ModalRawValue,
+  required: boolean,
+): string | undefined {
+  const isText = def.type === "short" || def.type === "paragraph";
+  const selected = isText ? given : first(given);
+  // Trimmed once here, so the length limits and the handler see the same text.
+  const text = typeof selected === "string" && isText ? selected.trim() : selected;
+  if (typeof text !== "string" || text.trim() === "") {
+    if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
+    return undefined;
+  }
+  if (isText) {
+    checkTextLength(def, text);
+  } else if (def.type === "select") {
+    if (!def.options.some((option) => option.value === text) || oneOf(given)) invalid(def);
+  } else if (!SNOWFLAKE.test(text) || oneOf(given)) {
+    invalid(def);
+  }
+  return text;
+}
+
+/** A user select that takes several people: a list of distinct ids within `minValues`..`maxValues`. */
+function parseUsers(
+  def: UserFieldDef,
+  given: ModalRawValue,
+  required: boolean,
+): string[] | undefined {
+  const list = ids(given);
+  if (list === null) invalid(def);
+  const distinct = [...new Set(list)];
+  if (distinct.length === 0) {
+    if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
+    return undefined;
+  }
+  const { minValues = required ? 1 : 0, maxValues = 1 } = def;
+  if (!distinct.every((id) => SNOWFLAKE.test(id)) || distinct.length > maxValues) invalid(def);
+  if (distinct.length < minValues) {
+    throw new UserError(`Pole „${def.label}” wymaga co najmniej ${minValues} wyborów.`);
+  }
+  return distinct;
+}
+
+/** A single upload: the adapter resolved it from the submit; type and size are checked here. */
+function parseFile(
+  def: FileFieldDef,
+  given: ModalRawValue,
+  required: boolean,
+): ModalFile | undefined {
+  if (given === undefined || (Array.isArray(given) && given.length === 0)) {
+    if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
+    return undefined;
+  }
+  const file = Array.isArray(given) && given.length === 1 ? given[0] : undefined;
+  if (!isModalFile(file)) invalid(def);
+  if (def.contentTypes && !allowedType(def.contentTypes, file.contentType)) {
+    throw new UserError(`Plik w polu „${def.label}” ma niedozwolony typ.`);
+  }
+  if (def.maxBytes !== undefined && file.size > def.maxBytes) {
+    throw new UserError(
+      `Plik w polu „${def.label}” może mieć najwyżej ${formatBytes(def.maxBytes)}.`,
+    );
+  }
+  return { url: file.url, name: file.name, contentType: file.contentType, size: file.size };
+}
+
+function isModalFile(value: unknown): value is ModalFile {
+  if (typeof value !== "object" || value === null) return false;
+  const file = value as Record<string, unknown>;
+  return (
+    typeof file.url === "string" &&
+    file.url.startsWith("https://") &&
+    typeof file.name === "string" &&
+    (file.contentType === null || typeof file.contentType === "string") &&
+    typeof file.size === "number" &&
+    Number.isFinite(file.size) &&
+    file.size >= 0
+  );
+}
+
+function allowedType(allowed: readonly string[], contentType: string | null): boolean {
+  if (contentType === null) return false;
+  // "image/png; charset=binary" and "IMAGE/PNG" are the same type.
+  const type = (contentType.split(";")[0] ?? "").trim().toLowerCase();
+  return allowed.some((pattern) => {
+    const wanted = pattern.toLowerCase();
+    return wanted.endsWith("/*") ? type.startsWith(wanted.slice(0, -1)) : type === wanted;
+  });
+}
+
+function formatBytes(bytes: number): string {
+  return bytes >= 1_048_576
+    ? `${Math.round(bytes / 1_048_576)} MB`
+    : `${Math.ceil(bytes / 1024)} KB`;
+}
+
 /** More than one value submitted to a single-choice select. */
-function oneOf(given: string | readonly string[] | undefined): boolean {
+function oneOf(given: ModalRawValue): boolean {
   return Array.isArray(given) && given.length > 1;
 }
 
@@ -303,10 +496,15 @@ export interface ModalContext<V = Record<string, string | undefined>>
     | "memberPermissions"
     | "state"
     | "acknowledged"
-    | "defer"
     | "reply"
     | "update"
   > {
+  /**
+   * Answers the submit with "thinking" so the handler has more than three seconds. On a modal opened from a
+   * message it keeps that message as it is when it is deferred or answered in place; with `ephemeral: true`
+   * it instead starts a private reply that only the submitter sees, and the message stays untouched.
+   */
+  defer(options?: { ephemeral?: boolean }): Promise<void>;
   /**
    * True when the modal was opened from a message component, so `update` can edit that message. False for a
    * modal opened by a slash command, where `update` throws.
@@ -363,13 +561,19 @@ export function defineModal<const F extends ModalFieldsDef>(
           type: def.type,
           label: def.label,
           description: def.description,
-          placeholder: def.placeholder,
+          placeholder: "placeholder" in def ? def.placeholder : undefined,
           required: def.required ?? true,
           minLength: def.type === "short" || def.type === "paragraph" ? def.minLength : undefined,
           maxLength: def.type === "short" || def.type === "paragraph" ? def.maxLength : undefined,
-          value: (defaults as Record<string, string | undefined>)[key] ?? def.defaultValue,
+          value:
+            (defaults as Record<string, string | undefined>)[key] ??
+            (def.type === "file" ? undefined : def.defaultValue),
+          minValues: def.type === "user" ? def.minValues : undefined,
+          maxValues: def.type === "user" ? def.maxValues : undefined,
           channelTypes: def.type === "channel" ? def.channelTypes : undefined,
           options: def.type === "select" ? def.options : undefined,
+          contentTypes: def.type === "file" ? def.contentTypes : undefined,
+          maxBytes: def.type === "file" ? def.maxBytes : undefined,
         })),
       };
       validateModal(spec);

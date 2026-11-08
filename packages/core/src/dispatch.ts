@@ -191,7 +191,7 @@ export async function executeModal(
         get acknowledged() {
           return ctx.acknowledged;
         },
-        defer: () => ctx.defer(),
+        defer: (options) => ctx.defer(options),
         reply: (reply) => ctx.reply(reply),
         update: (reply) => ctx.update(reply),
       });

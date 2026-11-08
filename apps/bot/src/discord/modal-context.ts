@@ -43,9 +43,10 @@ export function contextFromModal(
         throw new Error("update() works only on a modal opened from a message component");
       }
     },
-    async defer() {
+    async defer(options) {
       if (answer !== "none") return;
-      if (interaction.isFromMessage()) {
+      // A private reply leaves the clicked message (a control panel) as it is.
+      if (interaction.isFromMessage() && !options?.ephemeral) {
         await interaction.deferUpdate();
         answer = "update";
       } else {

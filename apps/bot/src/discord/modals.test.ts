@@ -124,6 +124,135 @@ const users = (...ids: string[]) => ({
   users: new Map(ids.map((id) => [id, { id }])),
 });
 
+const upload = (
+  ...files: { id: string; url: string; name: string; contentType: string | null; size: number }[]
+) => ({
+  type: ComponentType.FileUpload,
+  values: files.map((f) => f.id),
+  attachments: new Map(files.map((f) => [f.id, f])),
+});
+const FILE = {
+  id: "9",
+  url: "https://cdn.discordapp.com/a.png",
+  name: "a.png",
+  contentType: "image/png",
+  size: 12,
+};
+
+const attach = defineModal({
+  module: "fun",
+  name: "attach",
+  title: "Załącznik",
+  fields: {
+    team: { type: "user", label: "Zespół", required: false, minValues: 1, maxValues: 10 },
+    proof: { type: "file", label: "Plik", required: false },
+  },
+  async run() {},
+});
+
+describe("multi-user select and file upload", () => {
+  test("the payload asks Discord for the value range and a file upload", () => {
+    const payload = toModalPayload(attach.build("1"));
+    const inner = payload.components.map((c) => ("component" in c ? c.component : null));
+    expect(inner[0]).toMatchObject({
+      type: ComponentType.UserSelect,
+      // The field is optional, so the client may leave it empty even though minValues is 1.
+      min_values: 0,
+      max_values: 10,
+    });
+    expect(inner[1]).toMatchObject({
+      type: ComponentType.FileUpload,
+      custom_id: "proof",
+      required: false,
+      min_values: 0,
+      max_values: 1,
+    });
+  });
+
+  test("the file filter follows contentTypes where Discord has an equivalent", () => {
+    const fileTypes = (contentTypes?: string[]) => {
+      const m = defineModal({
+        module: "fun",
+        name: "ft",
+        title: "t",
+        fields: { f: { type: "file", label: "Plik", contentTypes } },
+        async run() {},
+      });
+      const field = toModalPayload(m.build("1")).components[0];
+      return field && "component" in field && "file_types" in field.component
+        ? field.component.file_types
+        : "missing";
+    };
+    expect(fileTypes(["image/*", "video/*", "application/pdf"])).toEqual([
+      "image",
+      "video",
+      ".pdf",
+    ]);
+    expect(fileTypes(["IMAGE/*"])).toEqual(["image"]);
+    // A type with no equivalent would make the picker stricter than the field: no filter at all.
+    expect(fileTypes(["image/*", "application/zip"])).toBeUndefined();
+    expect(fileTypes(["image/png"])).toBeUndefined();
+    expect(fileTypes(undefined)).toBeUndefined();
+  });
+
+  test("an optional user select always allows an empty pick, a required one asks for at least one", () => {
+    const users = (required: boolean, minValues?: number) => {
+      const m = defineModal({
+        module: "fun",
+        name: "us",
+        title: "t",
+        fields: { u: { type: "user", label: "Kto", required, minValues, maxValues: 5 } },
+        async run() {},
+      });
+      const field = toModalPayload(m.build("1")).components[0];
+      return field && "component" in field && "min_values" in field.component
+        ? field.component.min_values
+        : "missing";
+    };
+    expect(users(false)).toBe(0);
+    expect(users(false, 2)).toBe(0);
+    expect(users(true)).toBe(1);
+    expect(users(true, 3)).toBe(3);
+  });
+
+  test("a required upload asks for one file", () => {
+    const required = defineModal({
+      module: "fun",
+      name: "req",
+      title: "t",
+      fields: { proof: { type: "file", label: "Plik" } },
+      async run() {},
+    });
+    const [label] = toModalPayload(required.build("1")).components;
+    expect(label && "component" in label ? label.component : null).toMatchObject({
+      required: true,
+      min_values: 1,
+      max_values: 1,
+    });
+  });
+
+  test("resolved attachments become files, an unresolved id or another component is rejected", () => {
+    const ok = submit({ proof: upload(FILE), team: users("7", "8") });
+    expect(readModalValues(attach, ok.interaction)).toEqual({
+      proof: [{ url: FILE.url, name: "a.png", contentType: "image/png", size: 12 }],
+      team: ["7", "8"],
+    });
+    const unresolved = submit({
+      proof: { type: ComponentType.FileUpload, values: ["9"], attachments: new Map() },
+    });
+    expect(readModalValues(attach, unresolved.interaction)).toEqual({
+      proof: REJECTED_MODAL_VALUE,
+    });
+    const wrongType = submit({ proof: text("x") });
+    expect(readModalValues(attach, wrongType.interaction)).toEqual({ proof: REJECTED_MODAL_VALUE });
+  });
+
+  test("an empty upload reads as no files", () => {
+    const { interaction } = submit({ proof: upload() });
+    expect(readModalValues(attach, interaction)).toEqual({ proof: [] });
+  });
+});
+
 describe("readModalValues", () => {
   test("reads text values and select ids that Discord resolved", () => {
     const { interaction } = submit({
@@ -220,6 +349,15 @@ describe("contextFromModal", () => {
     expect(fromSlash.calls.map((c) => c.method)).toEqual(["deferReply"]);
     expect(b.canUpdate).toBe(false);
     await expect(b.update({ content: "x" })).rejects.toThrow("message component");
+  });
+
+  test("an ephemeral defer on a modal from a message starts a private reply and leaves the message", async () => {
+    const fromMessage = submit({}, true);
+    const ctx = contextFromModal(fromMessage.interaction, "");
+    await ctx.defer({ ephemeral: true });
+    await ctx.reply({ content: "gotowe" });
+    expect(fromMessage.calls.map((c) => c.method)).toEqual(["deferReply", "followUp"]);
+    expect(fromMessage.calls[0]?.payload).toMatchObject({ flags: 64 });
   });
 });
 
