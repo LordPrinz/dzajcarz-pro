@@ -20,6 +20,11 @@ export interface MusicTrack {
   isSeekable: boolean;
   /** Member who added it. */
   requesterId: string;
+  /**
+   * Queued by the bot itself (a scheduled song), not by a member: it gets no now playing panel and no
+   * failure note.
+   */
+  byBot?: true;
 }
 
 export type SearchResult =
@@ -73,7 +78,11 @@ export interface MusicPlayer {
   search(query: MusicQuery, requesterId: string): Promise<SearchResult>;
   /** Null when the bot has no player in the guild. */
   state(guildId: string): PlayerState | null;
-  /** Creates the guild's player in the voice channel, or keeps the existing one. */
+  /**
+   * Creates the guild's player in the voice channel, or keeps the existing one. A player the bot started
+   * on its own (a scheduled song) takes `textChannelId` as its panel channel the first time a member joins
+   * it this way.
+   */
   join(guildId: string, voiceChannelId: string, textChannelId: string): Promise<void>;
   /** Appends to the queue and starts playing when nothing is. */
   enqueue(guildId: string, tracks: readonly MusicTrack[]): Promise<void>;

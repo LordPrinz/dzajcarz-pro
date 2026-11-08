@@ -21,6 +21,7 @@
         "@dzajcarz/module-general": "workspace:*",
         "@dzajcarz/module-music": "workspace:*",
         "@dzajcarz/module-party": "workspace:*",
+        "@dzajcarz/module-schedule": "workspace:*",
         "@dzajcarz/module-settings": "workspace:*",
         "@dzajcarz/module-status": "workspace:*",
         "@dzajcarz/module-welcome": "workspace:*",
@@ -52,6 +53,16 @@
       "dependencies": {
         "@dzajcarz/core": "workspace:*",
         "@dzajcarz/kv": "workspace:*",
+      },
+      "devDependencies": {
+        "discord.js": "14.27.0",
+      },
+    },
+    "modules/schedule": {
+      "name": "@dzajcarz/module-schedule",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dzajcarz/core": "workspace:*",
       },
       "devDependencies": {
         "discord.js": "14.27.0",
@@ -145,6 +156,8 @@
     "@dzajcarz/module-music": ["@dzajcarz/module-music@workspace:modules/music"],
 
     "@dzajcarz/module-party": ["@dzajcarz/module-party@workspace:modules/party"],
+
+    "@dzajcarz/module-schedule": ["@dzajcarz/module-schedule@workspace:modules/schedule"],
 
     "@dzajcarz/module-settings": ["@dzajcarz/module-settings@workspace:modules/settings"],
 

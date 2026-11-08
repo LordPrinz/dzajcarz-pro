@@ -201,7 +201,8 @@ export function createMusicModule({
       const room = MAX_QUEUE_LENGTH - queued;
       if (room <= 0) throw new UserError(`Kolejka jest pełna (${MAX_QUEUE_LENGTH} utworów).`);
       const accepted = tracks.slice(0, room);
-      if (!state) await player.join(guildId, channelId, textChannelId);
+      // Joining a song the bot plays on its own makes this channel the panel's for the tracks to come.
+      if (!state || state.current?.byBot) await player.join(guildId, channelId, textChannelId);
       await player.enqueue(guildId, accepted);
       const startsNow = !state?.current;
       // A new track redraws the panel by itself; otherwise only its queue count changed.
@@ -470,6 +471,7 @@ export function createMusicModule({
       void inOrder(guildId, () => removePanel(guildId));
     },
     trackFailed(guildId, track) {
+      if (track.byBot) return;
       const channelId = player.state(guildId)?.textChannelId;
       if (!channelId) return;
       panels.post(channelId, { content: trackFailedText(track.title) }).catch((error: unknown) => {

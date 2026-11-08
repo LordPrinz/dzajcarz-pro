@@ -85,6 +85,8 @@ services:
       - "127.0.0.1:2333:2333"
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      # The scheduled songs (ADR 0004). Read-only; the bot plays them by a fixed name, never by member input.
+      - ./lavalink/music:/opt/Lavalink/music:ro
       - lavalink-plugins:/opt/Lavalink/plugins
 
 volumes:

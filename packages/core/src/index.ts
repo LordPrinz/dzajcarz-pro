@@ -1,6 +1,7 @@
 export * from "./command.ts";
 export * from "./component.ts";
 export * from "./component-state.ts";
+export * from "./cron.ts";
 export * from "./dispatch.ts";
 export * from "./errors.ts";
 export * from "./logger.ts";

@@ -1,7 +1,7 @@
 # 4. Lavalink for audio
 
 - **Status:** accepted
-- **Date:** 2026-11-06, amended 2026-11-08 (DZAJ-50)
+- **Date:** 2026-11-06, amended 2026-11-08 (DZAJ-50, DZAJ-13)
 
 ## Context
 
@@ -87,6 +87,35 @@ track starts right away):
   source stays enabled so it starts working again with a fixed Lavalink release.
 - Vimeo: does not work. Loading succeeds, playback fails inside the Lavaplayer bundled with Lavalink
   4.2.2, the latest release.
+
+## Local files (DZAJ-13)
+
+The scheduled songs ("Lato z Radiem", `icona_pop`) are mp3 files in `infra/lavalink/music`, mounted read-only
+at `/opt/Lavalink/music` in the Lavalink container, and `lavalink.server.sources.local` is on. That source
+loads any path the node can read, so it is only safe while no member can choose the path:
+
+- `/play` and `/search` turn everything a member types into a `ytsearch:` query or one of the allowed
+  links (`parseQuery`, `toIdentifier`). `local:/etc/passwd` and `/etc/passwd` become search words, and tests
+  in `mapping.test.ts` and `lavalink.test.ts` assert the identifiers the node receives.
+- Only the schedule module reaches `playLocalFile`, through a name from a list in the code. The adapter looks
+  the name up and refuses an unknown one, so the path is never built from input. `playLocalFile` also checks
+  the path itself: it must lie in `/opt/Lavalink/music` and the file name must match `[a-z0-9_]+\.mp3`.
+- The identifier is the bare absolute path. Lavaplayer's local source opens `new File(identifier)` and has
+  no prefix of its own; `local:` would become part of the file name.
+- Tracks are queued from encoded ids, and those can come back from component state. The adapter refuses a
+  decoded track whose source is `local`, so only `playLocalFile` ever plays a file.
+
+What the source can reach is limited. It runs media detection on the path and reports whether it exists and
+what it holds as audio; it never returns a file's contents. `application.yml` holds no secret either: the
+node password comes from `LAVALINK_SERVER_PASSWORD`. The node listens on `127.0.0.1:2333` only and needs
+that password. The checks above are still the hard rule, because a member who could choose a path could
+probe which files exist in the container.
+
+The `http` source stays off. It would let the node fetch any URL a track names, and anyone who can make it
+load a URL could reach internal services through it (cloud metadata, Redis): server-side request forgery
+with the node as the proxy. The local source can only reach the container's own files, and the bot never
+lets a member pick one, so it is the smaller risk for the same feature. Adding a song means adding the file,
+and a line in `scheduled-songs.ts`; the directory is mounted, so Lavalink needs no restart for a new file.
 
 ## Consequences
 

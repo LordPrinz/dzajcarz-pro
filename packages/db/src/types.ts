@@ -42,3 +42,15 @@ export interface PartyChannelRow {
   area_join_channel_id: string;
   created_at: Date;
 }
+
+export interface ScheduledSongConfigRow {
+  guild_id: string;
+  song: string;
+  updated_at: Date;
+}
+
+export interface ScheduledSongExclusionRow {
+  guild_id: string;
+  channel_id: string;
+  created_at: Date;
+}

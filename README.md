@@ -38,6 +38,7 @@ modules/
   settings/         prefix (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set through a form, off, test), greets new members
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, special invite with a message and attachment, block, hide, show), a voice channel per member who joins the party area
+  schedule/         schedule (list, exclude, include, song), plays "Lato z Radiem" at 9:00 and 21:00 in the busiest voice channel
   status/           rotates the bot's activity (the old bot's song)
   music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), loop, shuffle, seek, volume, filter, remove, jump, back, clear, save (sv), a now playing panel with buttons
   …                 moderation, fun (see the board)
@@ -76,6 +77,13 @@ YouTube stream signatures for Lavalink (ADR 4). Both variables are optional: wit
 down, the bot runs normally and music commands answer that the player is unavailable. In the voice channel
 the bot needs **Connect** and **Speak**, and **Send Messages** and **Embed Links** in the text channel where
 music was started (the now playing panel).
+
+The schedule module plays the songs in `infra/lavalink/music` through Lavalink's `local` source (ADR 4), so
+Lavalink needs that directory mounted: after pulling this change recreate it with
+`docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d --force-recreate lavalink`.
+At 9:00 and 21:00 Warsaw time the bot joins the voice channel with the most people in each server, unless
+music is already playing there. Servers manage it with `/schedule` (Manage Server) or switch it off with
+`/modules disable schedule`. `SCHEDULED_SONG_CRON` and `SCHEDULED_SONG_TIMEZONE` change the time.
 
 ## Scripts
 

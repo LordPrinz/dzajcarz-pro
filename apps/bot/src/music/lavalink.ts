@@ -1,6 +1,13 @@
 /** `MusicPlayer` on top of lavalink-client (ADR 4): one node, one player per guild. */
 import type { Logger } from "@dzajcarz/core";
-import type { MusicFilter, MusicListener, MusicPlayer, MusicTrack } from "@dzajcarz/module-music";
+import type {
+  LoopMode,
+  MusicFilter,
+  MusicListener,
+  MusicPlayer,
+  MusicTrack,
+} from "@dzajcarz/module-music";
+import type { ScheduledPlayResult } from "@dzajcarz/module-schedule";
 import { type Client, Events } from "discord.js";
 import {
   EQList,
@@ -21,8 +28,30 @@ import {
   toPlayerState,
   toSearchResult,
 } from "./mapping.ts";
+import { LAVALINK_MUSIC_DIR } from "./scheduled-songs.ts";
 
 export interface LavalinkMusicPlayer extends MusicPlayer {
+  /**
+   * Plays a file of the node's local source in the voice channel, moving an idle player of the guild
+   * there. The track is marked `byBot`, so the music module shows no panel for it. Resolves `busy` at once
+   * when the guild already has music playing or queued; otherwise when the file is over, `queued` telling
+   * whether other tracks follow it. `file` must be a song file of `LAVALINK_MUSIC_DIR`, which the bot's
+   * own configuration lists: the node opens whatever path it gets.
+   *
+   * The file plays at the player's volume and with its effect: an idle player keeps what members set, a new
+   * one starts at the source's own volume with none. It never repeats: the members' loop mode is held back
+   * while it plays and applies again to the tracks after it.
+   */
+  playLocalFile(
+    guildId: string,
+    voiceChannelId: string,
+    file: string,
+  ): Promise<ScheduledPlayResult>;
+  /**
+   * Whether the guild's player has a current or queued track, read from the client's queue, so a player
+   * that is rejoining after a node restart counts too.
+   */
+  isPlaying(guildId: string): boolean;
   /** Leaves every voice channel and closes the node connection. */
   destroy(): Promise<void>;
 }
@@ -42,6 +71,8 @@ const TRACK_CACHE_SIZE = 2000;
 const VOLUME = 100;
 /** How long a recovery waits for Discord to confirm that the bot left voice before joining again. */
 const REJOIN_TIMEOUT_MS = 5000;
+/** A song file name in the music directory: no separators, so no way out of it. */
+const LOCAL_FILE_NAME = /^[a-z0-9_]+\.mp3$/;
 
 /** The client's own presets (toggleNightcore, toggleVaporwave, toggleRotation), written out. */
 const NIGHTCORE = { speed: 1.29, pitch: 1.29, rate: 0.9366 };
@@ -125,12 +156,23 @@ export function createLavalinkMusicPlayer({
     return player;
   }
 
-  /** The track to queue, with the module's requester on it. */
+  /**
+   * The track to queue, with the module's requester on it. A track id is an encoded track and may come
+   * back from component state, so a decoded local file is refused: only `playLocalFile` plays those.
+   */
   async function toTrack(player: Player, track: MusicTrack): Promise<Track> {
     const requester = { id: track.requesterId };
     const known =
       cache.get(track.id) ?? (await player.node.decode.singleTrack(track.id, requester));
+    // SourceNames does not list Lavalink's own sources, `local` among them.
+    if ((known.info.sourceName as string) === "local")
+      throw new Error("Local files cannot be queued");
     return manager.utils.buildTrack(known, requester);
+  }
+
+  function isPlaying(guildId: string): boolean {
+    const queue = manager.getPlayer(guildId)?.queue;
+    return Boolean(queue && (queue.current || queue.tracks.length > 0));
   }
 
   // A restarted node forgets its sessions: the client keeps the players but nothing plays any more. Every
@@ -140,6 +182,34 @@ export function createLavalinkMusicPlayer({
   const skipping = new Map<string, string>();
   /** Guilds whose bot leaves and rejoins voice on purpose (recovery); their disconnect is not a kick. */
   const rejoining = new Map<string, () => void>();
+
+  /**
+   * Local files being played: settled by the track's end, the queue's end or the player's end. The player's
+   * own loop mode stays off meanwhile, or the client would replay the file (track loop) or queue it again
+   * (queue loop); `loop` is the members' mode, put back on the player when the file is over.
+   */
+  const localPlays = new Map<
+    string,
+    { encoded: string; loop: LoopMode; done: (result: { queued: boolean }) => void }
+  >();
+  function finishLocal(guildId: string, queued: boolean): void {
+    const local = localPlays.get(guildId);
+    if (!local) return;
+    localPlays.delete(guildId);
+    // The client emits trackEnd before it starts the next track, and setRepeatMode sets the mode before it
+    // awaits anything, so the next track already plays under the members' mode.
+    manager
+      .getPlayer(guildId)
+      ?.setRepeatMode(local.loop)
+      .catch((error: unknown) => logger.warn("Restoring the loop mode failed", { guildId, error }));
+    local.done({ queued });
+  }
+  /** The loop mode members chose, also while a local file holds the player's own mode off. */
+  function loopOf(player: Player): LoopMode {
+    return localPlays.get(player.guildId)?.loop ?? player.repeatMode;
+  }
+  /** Players started by `playLocalFile`; the first member to join one makes their channel its text channel. */
+  const unclaimed = new Set<string>();
 
   /** The effect each player runs; the client only knows the individual switches. */
   const filters = new Map<string, MusicFilter>();
@@ -158,6 +228,8 @@ export function createLavalinkMusicPlayer({
   }
 
   function playerGone(guildId: string, reason: unknown): void {
+    finishLocal(guildId, false);
+    unclaimed.delete(guildId);
     resumeAt.delete(guildId);
     filters.delete(guildId);
     skipping.delete(guildId);
@@ -203,7 +275,14 @@ export function createLavalinkMusicPlayer({
     if (track)
       emit("trackStart", (listener) => listener.trackStart(player.guildId, toMusicTrack(track)));
   });
+  // Emitted when another track follows, and when play() replaces the track ("replaced"); the end of the
+  // last one is queueEnd.
+  manager.on("trackEnd", (player, track) => {
+    if (track?.encoded === localPlays.get(player.guildId)?.encoded)
+      finishLocal(player.guildId, true);
+  });
   manager.on("queueEnd", (player) => {
+    finishLocal(player.guildId, false);
     skipping.delete(player.guildId);
     emit("queueEnd", (listener) => listener.queueEnd(player.guildId));
   });
@@ -321,6 +400,47 @@ export function createLavalinkMusicPlayer({
       .catch((error: unknown) => logger.error("Lavalink init failed", { error }));
   });
 
+  async function joinVoice(
+    guildId: string,
+    voiceChannelId: string,
+    textChannelId: string,
+  ): Promise<void> {
+    const player = manager.createPlayer({
+      guildId,
+      voiceChannelId,
+      textChannelId,
+      selfDeaf: true,
+      volume: VOLUME,
+    });
+    // createPlayer returns an existing player as it is; one that lost its channel (a rejoin that never
+    // finished) would otherwise connect to nothing, and one the bot started has no text channel of its own.
+    if (!player.voiceChannelId || unclaimed.delete(guildId)) {
+      player.options.voiceChannelId = voiceChannelId;
+      player.options.textChannelId = textChannelId;
+      player.textChannelId = textChannelId;
+    }
+    if (!player.connected) await player.connect();
+  }
+
+  /**
+   * The guild's player in `voiceChannelId`, for a file the bot plays. An idle player is moved with a plain
+   * voice state update: destroying it and creating a new one would race Discord's "left voice" for the old
+   * one, which the client then applies to the new player and kills it.
+   */
+  async function takeOver(guildId: string, voiceChannelId: string): Promise<Player> {
+    const idle = manager.getPlayer(guildId);
+    if (idle) {
+      idle.options.voiceChannelId = voiceChannelId;
+      idle.options.textChannelId = voiceChannelId;
+      idle.textChannelId = voiceChannelId;
+      if (!idle.connected || idle.voiceChannelId !== voiceChannelId) await idle.connect();
+    } else {
+      await joinVoice(guildId, voiceChannelId, voiceChannelId);
+    }
+    unclaimed.add(guildId);
+    return playerOf(guildId);
+  }
+
   return {
     available: () => manager.useable,
 
@@ -345,32 +465,59 @@ export function createLavalinkMusicPlayer({
 
     state(guildId) {
       const player = manager.getPlayer(guildId);
-      return player ? toPlayerState(player, filters.get(guildId) ?? "off") : null;
+      return player ? toPlayerState(player, filters.get(guildId) ?? "off", loopOf(player)) : null;
     },
 
-    async join(guildId, voiceChannelId, textChannelId) {
-      const player = manager.createPlayer({
-        guildId,
-        voiceChannelId,
-        textChannelId,
-        selfDeaf: true,
-        volume: VOLUME,
-      });
-      // createPlayer returns an existing player as it is; one that lost its channel (a rejoin that never
-      // finished) would otherwise connect to nothing.
-      if (!player.voiceChannelId) {
-        player.options.voiceChannelId = voiceChannelId;
-        player.options.textChannelId = textChannelId;
-        player.textChannelId = textChannelId;
-      }
-      if (!player.connected) await player.connect();
-    },
+    join: joinVoice,
 
     async enqueue(guildId, tracks) {
       const player = playerOf(guildId);
       await player.queue.add(await Promise.all(tracks.map((track) => toTrack(player, track))));
-      // `current` is set as soon as play() starts, unlike `playing`, which waits for the node.
-      if (!player.queue.current) await player.play();
+      // `current` is set as soon as play() starts, unlike `playing`, which waits for the node. While a
+      // local file is being started, it plays first and these tracks follow it.
+      if (!player.queue.current && !localPlays.has(guildId)) await player.play();
+    },
+
+    isPlaying,
+
+    async playLocalFile(guildId, voiceChannelId, file) {
+      const name = file.startsWith(`${LAVALINK_MUSIC_DIR}/`)
+        ? file.slice(LAVALINK_MUSIC_DIR.length + 1)
+        : "";
+      if (!LOCAL_FILE_NAME.test(name))
+        throw new Error(`${file} is not a song file of the music directory`);
+      const node = connectedNode();
+      if (!node) throw new Error("No Lavalink node is connected");
+      // The local source takes the bare path (`new File(identifier)`); it has no prefix of its own.
+      const result: RawLoadResult = await node.request(
+        `/loadtracks?identifier=${encodeURIComponent(file)}`,
+      );
+      const [raw] = rawTracksOf(result);
+      if (!raw) throw new Error(`Lavalink could not load ${file}`);
+      // No await between this check and claiming the guild: members' music that got there first is
+      // never interrupted, and tracks queued after the claim wait behind the file (enqueue).
+      if (isPlaying(guildId) || localPlays.has(guildId) || rejoining.has(guildId)) {
+        return { status: "busy" };
+      }
+      const loop = manager.getPlayer(guildId)?.repeatMode ?? "off";
+      const finished = new Promise<{ queued: boolean }>((done) => {
+        localPlays.set(guildId, { encoded: raw.encoded, loop, done });
+      });
+      const track = manager.utils.buildTrack(raw, { id: client.user?.id ?? "", byBot: true });
+      try {
+        const player = await takeOver(guildId, voiceChannelId);
+        await player.setRepeatMode("off");
+        // Ahead of anything a member queued while the bot was joining.
+        await player.queue.add(track, 0);
+        await player.play();
+      } catch (error) {
+        localPlays.delete(guildId);
+        const player = manager.getPlayer(guildId);
+        if (player) await destroyPlayer(player, "scheduled song failed");
+        throw error;
+      }
+      const { queued } = await finished;
+      return { status: "played", queued };
     },
 
     async skip(guildId, expectedTrackId) {
@@ -398,7 +545,11 @@ export function createLavalinkMusicPlayer({
     },
 
     async setLoop(guildId, mode) {
-      await playerOf(guildId).setRepeatMode(mode);
+      const player = playerOf(guildId);
+      const local = localPlays.get(guildId);
+      // During a local file the mode waits for the tracks after it (finishLocal).
+      if (local) local.loop = mode;
+      else await player.setRepeatMode(mode);
     },
 
     async shuffle(guildId) {
@@ -444,7 +595,7 @@ export function createLavalinkMusicPlayer({
         return false;
       skipping.set(guildId, current.encoded);
       try {
-        if (player.repeatMode === "queue" && index > 0) {
+        if (loopOf(player) === "queue" && index > 0) {
           // The loop keeps every track: the ones passed over wait at the end instead of being dropped.
           await player.queue.add(tracksOf(await player.queue.splice(0, index)));
           await player.skip(0, false);
@@ -464,18 +615,23 @@ export function createLavalinkMusicPlayer({
       if (skipping.has(guildId)) return "changed";
       const current = player.queue.current;
       // The track loop adds the current track to the history on every repeat; going back means before it.
-      while (current?.encoded && player.queue.previous[0]?.encoded === current.encoded) {
+      // A file the bot played is not the members' history either.
+      const passOver = (track: Track) =>
+        (current?.encoded ? track.encoded === current.encoded : false) ||
+        toMusicTrack(track).byBot === true;
+      while (player.queue.previous[0] && passOver(player.queue.previous[0])) {
         await player.queue.shiftPrevious();
       }
       const back = await player.queue.shiftPrevious();
       if (!back) return "none";
-      if (player.repeatMode === "queue") {
+      if (loopOf(player) === "queue") {
         // The queue loop already put the back track at the end; playing it now must not add a second turn.
         const copy = player.queue.tracks.findLastIndex((track) => track.encoded === back.encoded);
         if (copy >= 0) await player.queue.splice(copy, 1);
       }
-      // The track that was playing waits at the front of the queue, so the next skip returns to it.
-      if (current) await player.queue.add(current, 0);
+      // The track that was playing waits at the front of the queue, so the next skip returns to it. A file
+      // the bot plays does not: going back ends it like a skip, and its trackEnd settles playLocalFile.
+      if (current && !toMusicTrack(current).byBot) await player.queue.add(current, 0);
       await player.play({ clientTrack: back });
       return toMusicTrack(back);
     },
