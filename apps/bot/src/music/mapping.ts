@@ -1,5 +1,12 @@
 /** Pure translations between lavalink-client objects and the music module's port types. */
-import type { MusicQuery, MusicTrack, PlayerState, SearchResult } from "@dzajcarz/module-music";
+import type {
+  LoopMode,
+  MusicFilter,
+  MusicQuery,
+  MusicTrack,
+  PlayerState,
+  SearchResult,
+} from "@dzajcarz/module-music";
 import type { LavalinkNodeOptions, Track, UnresolvedTrack } from "lavalink-client";
 
 /** A restarted node is back within seconds; fast retries cover about a minute (spike DZAJ-10). */
@@ -109,6 +116,7 @@ export function toMusicTrack(track: Track | UnresolvedTrack): MusicTrack {
     uri: info.uri ?? null,
     artworkUrl: info.artworkUrl ?? track.pluginInfo?.artworkUrl ?? null,
     isStream: info.isStream ?? false,
+    isSeekable: !info.isStream && (info.isSeekable ?? false),
     requesterId: typeof requester?.id === "string" ? requester.id : "",
     ...(requester?.byBot === true ? { byBot: true as const } : {}),
   };
@@ -134,10 +142,17 @@ export interface PlayerLike {
   playing: boolean;
   paused: boolean;
   position: number;
+  volume: number;
+  repeatMode: LoopMode;
   queue: { current: Track | null; tracks: (Track | UnresolvedTrack)[] };
 }
 
-export function toPlayerState(player: PlayerLike): PlayerState | null {
+/** `loop` is the members' mode, which differs from the player's own while the bot plays a local file. */
+export function toPlayerState(
+  player: PlayerLike,
+  filter: MusicFilter,
+  loop: LoopMode = player.repeatMode,
+): PlayerState | null {
   if (!player.voiceChannelId) return null;
   const current = player.queue.current;
   return {
@@ -147,5 +162,8 @@ export function toPlayerState(player: PlayerLike): PlayerState | null {
     upcoming: player.queue.tracks.map(toMusicTrack),
     positionMs: current ? Math.max(0, player.position) : 0,
     paused: player.paused,
+    loop,
+    volume: player.volume,
+    filter,
   };
 }

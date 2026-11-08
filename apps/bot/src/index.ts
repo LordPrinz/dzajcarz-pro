@@ -20,7 +20,7 @@ import { attachHandlers } from "./bot.ts";
 import { deployOnStartup } from "./deploy.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
-import { createPanelMessages, createVoiceChannels } from "./discord/music.ts";
+import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./discord/music.ts";
 import {
   createPartyChannels,
   createPartyChat,
@@ -125,6 +125,7 @@ const modules = createModules({
   musicPlayer,
   voiceChannels: createVoiceChannels(client),
   musicPanels: createPanelMessages(client),
+  directMessages: createDirectMessages(client),
   componentState: createRedisStore(redis),
   cron: createCronScheduler(),
   scheduleSettings: createScheduledSongRepository(sql),

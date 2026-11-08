@@ -98,3 +98,36 @@ export function httpUrl(url: string | null): string | undefined {
   if (protocol !== "http:" && protocol !== "https:") return undefined;
   return href.length <= MAX_URL_LENGTH ? href : undefined;
 }
+
+/** Longest time `/seek` reads: 99:59:59, far past any track. */
+const MAX_TIME_SECONDS = 359_999;
+
+/**
+ * A time typed by a member, in milliseconds: `90` (seconds), `1:30`, `1:02:03`, `1m30s`, `1m30`, `1 m 30 s`,
+ * `1h2m`, `45s`. Both forms follow the same rules: a part after a larger one stays under 60 (`1:75`, `1m90s`
+ * and `1h75m` are refused), minutes before seconds go up to 99 without hours (longer times name the hours),
+ * and the whole is at most 99:59:59. Null for anything else, including an empty string or a negative number.
+ */
+export function parseTime(input: string): number | null {
+  const text = input.trim().toLowerCase();
+  if (/^\d{1,6}$/.test(text)) return toTimeMs(undefined, undefined, text);
+  const clock = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})$/.exec(text);
+  if (clock) return toTimeMs(clock[1], clock[2], clock[3]);
+  // A bare number at the end counts as seconds only after minutes (`1m30`), never after hours alone.
+  const units = /^(?:(\d{1,2})\s*h)?\s*(?:(\d{1,2})\s*m)?\s*(?:(\d{1,6})\s*(s?))?$/.exec(text);
+  if (!units || text === "") return null;
+  const [, hours, minutes, seconds, secondsUnit] = units;
+  if (seconds !== undefined && secondsUnit === "" && minutes === undefined) return null;
+  return toTimeMs(hours, minutes, seconds);
+}
+
+function toTimeMs(
+  hours: string | undefined,
+  minutes: string | undefined,
+  seconds: string | undefined,
+): number | null {
+  if (hours !== undefined && Number(minutes ?? 0) > 59) return null;
+  if ((hours !== undefined || minutes !== undefined) && Number(seconds ?? 0) > 59) return null;
+  const total = Number(hours ?? 0) * 3600 + Number(minutes ?? 0) * 60 + Number(seconds ?? 0);
+  return total > MAX_TIME_SECONDS ? null : total * 1000;
+}

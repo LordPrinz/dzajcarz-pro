@@ -3,6 +3,7 @@ import type { KeyValueStore } from "@dzajcarz/kv";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
   createMusicModule,
+  type DirectMessages,
   type MusicPlayer,
   type PanelMessages,
   type VoiceChannels,
@@ -64,6 +65,7 @@ export interface ModuleServices {
   musicPlayer: MusicPlayer;
   voiceChannels: VoiceChannels;
   musicPanels: PanelMessages;
+  directMessages: DirectMessages;
   componentState: Pick<KeyValueStore, "get" | "set">;
   cron: CronScheduler;
   scheduleSettings: ScheduleSettings;
@@ -105,6 +107,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       player: services.musicPlayer,
       voice: services.voiceChannels,
       panels: services.musicPanels,
+      directMessages: services.directMessages,
       scheduler: services.scheduler,
       stateStorage: services.componentState,
       logger: services.logger.child({ module: "music" }),
