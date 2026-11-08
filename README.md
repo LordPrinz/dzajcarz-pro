@@ -57,8 +57,7 @@ bun install                       # also installs the git hooks
 cp .env.example .env              # fill in DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_DEV_GUILD_ID
 bun run infra:up                  # Postgres :5432, Redis :6379
 bun run db:migrate
-bun run commands:deploy           # register slash commands (dev guild: instant)
-bun run dev                       # the bot, restarted on file changes
+bun run dev                       # the bot, restarted on file changes; registers its slash commands
 ```
 
 The party module needs these permissions for the bot in the server: **Manage Channels** (create, rename and
@@ -74,14 +73,14 @@ The music module needs Lavalink as well:
 
 ## Scripts
 
-| Command                       | What it does                                                             |
-| ----------------------------- | ------------------------------------------------------------------------ |
-| `bun run dev`                 | bot in watch mode                                                        |
-| `bun run start`               | bot without watch                                                        |
-| `bun run commands:deploy`     | register slash commands (in `DISCORD_DEV_GUILD_ID`, or globally)         |
-| `bun run check` / `check:fix` | Biome lint + format                                                      |
-| `bun run typecheck`           | `tsc` for the scripts and every workspace                                |
-| `bun test`                    | all tests (DB / Redis tests need `TEST_DATABASE_URL` / `TEST_REDIS_URL`) |
-| `bun run db:new <name>`       | new empty migration `packages/db/migrations/NNNN_<name>.sql`             |
-| `bun run db:migrate`          | apply migrations                                                         |
-| `bun run infra:up` / `down`   | start / stop the local services                                          |
+| Command                       | What it does                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------- |
+| `bun run dev`                 | bot in watch mode                                                                     |
+| `bun run start`               | bot without watch                                                                     |
+| `bun run commands:deploy`     | register slash commands without starting the bot (optional: the bot does it on start) |
+| `bun run check` / `check:fix` | Biome lint + format                                                                   |
+| `bun run typecheck`           | `tsc` for the scripts and every workspace                                             |
+| `bun test`                    | all tests (DB / Redis tests need `TEST_DATABASE_URL` / `TEST_REDIS_URL`)              |
+| `bun run db:new <name>`       | new empty migration `packages/db/migrations/NNNN_<name>.sql`                          |
+| `bun run db:migrate`          | apply migrations                                                                      |
+| `bun run infra:up` / `down`   | start / stop the local services                                                       |

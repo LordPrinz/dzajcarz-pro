@@ -1,7 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import { silentLogger } from "@dzajcarz/core";
 import { ApplicationIntegrationType, InteractionContextType } from "discord.js";
-import { buildDeployBody, deployRoute, deployTarget, unusedServices } from "./deploy.ts";
-import { loadDeployEnv } from "./env.ts";
+import {
+  buildDeployBody,
+  createDeployRegistry,
+  type DeployStep,
+  deployOnStartup,
+  deployRoute,
+  deployTarget,
+  sameCommands,
+  unusedServices,
+} from "./deploy.ts";
+import { loadDeployEnv, loadEnv } from "./env.ts";
 
 const GUILD = "100000000000000001";
 const CLIENT = "200000000000000002";
@@ -115,5 +125,157 @@ describe("unusedServices", () => {
     const held = { service, send: service.send };
     expect(held.send).toBeDefined();
     expect(await Promise.resolve(service)).toBe(service);
+  });
+});
+
+type Json = Record<string, unknown>;
+
+/** What Discord's GET returns for a deployed body (shape seen on the live API). */
+function asDiscordReturnsIt(body: readonly object[], scope: DeployStep["scope"]): Json[] {
+  const option = (o: Json): Json => {
+    const { required, options, ...rest } = o;
+    return {
+      ...rest,
+      ...(required ? { required } : {}),
+      ...(Array.isArray(options) && options.length > 0 ? { options: options.map(option) } : {}),
+    };
+  };
+  return [...body].reverse().map((command, index) => {
+    const { options, default_member_permissions, ...rest } = command as Json;
+    return {
+      id: `15687047703849945${index}`,
+      application_id: CLIENT,
+      version: "1",
+      default_member_permissions: default_member_permissions ?? null,
+      dm_permission: true,
+      nsfw: false,
+      ...(scope === "guild" ? { integration_types: [0], contexts: null } : {}),
+      ...rest,
+      ...(Array.isArray(options) && options.length > 0 ? { options: options.map(option) } : {}),
+    };
+  });
+}
+
+describe("sameCommands", () => {
+  for (const scope of ["guild", "global"] as const) {
+    test(`matches what Discord returns for the same ${scope} set`, () => {
+      const local = buildDeployBody(
+        scope === "guild" ? { scope, guildId: GUILD, clear: false } : { scope, clear: false },
+      );
+      expect(sameCommands(local, asDiscordReturnsIt(local, scope), scope)).toBe(true);
+    });
+  }
+
+  test("sees a changed description, a new option, new contexts and a removed command", () => {
+    const local = buildDeployBody({ scope: "global", clear: false });
+    const remote = () => asDiscordReturnsIt(local, "global");
+    const edit = (change: (commands: Json[]) => void) => {
+      const commands = remote();
+      change(commands);
+      return sameCommands(local, commands, "global");
+    };
+    const ping = (commands: Json[]) => commands.find((c) => c.name === "ping") as Json;
+    expect(
+      edit((c) => {
+        ping(c).description = "old text";
+      }),
+    ).toBe(false);
+    expect(
+      edit((c) => {
+        ping(c).options = [{ type: 3, name: "x", description: "x" }];
+      }),
+    ).toBe(false);
+    expect(
+      edit((c) => {
+        ping(c).contexts = [0];
+      }),
+    ).toBe(false);
+    expect(edit((c) => void c.pop())).toBe(false);
+    expect(sameCommands(local, [], "global")).toBe(local.length === 0);
+  });
+});
+
+describe("deployOnStartup", () => {
+  function fakeRest(remote: unknown, fail?: "get" | "put") {
+    const calls: string[] = [];
+    return {
+      calls,
+      async get(route: `/${string}`) {
+        calls.push(`GET ${route}`);
+        if (fail === "get") throw new Error("Missing Access");
+        return remote;
+      },
+      async put(route: `/${string}`, _options: { body: unknown }) {
+        calls.push(`PUT ${route}`);
+        if (fail === "put") throw new Error("Missing Access");
+        return [];
+      },
+    };
+  }
+  const registry = createDeployRegistry();
+  const guildRoute = `/applications/${CLIENT}/guilds/${GUILD}/commands`;
+  const globalRoute = `/applications/${CLIENT}/commands`;
+  const guildBody = buildDeployBody({ scope: "guild", guildId: GUILD, clear: false }, registry);
+
+  test("sends nothing when the dev guild already has the set", async () => {
+    const rest = fakeRest(asDiscordReturnsIt(guildBody, "guild"));
+    await deployOnStartup({
+      rest,
+      clientId: CLIENT,
+      devGuildId: GUILD,
+      registry,
+      logger: silentLogger,
+    });
+    expect(rest.calls).toEqual([`GET ${guildRoute}`]);
+  });
+
+  test("puts the set when it differs, in the dev guild or globally like the manual script", async () => {
+    const guild = fakeRest([]);
+    await deployOnStartup({
+      rest: guild,
+      clientId: CLIENT,
+      devGuildId: GUILD,
+      registry,
+      logger: silentLogger,
+    });
+    expect(guild.calls).toEqual([`GET ${guildRoute}`, `PUT ${guildRoute}`]);
+    const global = fakeRest(asDiscordReturnsIt(guildBody, "guild"));
+    await deployOnStartup({
+      rest: global,
+      clientId: CLIENT,
+      devGuildId: undefined,
+      registry,
+      logger: silentLogger,
+    });
+    // A guild-shaped set lacks contexts and integration types, so the global one differs.
+    expect(global.calls).toEqual([`GET ${globalRoute}`, `PUT ${globalRoute}`]);
+  });
+
+  test("logs a failed read or write instead of throwing", async () => {
+    for (const fail of ["get", "put"] as const) {
+      const errors: string[] = [];
+      const logger = { ...silentLogger, error: (message: string) => void errors.push(message) };
+      await deployOnStartup({
+        rest: fakeRest([], fail),
+        clientId: CLIENT,
+        devGuildId: GUILD,
+        registry,
+        logger,
+      });
+      expect(errors).toEqual(["Deploying slash commands failed"]);
+    }
+  });
+
+  test("COMMANDS_AUTO_DEPLOY is on unless switched off", () => {
+    const env = {
+      ...base,
+      DATABASE_URL: "postgres://u:p@localhost:5432/db",
+      REDIS_URL: "redis://localhost:6379",
+    };
+    expect(loadEnv(env).COMMANDS_AUTO_DEPLOY).toBe(true);
+    expect(loadEnv({ ...env, COMMANDS_AUTO_DEPLOY: "" }).COMMANDS_AUTO_DEPLOY).toBe(true);
+    expect(loadEnv({ ...env, COMMANDS_AUTO_DEPLOY: "true" }).COMMANDS_AUTO_DEPLOY).toBe(true);
+    expect(loadEnv({ ...env, COMMANDS_AUTO_DEPLOY: "0" }).COMMANDS_AUTO_DEPLOY).toBe(false);
+    expect(loadEnv({ ...env, COMMANDS_AUTO_DEPLOY: "false" }).COMMANDS_AUTO_DEPLOY).toBe(false);
   });
 });
