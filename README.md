@@ -39,7 +39,8 @@ modules/
   welcome/          welcome (set through a form, off, test), greets new members
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, block, hide, show), a voice channel per member who joins the party area
   status/           rotates the bot's activity (the old bot's song)
-  …                 music, moderation, fun (see the board)
+  music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), a now playing panel with buttons
+  …                 moderation, fun (see the board)
 infra/              docker-compose: Postgres, Redis, Lavalink and yt-cipher (profile "music")
 scripts/            git hooks and GitHub automation (Bun scripts)
 docs/               design doc and ADRs
@@ -57,8 +58,7 @@ bun install                       # also installs the git hooks
 cp .env.example .env              # fill in DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_DEV_GUILD_ID
 bun run infra:up                  # Postgres :5432, Redis :6379
 bun run db:migrate
-bun run commands:deploy           # register slash commands (dev guild: instant)
-bun run dev                       # the bot, restarted on file changes
+bun run dev                       # the bot, restarted on file changes; registers its slash commands
 ```
 
 The party module needs these permissions for the bot in the server: **Manage Channels** (create, rename and
@@ -70,19 +70,23 @@ channel, where the bot needs **Send Messages** and **Embed Links** (the panel), 
 there after 15 seconds; without it the panel still works and the chat is just not cleaned.
 
 The music module needs Lavalink as well:
-`docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d` (port 2333). The profile
-also starts yt-cipher, which deciphers YouTube stream signatures for Lavalink (ADR 4).
+`docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d` (port 2333), with
+`LAVALINK_URL` and `LAVALINK_PASSWORD` in `.env`. The profile also starts yt-cipher, which deciphers
+YouTube stream signatures for Lavalink (ADR 4). Both variables are optional: without them, or while the node is
+down, the bot runs normally and music commands answer that the player is unavailable. In the voice channel
+the bot needs **Connect** and **Speak**, and **Send Messages** and **Embed Links** in the text channel where
+music was started (the now playing panel).
 
 ## Scripts
 
-| Command                       | What it does                                                             |
-| ----------------------------- | ------------------------------------------------------------------------ |
-| `bun run dev`                 | bot in watch mode                                                        |
-| `bun run start`               | bot without watch                                                        |
-| `bun run commands:deploy`     | register slash commands (in `DISCORD_DEV_GUILD_ID`, or globally)         |
-| `bun run check` / `check:fix` | Biome lint + format                                                      |
-| `bun run typecheck`           | `tsc` for the scripts and every workspace                                |
-| `bun test`                    | all tests (DB / Redis tests need `TEST_DATABASE_URL` / `TEST_REDIS_URL`) |
-| `bun run db:new <name>`       | new empty migration `packages/db/migrations/NNNN_<name>.sql`             |
-| `bun run db:migrate`          | apply migrations                                                         |
-| `bun run infra:up` / `down`   | start / stop the local services                                          |
+| Command                       | What it does                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------- |
+| `bun run dev`                 | bot in watch mode                                                                     |
+| `bun run start`               | bot without watch                                                                     |
+| `bun run commands:deploy`     | register slash commands without starting the bot (optional: the bot does it on start) |
+| `bun run check` / `check:fix` | Biome lint + format                                                                   |
+| `bun run typecheck`           | `tsc` for the scripts and every workspace                                             |
+| `bun test`                    | all tests (DB / Redis tests need `TEST_DATABASE_URL` / `TEST_REDIS_URL`)              |
+| `bun run db:new <name>`       | new empty migration `packages/db/migrations/NNNN_<name>.sql`                          |
+| `bun run db:migrate`          | apply migrations                                                                      |
+| `bun run infra:up` / `down`   | start / stop the local services                                                       |

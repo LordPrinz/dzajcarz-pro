@@ -11,8 +11,10 @@ import { createRedisStore, keepConnected } from "@dzajcarz/kv";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
+import { deployOnStartup } from "./deploy.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
+import { createPanelMessages, createVoiceChannels } from "./discord/music.ts";
 import { createPartyChannels, createPartyChat, createPartyPermissions } from "./discord/party.ts";
 import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
@@ -22,6 +24,8 @@ import { createModuleEnabled } from "./event-scope.ts";
 import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
 import { createModules } from "./modules.ts";
+import { createLavalinkMusicPlayer } from "./music/lavalink.ts";
+import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
 import { createPrefixResolver } from "./prefix-resolver.ts";
 import { createPrefixSettings } from "./prefix-settings.ts";
 
@@ -65,6 +69,18 @@ const client = new Client({
   allowedMentions: NO_MENTIONS,
 });
 
+// Without a configured node the module still loads, so its commands explain that music is unavailable.
+const musicPlayer =
+  env.LAVALINK_URL && env.LAVALINK_PASSWORD
+    ? createLavalinkMusicPlayer({
+        client,
+        url: env.LAVALINK_URL,
+        password: env.LAVALINK_PASSWORD,
+        logger: logger.child({ component: "lavalink" }),
+      })
+    : createUnavailableMusicPlayer();
+if (!env.LAVALINK_URL) logger.info("LAVALINK_URL is not set; music is off");
+
 const botInGuild = (guildId: string) => client.guilds.cache.has(guildId);
 
 const modules = createModules({
@@ -91,6 +107,10 @@ const modules = createModules({
   partyLock: createRedisStore(redis),
   presence: createPresence(client),
   clock: createClock(),
+  musicPlayer,
+  voiceChannels: createVoiceChannels(client),
+  musicPanels: createPanelMessages(client),
+  componentState: createRedisStore(redis),
   logger,
 });
 const registry = createRegistry(modules);
@@ -102,6 +122,16 @@ client.once(Events.ClientReady, (ready) => {
     guilds: ready.guilds.cache.size,
     commands: registry.commands().length,
   });
+  if (env.COMMANDS_AUTO_DEPLOY) {
+    void deployOnStartup({
+      rest: client.rest,
+      clientId: env.DISCORD_CLIENT_ID,
+      devGuildId: env.DISCORD_DEV_GUILD_ID,
+      global: env.DEPLOY_GLOBAL,
+      registry,
+      logger: logger.child({ component: "deploy" }),
+    });
+  }
 });
 // A rejected promise nobody awaited (a failed Discord call in a listener) is logged, not fatal.
 process.on("unhandledRejection", (reason) =>
@@ -121,6 +151,10 @@ async function shutdown(signal: string): Promise<void> {
       logger.error("Module dispose failed", { module: module.name, error });
     }
   }
+  // After the music module removed its panels: leave voice and close the node connection.
+  await musicPlayer
+    .destroy()
+    .catch((error: unknown) => logger.error("Music player shutdown failed", { error }));
   await client.destroy();
   redis.close();
   await sql.close();

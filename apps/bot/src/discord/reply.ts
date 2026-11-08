@@ -19,7 +19,9 @@ export function toReplyPayload(reply: Reply): ReplyPayload {
     content: reply.content,
     embeds: (reply.embeds ?? []).map((embed) => ({
       title: embed.title,
+      url: embed.url,
       description: embed.description,
+      thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined,
       color: embed.color,
       fields: embed.fields,
       footer: embed.footer ? { text: embed.footer } : undefined,

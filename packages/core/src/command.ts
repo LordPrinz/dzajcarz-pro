@@ -64,7 +64,11 @@ export interface EmbedField {
 /** The subset of a Discord embed modules use; the adapter maps it to discord.js. */
 export interface Embed {
   title?: string;
+  /** Makes the title a link; http(s) only. */
+  url?: string;
   description?: string;
+  /** Image URL shown in the top right corner (http(s)). */
+  thumbnail?: string;
   /** 0xRRGGBB */
   color?: number;
   fields?: EmbedField[];
