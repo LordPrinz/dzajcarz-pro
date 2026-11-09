@@ -33,15 +33,15 @@ services:
       lavalink:
         condition: service_started
     environment:
-      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env.production}
-      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID in .env.production}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID in .env}
       # No DISCORD_DEV_GUILD_ID on purpose: the startup deploy then registers the commands globally,
       # and only when they differ from what Discord has.
       COMMANDS_AUTO_DEPLOY: "true"
-      DATABASE_URL: postgres://dzajcarz:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}@postgres:5432/dzajcarz
-      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
+      DATABASE_URL: postgres://dzajcarz:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/dzajcarz
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
       LAVALINK_URL: http://lavalink:2333
-      LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env.production}
+      LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env}
       BOT_PREFIX: ${BOT_PREFIX:-!}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RIOT_API_KEY: ${RIOT_API_KEY:-}
@@ -67,7 +67,7 @@ services:
     networks: [data]
     environment:
       POSTGRES_USER: dzajcarz
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: dzajcarz
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -96,7 +96,7 @@ services:
         --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     environment:
       # Read by the command above and by redis-cli in the health check.
-      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
     tmpfs:
       - /tmp:mode=0755,size=1m
     volumes:
@@ -160,7 +160,7 @@ services:
       yt-cipher:
         condition: service_started
     environment:
-      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env.production}
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env}
       _JAVA_OPTIONS: -Xmx512M
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro

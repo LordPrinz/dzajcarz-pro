@@ -8,7 +8,7 @@ Lavalink 4.2.2 and yt-cipher run next to it as separate services. Music is alway
 Nothing is published to the network except the health endpoint, which compose always binds to
 `127.0.0.1:<HEALTH_PUBLISH_PORT>` (default 8080) on the host, never to a public address. The services find
 each other by name, and compose builds `DATABASE_URL`, `REDIS_URL` and `LAVALINK_URL` from the passwords in
-`.env.production`. Postgres and Redis sit on an internal network with no route out; Lavalink and yt-cipher
+`.env`. Postgres and Redis sit on an internal network with no route out; Lavalink and yt-cipher
 on one that reaches the internet. The bot is on both and reaches Discord through the second. The Postgres,
 Redis and Lavalink images are pinned by digest, and Lavalink and yt-cipher run read-only with every
 capability dropped. Redis reads its password from a config file on a tmpfs, so it shows up neither in `ps`
@@ -26,7 +26,7 @@ in `~/.bashrc`) and use it instead; it does what the scripts do:
 ```bash
 prod() {
   BOT_REVISION=$(git rev-parse --short HEAD) \
-    docker compose --env-file .env.production -f infra/docker-compose.prod.yml "$@"
+    docker compose --env-file .env -f infra/docker-compose.prod.yml "$@"
 }
 ```
 
@@ -52,10 +52,17 @@ of this repository: the image is built from it, and Lavalink mounts `infra/laval
 
 ```bash
 git clone git@github.com:LordPrinz/dzajcarz-pro.git dzajcarz && cd dzajcarz   # v5 is the default branch
-cp .env.production.example .env.production && chmod 600 .env.production
+cp .env.example .env && chmod 600 .env
 # fill in DISCORD_TOKEN, DISCORD_CLIENT_ID and the three passwords (openssl rand -hex 32 for each)
 bun run prod:up
 ```
+
+Production reads the same `.env` as local development, but only the values the bot needs on a server: the
+token, the client id, the three passwords, `BOT_PREFIX`, `RIOT_API_KEY`, `LOG_LEVEL`, the scheduled song
+settings and `HEALTH_PUBLISH_PORT`. Compose passes each one to the bot by name, so `DATABASE_URL`,
+`REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID` and the `TEST_*` URLs in the file never reach the
+production container. Without a dev guild the bot deploys its slash commands globally. The production stack
+is a separate compose project with its own volumes, so it does not share data with `bun run infra:up`.
 
 The passwords end up inside `DATABASE_URL` and `REDIS_URL`. The bot refuses to start when one of them breaks
 the URL (an unencoded `@`, `/`, `?` or `#`), so stick to hex passwords. The first start of Lavalink downloads
@@ -67,7 +74,7 @@ prod exec lavalink sha256sum /opt/Lavalink/plugins/*.jar
 ```
 
 `POSTGRES_PASSWORD` only takes effect when the `postgres-data` volume is first created. To change it later,
-change it in the database first, then in `.env.production`, then run `bun run prod:up`:
+change it in the database first, then in `.env`, then run `bun run prod:up`:
 
 ```bash
 prod exec postgres psql -U dzajcarz -c "ALTER USER dzajcarz PASSWORD '<new hex password>'"
@@ -151,4 +158,4 @@ The data lives in the `dzajcarz-prod_postgres-data` volume. `prod:down` keeps it
 ## Logs and disk
 
 Every service uses Docker's `json-file` log driver capped at five 10 MB files, so logs cannot fill the
-disk. `LOG_LEVEL=debug` in `.env.production` and another `bun run prod:up` make the bot more talkative.
+disk. `LOG_LEVEL=debug` in `.env` and another `bun run prod:up` make the bot more talkative.
