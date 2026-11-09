@@ -1,0 +1,148 @@
+# Production: the bot image plus Postgres, Redis, Lavalink and yt-cipher. See docs/DEPLOYMENT.md.
+#   docker compose --env-file .env.production -f infra/docker-compose.prod.yml up -d --build
+# Nothing is published except the bot's health endpoint on 127.0.0.1. The services reach each other by
+# name over the project network, so the bot's connection URLs are built here, not in the env file.
+name: dzajcarz-prod
+
+# Docker's default json-file log never rotates; the bot logs a JSON line per event.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+services:
+  bot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    # Tag each release (BOT_TAG=$(git rev-parse --short HEAD)) so a rollback is starting the previous tag.
+    image: dzajcarz-bot:${BOT_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # Not healthy: the bot starts without the node and reconnects, music commands say it is unavailable.
+      lavalink:
+        condition: service_started
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env.production}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID in .env.production}
+      # No DISCORD_DEV_GUILD_ID on purpose: the startup deploy then registers the commands globally,
+      # and only when they differ from what Discord has.
+      COMMANDS_AUTO_DEPLOY: "true"
+      DATABASE_URL: postgres://dzajcarz:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}@postgres:5432/dzajcarz
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
+      LAVALINK_URL: http://lavalink:2333
+      LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env.production}
+      BOT_PREFIX: ${BOT_PREFIX:-!}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RIOT_API_KEY: ${RIOT_API_KEY:-}
+      SCHEDULED_SONG_CRON: ${SCHEDULED_SONG_CRON:-0 9,21 * * *}
+      SCHEDULED_SONG_TIMEZONE: ${SCHEDULED_SONG_TIMEZONE:-Europe/Warsaw}
+    ports:
+      - "127.0.0.1:${HEALTH_PUBLISH_PORT:-8080}:8080"
+    # The binary writes nothing to disk.
+    read_only: true
+    tmpfs:
+      - /tmp:uid=65532,gid=65532,mode=0700,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    # Time for the shutdown: panels removed, voice left, connections closed.
+    stop_grace_period: 30s
+    logging: *logging
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dzajcarz
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: dzajcarz
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dzajcarz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  # Caches, cooldowns and other state that may be lost (ADR 0003).
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}",
+        "--appendonly",
+        "yes",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  # Music is always on in production (no profile): the scheduled songs need it too.
+  # Docker creates the plugins volume owned by root and Lavalink (uid 322) cannot download the YouTube
+  # plugin into it, so this one-shot step fixes the ownership first.
+  lavalink-plugins-init:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    user: "0"
+    entrypoint: ["chown", "322", "/opt/Lavalink/plugins"]
+    volumes:
+      - lavalink-plugins:/opt/Lavalink/plugins
+    logging: *logging
+
+  # Deciphers YouTube stream signatures for the youtube-plugin (ADR 0004). Pinned by digest: upstream only
+  # publishes a moving `master` tag. Same hardening as in the development compose.
+  yt-cipher:
+    image: ghcr.io/kikkia/yt-cipher@sha256:4c5ec381ff57336cfc24822d2b526a5ad7cd0171f61065a1bbc87bb736842449
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /home/nonroot/.cache:uid=65532,gid=65532,mode=0700,size=64m
+      - /tmp:uid=65532,gid=65532,mode=0700,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      OVERRIDE_PLAYER_VARIANT: IAS
+    logging: *logging
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    restart: unless-stopped
+    depends_on:
+      lavalink-plugins-init:
+        condition: service_completed_successfully
+      yt-cipher:
+        condition: service_started
+    environment:
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env.production}
+      _JAVA_OPTIONS: -Xmx512M
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      # The scheduled songs (ADR 0004), played by a fixed name, never by member input.
+      - ./lavalink/music:/opt/Lavalink/music:ro
+      - lavalink-plugins:/opt/Lavalink/plugins
+    logging: *logging
+
+volumes:
+  postgres-data:
+  redis-data:
+  lavalink-plugins:

@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
+import { MIGRATIONS } from "./migrations.ts";
 import { migrate } from "./migrator.ts";
 
 // Integration test: runs only when a disposable database is available (CI provides one).
@@ -39,5 +40,20 @@ describe.skipIf(!sql)("migrator", () => {
       "schema_migrations",
       "welcome_config",
     ]);
+  });
+
+  test("applies each migration once when two callers race", async () => {
+    const raceSchema = `${schema}_race`;
+    await (sql as SQL).unsafe(`CREATE SCHEMA ${raceSchema}`);
+    const pool = new SQL({ url, max: 2, connection: { search_path: raceSchema } });
+    try {
+      const [first, second] = await Promise.all([migrate(pool), migrate(pool)]);
+      expect([...(first ?? []), ...(second ?? [])].sort()).toEqual(
+        MIGRATIONS.map((migration) => migration.name),
+      );
+    } finally {
+      await pool.close();
+      await (sql as SQL).unsafe(`DROP SCHEMA IF EXISTS ${raceSchema} CASCADE`);
+    }
   });
 });

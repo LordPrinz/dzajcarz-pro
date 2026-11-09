@@ -16,6 +16,7 @@ import {
   createScheduledSongRepository,
   createWelcomeRepository,
 } from "@dzajcarz/db";
+import { migrate } from "@dzajcarz/db/migrator";
 import { createRedisStore, keepConnected } from "@dzajcarz/kv";
 import { DZAJCO_GIF } from "@dzajcarz/module-dzajco";
 import { RedisClient } from "bun";
@@ -60,6 +61,15 @@ const env = loadEnv();
 const logger = createJsonLogger({ level: env.LOG_LEVEL });
 
 const sql = createDb(env.DATABASE_URL);
+// Before anything touches the schema. A failed migration exits non-zero, so the bot never logs in on a
+// half-migrated database and the container's restart policy retries it.
+try {
+  const applied = await migrate(sql);
+  logger.info(applied.length ? "Applied migrations" : "Database is up to date", { applied });
+} catch (error) {
+  logger.error("Migration failed", { error });
+  process.exit(1);
+}
 const redis = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
 keepConnected(redis);
 

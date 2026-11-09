@@ -18,6 +18,14 @@ updates:
     commit-message:
       prefix: "[DZAJ-3] build"
       include: scope
+  # The base images of the bot's Dockerfile.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "[DZAJ-3] build"
+      include: scope
   - package-ecosystem: docker-compose
     directory: /infra
     schedule:

@@ -9,6 +9,7 @@ branches and are kept as history only.
 
 - **Architecture & decisions:** [docs/DESIGN.md](docs/DESIGN.md)
 - **Workflow & conventions:** [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Production & releases:** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - **Wiki:** generated from these docs on every merge to `v5` ([`wiki.yml`](.github/workflows/wiki.yml)); edit the files in this repository, not the wiki
 - **Board:** GitHub Projects → _Dzajcarz_ (private)
 
@@ -47,7 +48,8 @@ modules/
   music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), loop, shuffle, seek, volume, filter, remove, jump, back, clear, save (sv), a now playing panel with buttons
   riot/             valorant, lol (player stats from the Riot API, needs RIOT_API_KEY)
   …                 moderation, fun (see the board)
-infra/              docker-compose: Postgres, Redis, Lavalink and yt-cipher (profile "music")
+infra/              docker-compose: Postgres, Redis, Lavalink and yt-cipher (profile "music"); the production compose
+Dockerfile          the bot compiled into one binary (docs/DEPLOYMENT.md)
 scripts/            git hooks and GitHub automation (Bun scripts)
 docs/               design doc and ADRs
 ```
@@ -63,8 +65,7 @@ Requirements: Bun ≥ 1.4.4, Docker, a Discord application with a bot user
 bun install                       # also installs the git hooks
 cp .env.example .env              # fill in DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_DEV_GUILD_ID
 bun run infra:up                  # Postgres :5432, Redis :6379
-bun run db:migrate
-bun run dev                       # the bot, restarted on file changes; registers its slash commands
+bun run dev                       # the bot, restarted on file changes; migrates and registers its slash commands
 ```
 
 The party module needs these permissions for the bot in the server: **Manage Channels** (create, rename and
@@ -96,14 +97,17 @@ history needs a production key (ADR 8).
 
 ## Scripts
 
-| Command                       | What it does                                                                          |
-| ----------------------------- | ------------------------------------------------------------------------------------- |
-| `bun run dev`                 | bot in watch mode                                                                     |
-| `bun run start`               | bot without watch                                                                     |
-| `bun run commands:deploy`     | register slash commands without starting the bot (optional: the bot does it on start) |
-| `bun run check` / `check:fix` | Biome lint + format                                                                   |
-| `bun run typecheck`           | `tsc` for the scripts and every workspace                                             |
-| `bun test`                    | all tests (DB / Redis tests need `TEST_DATABASE_URL` / `TEST_REDIS_URL`)              |
-| `bun run db:new <name>`       | new empty migration `packages/db/migrations/NNNN_<name>.sql`                          |
-| `bun run db:migrate`          | apply migrations                                                                      |
-| `bun run infra:up` / `down`   | start / stop the local services                                                       |
+| Command                       | What it does                                                                                             |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `bun run dev`                 | bot in watch mode                                                                                        |
+| `bun run start`               | bot without watch                                                                                        |
+| `bun run commands:deploy`     | register slash commands without starting the bot (optional: the bot does it on start)                    |
+| `bun run check` / `check:fix` | Biome lint + format                                                                                      |
+| `bun run typecheck`           | `tsc` for the scripts and every workspace                                                                |
+| `bun test`                    | all tests (DB / Redis tests need `TEST_DATABASE_URL` / `TEST_REDIS_URL`)                                 |
+| `bun run db:new <name>`       | new empty migration `packages/db/migrations/NNNN_<name>.sql`; list it in `packages/db/src/migrations.ts` |
+| `bun run db:migrate`          | apply migrations without starting the bot (optional: the bot does it on start)                           |
+| `bun run infra:up` / `down`   | start / stop the local services                                                                          |
+| `bun run docker:build`        | build the production image `dzajcarz-bot`                                                                |
+| `bun run prod:up` / `down`    | start / stop production from `.env.production` ([deployment](docs/DEPLOYMENT.md))                        |
+| `bun run prod:logs`           | follow the production bot's log                                                                          |

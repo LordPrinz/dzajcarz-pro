@@ -149,6 +149,20 @@ does a port that is already taken (a warning is logged and the bot keeps running
 `http://127.0.0.1:$HEALTH_PORT/health` and exits `0` on a `200` and `1` otherwise (also when
 `HEALTH_PORT=0`). It reads only `HEALTH_PORT`, so it works without the bot's secrets.
 
+### Migrations and the compiled binary
+
+Production runs the bot as one binary from `bun build --compile` ([deployment](DEPLOYMENT.md)). Such a binary
+has no `migrations/` directory to scan, so `packages/db/src/migrations.ts` imports every `.sql` file as text
+(`with { type: "text" }`) and the bundler embeds them. A test fails when a file in `migrations/` is missing
+from that list or its embedded text differs from the file, because the checksum in `schema_migrations` has
+to match byte for byte.
+
+The bot applies pending migrations at startup, before it touches the database or logs in, and exits with
+code 1 when one fails. A separate migration step or container would add a moving part for a deployment of
+one bot. `migrate` holds a Postgres advisory lock on one connection while it runs, so a second caller (a
+restarted container that overlaps the old one, or `db:migrate` by hand) waits instead of applying the same
+file twice.
+
 ### Prefix per guild
 
 The prefix is stored in `guild_settings.prefix` (null means the default from `BOT_PREFIX`) and cached in
