@@ -16,6 +16,7 @@ import {
   type PartyPermissions,
   type PartyRepository,
 } from "@dzajcarz/module-party";
+import { createRiotModule, type RiotStats } from "@dzajcarz/module-riot";
 import {
   createScheduleModule,
   type ScheduledSong,
@@ -73,6 +74,9 @@ export interface ModuleServices {
   scheduledSongPlayer: ScheduledSongPlayer;
   scheduledSongs: readonly [ScheduledSong, ...ScheduledSong[]];
   scheduledSongCron: { expression: string; timeZone: string };
+  // riot
+  riotStats: RiotStats | null;
+  riotStore: KeyValueStore;
   logger: Logger;
 }
 
@@ -127,6 +131,12 @@ export function createModules(services: ModuleServices): BotModule[] {
       presence: services.presence,
       clock: services.clock,
       logger: services.logger.child({ module: "status" }),
+    }),
+    createRiotModule({
+      stats: services.riotStats,
+      store: services.riotStore,
+      now: Date.now,
+      logger: services.logger.child({ module: "riot" }),
     }),
   ];
 }

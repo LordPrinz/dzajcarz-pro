@@ -307,6 +307,8 @@ export const createDeployRegistry = () =>
       scheduledSongPlayer: unusedServices(),
       scheduledSongs: SCHEDULED_SONGS,
       scheduledSongCron: { expression: "0 9,21 * * *", timeZone: "Europe/Warsaw" },
+      riotStats: null,
+      riotStore: unusedServices(),
       logger: silentLogger,
     }),
   );

@@ -27,6 +27,10 @@ services:
         "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}",
         "--appendonly",
         "yes",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
       ]
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}

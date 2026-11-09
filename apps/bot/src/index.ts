@@ -42,6 +42,7 @@ import { SCHEDULED_SONGS } from "./music/scheduled-songs.ts";
 import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
 import { createPrefixResolver } from "./prefix-resolver.ts";
 import { createPrefixSettings } from "./prefix-settings.ts";
+import { createRiotStats } from "./riot/stats.ts";
 
 const env = loadEnv();
 const logger = createJsonLogger({ level: env.LOG_LEVEL });
@@ -95,6 +96,17 @@ const musicPlayer =
     : createUnavailableMusicPlayer();
 if (!env.LAVALINK_URL) logger.info("LAVALINK_URL is not set; music is off");
 
+// Without a key the module still loads, so its commands explain that Riot stats are off.
+const riotStore = createRedisStore(redis);
+const riotStats = env.RIOT_API_KEY
+  ? createRiotStats({
+      apiKey: env.RIOT_API_KEY,
+      cache: riotStore,
+      logger: logger.child({ component: "riot" }),
+    })
+  : null;
+if (!env.RIOT_API_KEY) logger.info("RIOT_API_KEY is not set; Riot stats are off");
+
 const botInGuild = (guildId: string) => client.guilds.cache.has(guildId);
 
 const modules = createModules({
@@ -133,6 +145,8 @@ const modules = createModules({
   scheduledSongPlayer: createScheduledSongPlayer(musicPlayer),
   scheduledSongs: SCHEDULED_SONGS,
   scheduledSongCron: { expression: env.SCHEDULED_SONG_CRON, timeZone: env.SCHEDULED_SONG_TIMEZONE },
+  riotStats,
+  riotStore,
   logger,
 });
 const registry = createRegistry(modules);

@@ -489,6 +489,43 @@ the node went away, or plays the next one when that position is past the track's
 when nothing is next). A player that cannot be brought back is destroyed. Shutdown removes the panels (module `dispose`), then
 destroys the players and the node connection before the Discord client.
 
+### Riot stats
+
+`modules/riot` has `/valorant <riot_id>` and `/lol <riot_id> [region]`, both usable everywhere like `/help`.
+The module talks to a `RiotStats` port (`valorant(id)`, `lol(id, platform)`) and a small
+`KeyValueStore` slice; `apps/bot/src/riot/` implements the port (clients: ADR 8). Without `RIOT_API_KEY` the
+port is `null` and both commands answer that stats are off.
+
+- **Input.** `Name#TAG` is split on the last `#`: name 3 to 16 characters, tag 3 to 5 letters or digits.
+  `/valorant` takes the rest of the line, so the name may hold spaces; `/lol` quotes such a name in the
+  prefix form (`!lol "Nazwa ze spacją#TAG" euw`). Every path segment sent to Riot goes through
+  `encodeURIComponent`, and names from Riot are markdown-escaped before they reach an embed.
+- **Routing.** Account-v1 always uses `europe`, which serves every Riot account. The Valorant shard comes
+  from `active-shards`; the League platform is the `region` option (`eun1` by default).
+- **Cache.** Only the projection the bot uses (validated fields, the newest five matches, Polish names) lives
+  in Redis for the TTLs below, never a raw response. A cache that fails or holds an entry that no longer
+  parses only costs a request. Redis runs with `--maxmemory 256mb --maxmemory-policy allkeys-lru`: it holds
+  only state that can be lost (ADR 3), so evicting a cache entry is always safe.
+
+  | Data                                           | TTL   |
+  | ---------------------------------------------- | ----- |
+  | Account, Valorant active shard                 | 1 h   |
+  | Valorant match, content, Data Dragon           | 24 h  |
+  | Valorant matchlist, summoner, entries, mastery | 5 min |
+
+- **Rate limits.** A budget of 30 lookups per minute for all users together (`riot:global`, a fixed window)
+  answers "za chwilę" when spent. A per-user cooldown (`riot:user:<id>`, 10 s) comes after the shared pause check, so a
+  blocked user does not use it up. A 429 stores the deadline `now + Retry-After` (10 s without the header or with a zero one, at most 120 s)
+  as the value of `riot:retry-after`, with the same duration as its TTL; until then every lookup answers
+  "Spróbuj za N s" without calling Riot.
+- **Errors.** 404 is "not found", 401 and 403 are "the key has no access", 429 is the pause above, and
+  timeouts, 5xx and malformed answers are "Riot does not respond". A development key gets a 403 on
+  `val/match/v1`, so `/valorant` with one answers that match history needs a production key; `/lol` says the
+  key expired or has no access. One Valorant match that fails or has an unexpected shape is dropped from the
+  list instead of failing the command.
+- **Valorant profile.** The five newest matches, each with result, map, agent and K/D/A; the rank is the tier of
+  the newest competitive match among them. A player with no matches gets "Brak ostatnich meczów."
+
 ## Testing
 
 - `core` and modules: unit tests with `createFakeContext`, no Discord connection.
