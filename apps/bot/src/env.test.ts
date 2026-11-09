@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadEnv } from "./env.ts";
+import { credentialsIntact, Env, loadEnv } from "./env.ts";
 
 const REQUIRED = {
   DISCORD_TOKEN: "t".repeat(60),
@@ -35,5 +35,54 @@ describe("health endpoint", () => {
 
   test("port 0 disables the endpoint", () => {
     expect(loadEnv({ ...REQUIRED, HEALTH_PORT: "0" }).HEALTH_PORT).toBe(0);
+  });
+});
+
+describe("connection URLs", () => {
+  const issues = (overrides: Record<string, string>) => {
+    const parsed = Env.safeParse({ ...REQUIRED, ...overrides });
+    return parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
+  };
+  const BROKEN = /URL-safe password such as `openssl rand -hex 32`/;
+
+  test("accept a hex password and a URL without credentials", () => {
+    expect(
+      issues({
+        DATABASE_URL: "postgres://dzajcarz:0a1b2c3d@postgres:5432/dzajcarz",
+        REDIS_URL: "redis://:9f8e7d@redis:6379/0",
+      }),
+    ).toEqual([]);
+    expect(issues({ REDIS_URL: "redis://localhost:6379" })).toEqual([]);
+  });
+
+  test("accept a percent-encoded password", () => {
+    expect(issues({ DATABASE_URL: "postgres://u:p%40ss%2Fw%23rd@db:5432/db" })).toEqual([]);
+  });
+
+  test.each(["p@ss", "p/ss", "p?ss", "p#ss"])(
+    "reject an unencoded %s in the password",
+    (password) => {
+      const messages = issues({ DATABASE_URL: `postgres://u:${password}@db:5432/db` });
+      expect(messages.some((message) => BROKEN.test(message))).toBe(true);
+    },
+  );
+
+  test("reject an empty password, e.g. from an unset variable", () => {
+    const messages = issues({ REDIS_URL: "redis://:@redis:6379/0" });
+    expect(messages.some((message) => BROKEN.test(message))).toBe(true);
+  });
+
+  test("still check the scheme", () => {
+    expect(issues({ DATABASE_URL: "mysql://u:p@db/db" })).not.toEqual([]);
+  });
+});
+
+describe("credentialsIntact", () => {
+  test("ignores URLs without credentials", () => {
+    expect(credentialsIntact("redis://redis:6379/0")).toBe(true);
+  });
+
+  test("is false when a slash in the password cuts the host part short", () => {
+    expect(credentialsIntact("postgres://u:12/x@db/db")).toBe(false);
   });
 });

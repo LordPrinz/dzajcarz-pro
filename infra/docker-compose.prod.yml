@@ -1,5 +1,5 @@
 # Production: the bot image plus Postgres, Redis, Lavalink and yt-cipher. See docs/DEPLOYMENT.md.
-#   docker compose --env-file .env.production -f infra/docker-compose.prod.yml up -d --build
+#   bun run prod:up
 # Nothing is published except the bot's health endpoint on 127.0.0.1. The services reach each other by
 # name over the project network, so the bot's connection URLs are built here, not in the env file.
 name: dzajcarz-prod
@@ -13,11 +13,14 @@ x-logging: &logging
 
 services:
   bot:
+    # The deployed version is the commit checked out next to this file. `bun run prod:*` sets BOT_REVISION
+    # to it, so `docker ps` and the image label show which commit runs.
     build:
       context: ..
       dockerfile: Dockerfile
-    # Tag each release (BOT_TAG=$(git rev-parse --short HEAD)) so a rollback is starting the previous tag.
-    image: dzajcarz-bot:${BOT_TAG:-latest}
+      args:
+        REVISION: ${BOT_REVISION:?run bun run prod:up, or set BOT_REVISION to git rev-parse --short HEAD}
+    image: dzajcarz-bot:${BOT_REVISION:?run bun run prod:up, or set BOT_REVISION to git rev-parse --short HEAD}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -64,7 +67,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dzajcarz"]
+      test: ["CMD-SHELL", "pg_isready -U dzajcarz -d dzajcarz -h 127.0.0.1"]
       interval: 5s
       timeout: 3s
       retries: 10

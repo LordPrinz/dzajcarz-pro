@@ -18,11 +18,19 @@ updates:
     commit-message:
       prefix: "[DZAJ-3] build"
       include: scope
-  # The base images of the bot's Dockerfile.
+  # The base images of the bot's Dockerfile. oven/bun only gets digest refreshes: the Bun version is pinned
+  # in package.json (packageManager, engines, @types/bun) and the CI workflows, and moves everywhere at once,
+  # by hand.
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      - dependency-name: oven/bun
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
     commit-message:
       prefix: "[DZAJ-3] build"
       include: scope

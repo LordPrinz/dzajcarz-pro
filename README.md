@@ -108,6 +108,5 @@ history needs a production key (ADR 8).
 | `bun run db:new <name>`       | new empty migration `packages/db/migrations/NNNN_<name>.sql`; list it in `packages/db/src/migrations.ts` |
 | `bun run db:migrate`          | apply migrations without starting the bot (optional: the bot does it on start)                           |
 | `bun run infra:up` / `down`   | start / stop the local services                                                                          |
-| `bun run docker:build`        | build the production image `dzajcarz-bot`                                                                |
-| `bun run prod:up` / `down`    | start / stop production from `.env.production` ([deployment](docs/DEPLOYMENT.md))                        |
+| `bun run prod:up` / `down`    | build the checked-out commit and start production, or stop it ([deployment](docs/DEPLOYMENT.md))         |
 | `bun run prod:logs`           | follow the production bot's log                                                                          |

@@ -44,18 +44,27 @@ jobs:
         with:
           persist-credentials: false
       - name: Build
-        run: docker build -t dzajcarz-bot:ci .
-      # The binary has to start on the runtime image: with nothing listening, the health check exits 1.
-      - name: Binary runs
+        run: docker build --build-arg REVISION=${{ github.sha }} -t dzajcarz-bot:ci .
+      # The bundle has to load on the runtime image: with valid settings and no network, the bot gets as far
+      # as the first migration and exits 1 with "Migration failed". A broken bundle dies before that line.
+      - name: Binary starts
         run: |
           set +e
-          docker run --rm dzajcarz-bot:ci healthcheck
+          output=$(docker run --rm --network none \
+            -e DISCORD_TOKEN=ci-token-that-is-long-enough-for-the-env-check-0000000000 \
+            -e DISCORD_CLIENT_ID=123456789012345678 \
+            -e DATABASE_URL=postgres://ci:ci@127.0.0.1:1/ci \
+            -e REDIS_URL=redis://127.0.0.1:1/0 \
+            dzajcarz-bot:ci 2>&1)
           status=$?
           set -e
+          echo "$output"
           test "$status" -eq 1
+          grep -q '"msg":"Migration failed"' <<< "$output"
       - name: Production compose is valid
         run: docker compose -f infra/docker-compose.prod.yml config --quiet
         env:
+          BOT_REVISION: ci
           DISCORD_TOKEN: ci
           DISCORD_CLIENT_ID: "0"
           POSTGRES_PASSWORD: ci

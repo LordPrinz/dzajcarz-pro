@@ -18,15 +18,21 @@ export async function migrate(
   migrations: readonly Migration[] = MIGRATIONS,
 ): Promise<string[]> {
   const connection = await sql.reserve();
+  let unlocked = false;
   try {
     await connection`SELECT pg_advisory_lock(${MIGRATION_LOCK})`;
     try {
       return await applyPending(connection, migrations);
     } finally {
-      await connection`SELECT pg_advisory_unlock(${MIGRATION_LOCK})`;
+      // Never throws: a failed unlock must not replace the migration's own error.
+      unlocked = await connection`SELECT pg_advisory_unlock(${MIGRATION_LOCK})`.then(
+        () => true,
+        () => false,
+      );
     }
   } finally {
-    await connection.release();
+    // Closing ends the session, which drops a lock that is still held instead of pooling it.
+    await (unlocked ? connection.release() : connection.close());
   }
 }
 

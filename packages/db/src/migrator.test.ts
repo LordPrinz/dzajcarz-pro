@@ -14,6 +14,31 @@ afterAll(async () => {
   await sql.close();
 });
 
+describe("migrator lock", () => {
+  // A connection whose every query fails, the unlock included, as when the database goes away mid-run.
+  function failingConnection() {
+    const calls: string[] = [];
+    const connection = (strings: TemplateStringsArray) => {
+      const text = strings.join("?");
+      calls.push(text.includes("unlock") ? "unlock" : text.includes("lock") ? "lock" : "query");
+      if (text.includes("CREATE TABLE")) return Promise.reject(new Error("migration failed"));
+      if (text.includes("unlock")) return Promise.reject(new Error("unlock failed"));
+      return Promise.resolve([]);
+    };
+    const reserved = Object.assign(connection, {
+      release: async () => void calls.push("release"),
+      close: async () => void calls.push("close"),
+    });
+    return { sql: { reserve: async () => reserved } as unknown as SQL, calls };
+  }
+
+  test("a failed unlock keeps the migration's error and closes the connection", async () => {
+    const { sql: failing, calls } = failingConnection();
+    await expect(migrate(failing)).rejects.toThrow("migration failed");
+    expect(calls).toEqual(["lock", "query", "unlock", "close"]);
+  });
+});
+
 describe.skipIf(!sql)("migrator", () => {
   test("applies all migrations once and is idempotent", async () => {
     const db = sql as SQL;

@@ -123,13 +123,13 @@ command with the same filters; an unknown or hidden name gets the same "not foun
 `UserError` messages go to the caller as they are (Polish). Any other error is logged with the command,
 guild and user, and the caller gets a generic message. Event handlers are wrapped the same way, so one
 failing module cannot take the process down. An unhandled rejection is logged and the process keeps
-running; an uncaught exception is logged and the process exits with code 1, so a supervisor starts a
-clean instance.
+running; an uncaught exception is logged and the process exits with code 1, so the container's restart
+policy starts a clean instance.
 
 ### Health endpoint
 
 The bot serves a small HTTP endpoint (`Bun.serve`) on `HEALTH_HOSTNAME:HEALTH_PORT` (default
-`127.0.0.1:8080`). `HEALTH_PORT=0` turns it off, and so
+`127.0.0.1:8080`; the Docker image sets `HEALTH_HOSTNAME=0.0.0.0`). `HEALTH_PORT=0` turns it off, and so
 does a port that is already taken (a warning is logged and the bot keeps running).
 
 - `GET /health` (readiness) probes the Discord gateway (every shard is ready), Postgres (`select 1`) and
@@ -147,7 +147,10 @@ does a port that is already taken (a warning is logged and the bot keeps running
 
 `bot healthcheck` is a self-check for supervisors without curl: it fetches
 `http://127.0.0.1:$HEALTH_PORT/health` and exits `0` on a `200` and `1` otherwise (also when
-`HEALTH_PORT=0`). It reads only `HEALTH_PORT`, so it works without the bot's secrets.
+`HEALTH_PORT=0`). It reads only `HEALTH_PORT`, so it works without the bot's secrets. The Docker
+`HEALTHCHECK` runs `bot healthcheck`, so `docker ps` shows the container as unhealthy while a dependency or
+the gateway is down. Plain Docker does not restart an unhealthy container; a crash restarts it through exit
+code 1 and the restart policy.
 
 ### Migrations and the compiled binary
 
