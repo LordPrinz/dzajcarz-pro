@@ -1,5 +1,10 @@
 import type { BotModule, CommandSummary, CronScheduler, Logger, Scheduler } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
+import {
+  createDzajcoModule,
+  type DzajcoResponder,
+  type DzajcoSettingsStore,
+} from "@dzajcarz/module-dzajco";
 import { createFunModule } from "@dzajcarz/module-fun";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
@@ -74,6 +79,10 @@ export interface ModuleServices {
   scheduledSongPlayer: ScheduledSongPlayer;
   scheduledSongs: readonly [ScheduledSong, ...ScheduledSong[]];
   scheduledSongCron: { expression: string; timeZone: string };
+  // dzajco
+  dzajcoSettings: DzajcoSettingsStore;
+  dzajcoResponder: DzajcoResponder;
+  dzajcoStore: KeyValueStore;
   logger: Logger;
 }
 
@@ -130,5 +139,14 @@ export function createModules(services: ModuleServices): BotModule[] {
       logger: services.logger.child({ module: "status" }),
     }),
     createFunModule({ random: Math.random, now: () => new Date(), timeZone: "Europe/Warsaw" }),
+    createDzajcoModule({
+      settings: services.dzajcoSettings,
+      responder: services.dzajcoResponder,
+      kv: services.dzajcoStore,
+      channels: services.channels,
+      random: Math.random,
+      prefixFor: services.prefixFor,
+      logger: services.logger.child({ module: "dzajco" }),
+    }),
   ];
 }

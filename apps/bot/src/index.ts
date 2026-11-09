@@ -7,6 +7,7 @@ import {
 } from "@dzajcarz/core";
 import {
   createDb,
+  createDzajcoRepository,
   createGuildSettingsRepository,
   createModuleToggleRepository,
   createPartyRepository,
@@ -14,10 +15,12 @@ import {
   createWelcomeRepository,
 } from "@dzajcarz/db";
 import { createRedisStore, keepConnected } from "@dzajcarz/kv";
+import { DZAJCO_GIF } from "@dzajcarz/module-dzajco";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { deployOnStartup } from "./deploy.ts";
+import { createDzajcoResponder } from "./discord/dzajco.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
 import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./discord/music.ts";
@@ -133,6 +136,9 @@ const modules = createModules({
   scheduledSongPlayer: createScheduledSongPlayer(musicPlayer),
   scheduledSongs: SCHEDULED_SONGS,
   scheduledSongCron: { expression: env.SCHEDULED_SONG_CRON, timeZone: env.SCHEDULED_SONG_TIMEZONE },
+  dzajcoSettings: createDzajcoRepository(sql),
+  dzajcoResponder: createDzajcoResponder(client, logger.child({ component: "dzajco" }), DZAJCO_GIF),
+  dzajcoStore: createRedisStore(redis),
   logger,
 });
 const registry = createRegistry(modules);

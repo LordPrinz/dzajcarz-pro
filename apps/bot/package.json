@@ -14,6 +14,7 @@
     "@dzajcarz/core": "workspace:*",
     "@dzajcarz/db": "workspace:*",
     "@dzajcarz/kv": "workspace:*",
+    "@dzajcarz/module-dzajco": "workspace:*",
     "@dzajcarz/module-fun": "workspace:*",
     "@dzajcarz/module-general": "workspace:*",
     "@dzajcarz/module-music": "workspace:*",

@@ -35,6 +35,7 @@ packages/
   kv/               KeyValueStore port with Redis and in-memory adapters
 modules/
   general/          ping, help (interactive menu: categories, pages, install links)
+  dzajco/           answers "what" in any language with the DŻAJCO gif (dzajco show, set, reset)
   settings/         prefix (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set through a form, off, test), greets new members
   fun/              czy_wiedziałeś, time

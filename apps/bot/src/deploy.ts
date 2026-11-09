@@ -307,6 +307,9 @@ export const createDeployRegistry = () =>
       scheduledSongPlayer: unusedServices(),
       scheduledSongs: SCHEDULED_SONGS,
       scheduledSongCron: { expression: "0 9,21 * * *", timeZone: "Europe/Warsaw" },
+      dzajcoSettings: unusedServices(),
+      dzajcoResponder: unusedServices(),
+      dzajcoStore: unusedServices(),
       logger: silentLogger,
     }),
   );
