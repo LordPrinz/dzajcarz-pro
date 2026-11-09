@@ -122,7 +122,31 @@ command with the same filters; an unknown or hidden name gets the same "not foun
 
 `UserError` messages go to the caller as they are (Polish). Any other error is logged with the command,
 guild and user, and the caller gets a generic message. Event handlers are wrapped the same way, so one
-failing module cannot take the process down.
+failing module cannot take the process down. An unhandled rejection is logged and the process keeps
+running; an uncaught exception is logged and the process exits with code 1, so the container's restart
+policy starts a clean instance.
+
+### Health endpoint
+
+The bot serves a small HTTP endpoint (`Bun.serve`) on `HEALTH_HOSTNAME:HEALTH_PORT` (default
+`0.0.0.0:8080`).
+
+- `GET /health` (readiness) probes the Discord gateway, Postgres (`select 1`) and Redis (`ping`) in
+  parallel, each with a 2 second timeout; a probe that throws or hangs counts as down. It answers `200`
+  when all three are up and `503` otherwise:
+
+  ```json
+  { "ok": false, "checks": { "gateway": true, "postgres": true, "redis": false } }
+  ```
+
+- `GET /health/live` (liveness) answers `200 {"ok":true}` whenever the process responds. A supervisor can
+  restart on a missing answer, while a `503` on `/health` means a dependency is down and a restart alone
+  would not help.
+- Any other path is `404`, any other method `405`.
+
+The compiled binary has no curl, so `bot healthcheck` fetches `http://127.0.0.1:$HEALTH_PORT/health` and
+exits `0` on a `200` and `1` otherwise. It reads only `HEALTH_PORT`, so it works without the bot's secrets.
+Use it as the Docker `HEALTHCHECK`.
 
 ### Prefix per guild
 

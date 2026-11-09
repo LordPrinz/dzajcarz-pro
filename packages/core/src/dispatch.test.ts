@@ -51,12 +51,17 @@ describe("executeCommand", () => {
         throw new Error("database password is hunter2");
       },
     });
-    const ctx = createFakeContext();
+    const ctx = createFakeContext({ guildId: "100000000000000001" });
     await executeCommand(command, ctx, createJsonLogger({ write: (line) => lines.push(line) }));
     expect(replyText(ctx.replies[0])).toBe(GENERIC_ERROR);
     expect(lines).toHaveLength(1);
     const entry = JSON.parse(lines[0] ?? "{}");
-    expect(entry).toMatchObject({ level: "error", command: "crash", invocation: "slash" });
+    expect(entry).toMatchObject({
+      level: "error",
+      command: "crash",
+      invocation: "slash",
+      guildId: "100000000000000001",
+    });
     expect(entry.error.message).toBe("database password is hunter2");
   });
 

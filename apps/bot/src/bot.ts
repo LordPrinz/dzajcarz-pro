@@ -78,12 +78,20 @@ export function createEventListener(
   logger: Logger,
 ): (...args: unknown[]) => Promise<void> {
   return async (...args) => {
+    let guildId: string | undefined;
     try {
       const scope = handler.alwaysRun ? undefined : eventScope(handler.event, args);
+      guildId = scope?.guildId;
       if (scope && !(await gate.isEnabled(scope.guildId, scope.channelId, module))) return;
       await handler.run(...args);
     } catch (error) {
-      logger.error("Event handler failed", { handler: handler.name, event: handler.event, error });
+      logger.error("Event handler failed", {
+        handler: handler.name,
+        event: handler.event,
+        module,
+        guildId,
+        error,
+      });
     }
   };
 }
@@ -122,7 +130,12 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
       }
       await executeCommand(command, ctx, logger);
     } catch (error) {
-      logger.error("Interaction handling failed", { interactionId: interaction.id, error });
+      logger.error("Interaction handling failed", {
+        interactionId: interaction.id,
+        guildId: interaction.guildId,
+        command: interaction.isCommand() ? interaction.commandName : undefined,
+        error,
+      });
     }
   });
 
@@ -130,7 +143,11 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
     try {
       await handleMessage(message, client.user?.id, deps);
     } catch (error) {
-      logger.error("Message handling failed", { messageId: message.id, error });
+      logger.error("Message handling failed", {
+        messageId: message.id,
+        guildId: message.guildId,
+        error,
+      });
     }
   });
 }
