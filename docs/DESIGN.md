@@ -123,13 +123,13 @@ command with the same filters; an unknown or hidden name gets the same "not foun
 `UserError` messages go to the caller as they are (Polish). Any other error is logged with the command,
 guild and user, and the caller gets a generic message. Event handlers are wrapped the same way, so one
 failing module cannot take the process down. An unhandled rejection is logged and the process keeps
-running; an uncaught exception is logged and the process exits with code 1, so a supervisor starts a
-clean instance.
+running; an uncaught exception is logged and the process exits with code 1, so the container's restart
+policy starts a clean instance.
 
 ### Health endpoint
 
 The bot serves a small HTTP endpoint (`Bun.serve`) on `HEALTH_HOSTNAME:HEALTH_PORT` (default
-`127.0.0.1:8080`). `HEALTH_PORT=0` turns it off, and so
+`127.0.0.1:8080`; the Docker image sets `HEALTH_HOSTNAME=0.0.0.0`). `HEALTH_PORT=0` turns it off, and so
 does a port that is already taken (a warning is logged and the bot keeps running).
 
 - `GET /health` (readiness) probes the Discord gateway (every shard is ready), Postgres (`select 1`) and
@@ -147,7 +147,24 @@ does a port that is already taken (a warning is logged and the bot keeps running
 
 `bot healthcheck` is a self-check for supervisors without curl: it fetches
 `http://127.0.0.1:$HEALTH_PORT/health` and exits `0` on a `200` and `1` otherwise (also when
-`HEALTH_PORT=0`). It reads only `HEALTH_PORT`, so it works without the bot's secrets.
+`HEALTH_PORT=0`). It reads only `HEALTH_PORT`, so it works without the bot's secrets. The Docker
+`HEALTHCHECK` runs `bot healthcheck`, so `docker ps` shows the container as unhealthy while a dependency or
+the gateway is down. Plain Docker does not restart an unhealthy container; a crash restarts it through exit
+code 1 and the restart policy.
+
+### Migrations and the compiled binary
+
+Production runs the bot as one binary from `bun build --compile` ([deployment](DEPLOYMENT.md)). Such a binary
+has no `migrations/` directory to scan, so `packages/db/src/migrations.ts` imports every `.sql` file as text
+(`with { type: "text" }`) and the bundler embeds them. A test fails when a file in `migrations/` is missing
+from that list or its embedded text differs from the file, because the checksum in `schema_migrations` has
+to match byte for byte.
+
+The bot applies pending migrations at startup, before it touches the database or logs in, and exits with
+code 1 when one fails. A separate migration step or container would add a moving part for a deployment of
+one bot. `migrate` holds a Postgres advisory lock on one connection while it runs, so a second caller (a
+restarted container that overlaps the old one, or `db:migrate` by hand) waits instead of applying the same
+file twice. It waits at most 60 seconds (`lock_timeout`), then fails like any other migration error.
 
 ### Cooldowns
 

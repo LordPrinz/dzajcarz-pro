@@ -1,0 +1,74 @@
+name: Docker
+
+# Builds the production image (never pushed) when something that goes into it changes.
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - tsconfig.base.json
+      - apps/**
+      - packages/**
+      - modules/**
+      - infra/docker-compose.prod.yml
+      - .github/workflows/docker.yml
+  push:
+    branches: [v5]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - tsconfig.base.json
+      - apps/**
+      - packages/**
+      - modules/**
+      - infra/docker-compose.prod.yml
+      - .github/workflows/docker.yml
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: docker build --build-arg REVISION=${{ github.sha }} -t dzajcarz-bot:ci .
+      # The bundle has to load on the runtime image: with valid settings and no network, the bot gets as far
+      # as the first migration and exits 1 with "Migration failed". A broken bundle dies before that line.
+      - name: Binary starts
+        run: |
+          set +e
+          output=$(docker run --rm --network none \
+            -e DISCORD_TOKEN=ci-token-that-is-long-enough-for-the-env-check-0000000000 \
+            -e DISCORD_CLIENT_ID=123456789012345678 \
+            -e DATABASE_URL=postgres://ci:ci@127.0.0.1:1/ci \
+            -e REDIS_URL=redis://127.0.0.1:1/0 \
+            dzajcarz-bot:ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          test "$status" -eq 1
+          grep -q '"msg":"Migration failed"' <<< "$output"
+      - name: Production compose is valid
+        run: docker compose -f infra/docker-compose.prod.yml config --quiet
+        env:
+          BOT_REVISION: ci
+          DISCORD_TOKEN: ci
+          DISCORD_CLIENT_ID: "0"
+          POSTGRES_PASSWORD: ci
+          REDIS_PASSWORD: ci
+          LAVALINK_PASSWORD: ci

@@ -26,13 +26,38 @@ function isTimeZone(value: string): boolean {
   }
 }
 
+/**
+ * Whether the credentials of `scheme://user:password@host/…` parse as written. An unencoded `/`, `?` or `#`
+ * in the password ends the host part early, and a second `@` is read differently by different parsers, so
+ * the client would connect somewhere else or without the password. An `@` in the query string trips it too,
+ * which is fine: compose never builds such a URL.
+ */
+export function credentialsIntact(value: string): boolean {
+  const afterScheme = value.slice(value.indexOf("://") + 3);
+  const at = afterScheme.lastIndexOf("@");
+  if (at === -1) return true;
+  const userinfo = afterScheme.slice(0, at);
+  if (/[@/?#]/.test(userinfo)) return false;
+  // `user:` with nothing after the colon is a password that got lost on the way, e.g. an unset variable.
+  return !userinfo.endsWith(":");
+}
+
+const connectionUrl = (protocol: RegExp) =>
+  z
+    .string()
+    .refine(
+      credentialsIntact,
+      "the password breaks the URL (an unencoded @ / ? # or an empty password); use a URL-safe password such as `openssl rand -hex 32`",
+    )
+    .pipe(z.url({ protocol }));
+
 const EnvFields = z.object({
   DISCORD_TOKEN: z.string().min(50),
   DISCORD_CLIENT_ID: snowflake,
   DISCORD_DEV_GUILD_ID: optional(snowflake),
   BOT_PREFIX: z.string().min(1).max(5).default("!"),
-  DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
-  REDIS_URL: z.url({ protocol: /^rediss?$/ }),
+  DATABASE_URL: connectionUrl(/^postgres(ql)?$/),
+  REDIS_URL: connectionUrl(/^rediss?$/),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   // Optional: without them the bot runs and music commands say the player is unavailable.
   LAVALINK_URL: optional(z.url({ protocol: /^https?$/ })),
@@ -48,7 +73,8 @@ const EnvFields = z.object({
     .string()
     .default("Europe/Warsaw")
     .refine(isTimeZone, "expected an IANA time zone, e.g. Europe/Warsaw"),
-  // The health endpoint (GET /health). 0 turns it off.
+  // The health endpoint (GET /health). 0 turns it off. The Docker image sets HEALTH_HOSTNAME=0.0.0.0 so a
+  // published port reaches it.
   HEALTH_PORT: z.coerce.number().int().min(0).max(65535).default(8080),
   HEALTH_HOSTNAME: z.string().min(1).default("127.0.0.1"),
   // On unless set to 0/false: the bot registers its slash commands at startup. Turn it off when several
@@ -61,7 +87,7 @@ const EnvFields = z.object({
   // startup deploy and `commands:deploy` alike.
   DEPLOY_GLOBAL: flag,
 });
-const Env = EnvFields.refine(
+export const Env = EnvFields.refine(
   (env) => (env.LAVALINK_URL === undefined) === (env.LAVALINK_PASSWORD === undefined),
   {
     message: "set both LAVALINK_URL and LAVALINK_PASSWORD, or neither",

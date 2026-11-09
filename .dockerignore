@@ -1,0 +1,15 @@
+# An allowlist: only what `bun install` and the bot's bundle need goes into the build context.
+*
+!package.json
+!bun.lock
+!bunfig.toml
+!tsconfig.base.json
+!apps/
+!packages/
+!modules/
+**/.env*
+**/node_modules
+**/dist
+**/coverage
+**/*.test.ts
+**/.DS_Store
