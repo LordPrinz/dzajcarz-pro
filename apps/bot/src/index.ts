@@ -173,7 +173,14 @@ const modules = createModules({
   logger,
 });
 const registry = createRegistry(modules);
-attachHandlers(client, { registry, prefixes, gate, botInGuild, logger });
+attachHandlers(client, {
+  registry,
+  prefixes,
+  gate,
+  botInGuild,
+  cooldowns: createRedisStore(redis),
+  logger,
+});
 
 client.once(Events.ClientReady, (ready) => {
   logger.info("Logged in", {

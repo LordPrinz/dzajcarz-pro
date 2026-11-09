@@ -28,6 +28,7 @@ export function createFunModule(deps: FunModuleDeps): BotModule {
     description: "Odpowiada na odwieczne pytanie",
     aliases: ["czy_wiedziales", "czywiedzial"],
     contexts: EVERYWHERE,
+    cooldownMs: 3_000,
     run: async (ctx) => {
       if (deps.random() < 0.5) await ctx.reply({ content: "Wiedział!", reactions: ["🙋‍♂️"] });
       else await ctx.reply("Nie wiedział sadge bruh");

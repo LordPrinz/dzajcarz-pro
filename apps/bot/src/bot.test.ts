@@ -111,6 +111,40 @@ describe("module toggles in routing", () => {
     expect(ran).toEqual(["command"]);
   });
 
+  test("passes deps.cooldowns to the dispatcher, so a second call is refused", async () => {
+    const { ran, replies, message, deps } = setup([]);
+    const windows = new Map<string, number>();
+    const cooldowns = {
+      increment: async (key: string, ttlMs: number) => {
+        const count = (windows.get(key) ?? 0) + 1;
+        windows.set(key, count);
+        return { count, ttlMs };
+      },
+    };
+    const limited = createRegistry([
+      {
+        name: "fun",
+        commands: [
+          defineCommand({
+            name: "ping",
+            description: "x",
+            cooldownMs: 5000,
+            run: async () => {
+              ran.push("command");
+            },
+          }),
+        ],
+      },
+    ]);
+    const withCooldowns = { ...deps, registry: limited, cooldowns };
+    await handleMessage(message, undefined, withCooldowns);
+    await handleMessage(message, undefined, withCooldowns);
+    expect(ran).toEqual(["command"]);
+    expect(replies).toEqual([
+      expect.objectContaining({ content: "Zwolnij. Spróbuj ponownie za 5 s." }),
+    ]);
+  });
+
   test("a guild-only command in a DM gets the server-only reply", async () => {
     const { ran, replies, message, deps } = setup([]);
     Object.assign(message, { guildId: null });

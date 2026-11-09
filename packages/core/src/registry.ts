@@ -223,6 +223,7 @@ function validateCommand(command: AnyCommand, module: string): void {
   }
   checkDescription(command.description, where);
   validateContexts(command, where);
+  checkCooldown(command.cooldownMs, where);
 
   const { subcommands } = command;
   if ((command.run === undefined) === (subcommands === undefined)) {
@@ -241,6 +242,7 @@ function validateCommand(command: AnyCommand, module: string): void {
     const at = `subcommand "${name}" of ${where}`;
     if (!NAME_PATTERN.test(name)) throw new Error(`Invalid name for ${at}`);
     checkDescription(subcommand.description, at);
+    checkCooldown(subcommand.cooldownMs, at);
     validateOptions(subcommand.options ?? {}, at);
   }
 }
@@ -344,6 +346,12 @@ function validateChoicesAndRange(option: OptionDef, at: string): void {
   }
   if (minValue !== undefined && maxValue !== undefined && minValue > maxValue) {
     throw new Error(`minValue is greater than maxValue: ${at}`);
+  }
+}
+
+function checkCooldown(cooldownMs: number | undefined, where: string): void {
+  if (cooldownMs !== undefined && (!Number.isInteger(cooldownMs) || cooldownMs <= 0)) {
+    throw new Error(`"cooldownMs" of ${where} must be a positive integer of milliseconds`);
   }
 }
 

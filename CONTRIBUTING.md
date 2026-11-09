@@ -93,7 +93,9 @@ interaction responses only.
 2. Export a factory `create<Name>Module(deps)` that returns a `BotModule`. `deps` lists only the ports
    the module needs (ADR 5); the module never reads env variables or creates clients itself.
 3. Define commands with `defineCommand` and event handlers with `defineEvent`. Throw `UserError` for
-   anything the caller should read; other errors are logged and replaced by a generic message.
+   anything the caller should read; other errors are logged and replaced by a generic message. Rate-limit a
+   command that hits an external service or floods a channel with `cooldownMs`: the dispatcher enforces it
+   per user across servers, and a subcommand's value overrides the command's.
 4. Add the module to `apps/bot/src/modules.ts` and pass its dependencies from `apps/bot/src/index.ts`.
 5. Test commands with `createFakeContext` from `@dzajcarz/core/testing`, without Discord.
 6. Where a command runs (optional, ADR 7): `contexts: { places, installs }` on `defineCommand`. Places are

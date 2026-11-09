@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { defineCommand, defineSubcommand } from "./command.ts";
 import { defineButton } from "./component.ts";
 import {
+  type CooldownStore,
   checkAccess,
   checkPrefixAccess,
   executeCommand,
@@ -420,5 +421,225 @@ describe("executeComponent order of checks", () => {
       silentLogger,
     );
     expect(failing.replies).toEqual([{ content: "Nie teraz.", ephemeral: true }]);
+  });
+});
+
+describe("executeCommand cooldowns", () => {
+  /** Same window semantics as the Redis store: the first call opens it, later ones count inside it. */
+  function fakeCooldowns(clock: { now: number }): CooldownStore {
+    const windows = new Map<string, { count: number; expiresAt: number }>();
+    return {
+      async increment(key, ttlMs) {
+        const live = windows.get(key);
+        const entry =
+          live && live.expiresAt > clock.now
+            ? { count: live.count + 1, expiresAt: live.expiresAt }
+            : { count: 1, expiresAt: clock.now + ttlMs };
+        windows.set(key, entry);
+        return { count: entry.count, ttlMs: entry.expiresAt - clock.now };
+      },
+    };
+  }
+
+  const make = (cooldownMs?: number) => {
+    let runs = 0;
+    const command = defineCommand({
+      name: "slow",
+      description: "Slow",
+      cooldownMs,
+      run: async () => {
+        runs++;
+      },
+    });
+    return { command, runs: () => runs };
+  };
+
+  test("refuses a second call inside the window and says how long is left", async () => {
+    const clock = { now: 0 };
+    const cooldowns = fakeCooldowns(clock);
+    const { command, runs } = make(10_000);
+    await executeCommand(command, createFakeContext(), silentLogger, cooldowns);
+    clock.now = 6_500;
+    const second = createFakeContext();
+    await executeCommand(command, second, silentLogger, cooldowns);
+    expect(runs()).toBe(1);
+    expect(second.replies).toEqual([
+      { content: "Zwolnij. Spróbuj ponownie za 4 s.", ephemeral: true },
+    ]);
+  });
+
+  test("runs again once the window has passed", async () => {
+    const clock = { now: 0 };
+    const cooldowns = fakeCooldowns(clock);
+    const { command, runs } = make(10_000);
+    await executeCommand(command, createFakeContext(), silentLogger, cooldowns);
+    clock.now = 10_000;
+    await executeCommand(command, createFakeContext(), silentLogger, cooldowns);
+    expect(runs()).toBe(2);
+  });
+
+  test("does not share a window between members or commands", async () => {
+    const cooldowns = fakeCooldowns({ now: 0 });
+    const a = make(10_000);
+    let otherRuns = 0;
+    const other = defineCommand({
+      name: "other",
+      description: "Other",
+      cooldownMs: 10_000,
+      run: async () => {
+        otherRuns++;
+      },
+    });
+    await executeCommand(a.command, createFakeContext({ userId: "1" }), silentLogger, cooldowns);
+    await executeCommand(a.command, createFakeContext({ userId: "2" }), silentLogger, cooldowns);
+    await executeCommand(other, createFakeContext({ userId: "1" }), silentLogger, cooldowns);
+    expect(a.runs()).toBe(2);
+    expect(otherRuns).toBe(1);
+  });
+
+  test("a command without cooldownMs never touches the store", async () => {
+    const { command, runs } = make();
+    const cooldowns: CooldownStore = {
+      increment: async () => {
+        throw new Error("should not be called");
+      },
+    };
+    await executeCommand(command, createFakeContext(), silentLogger, cooldowns);
+    await executeCommand(command, createFakeContext(), silentLogger, cooldowns);
+    expect(runs()).toBe(2);
+  });
+
+  test("a subcommand's cooldown wins over the command's and has its own window", async () => {
+    const cooldowns = fakeCooldowns({ now: 0 });
+    let fast = 0;
+    let slow = 0;
+    const command = defineCommand({
+      name: "group",
+      description: "Group",
+      cooldownMs: 60_000,
+      subcommands: {
+        fast: defineSubcommand({
+          description: "Fast",
+          cooldownMs: 1_000,
+          run: async () => {
+            fast++;
+          },
+        }),
+        slow: defineSubcommand({
+          description: "Slow",
+          run: async () => {
+            slow++;
+          },
+        }),
+      },
+    });
+    const call = (subcommand: string) =>
+      executeCommand(command, createFakeContext({ subcommand }), silentLogger, cooldowns);
+    await call("fast");
+    const refused = createFakeContext({ subcommand: "fast" });
+    await executeCommand(command, refused, silentLogger, cooldowns);
+    expect(replyText(refused.replies[0])).toBe("Zwolnij. Spróbuj ponownie za 1 s.");
+    await call("slow");
+    const slowAgain = createFakeContext({ subcommand: "slow" });
+    await executeCommand(command, slowAgain, silentLogger, cooldowns);
+    expect(replyText(slowAgain.replies[0])).toBe("Zwolnij. Spróbuj ponownie za 60 s.");
+    expect({ fast, slow }).toEqual({ fast: 1, slow: 1 });
+  });
+
+  test("a denied member does not burn the cooldown", async () => {
+    const cooldowns = fakeCooldowns({ now: 0 });
+    let runs = 0;
+    const command = defineCommand({
+      name: "ban",
+      description: "Ban",
+      permissions: BAN,
+      cooldownMs: 10_000,
+      run: async () => {
+        runs++;
+      },
+    });
+    const denied = createFakeContext({ memberPermissions: 0n });
+    await executeCommand(command, denied, silentLogger, cooldowns);
+    expect(replyText(denied.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
+    await executeCommand(
+      command,
+      createFakeContext({ memberPermissions: BAN }),
+      silentLogger,
+      cooldowns,
+    );
+    expect(runs).toBe(1);
+  });
+
+  test("runs the command and logs a warning when the store fails", async () => {
+    const lines: string[] = [];
+    const { command, runs } = make(10_000);
+    const cooldowns: CooldownStore = {
+      increment: async () => {
+        throw new Error("Redis is down");
+      },
+    };
+    const ctx = createFakeContext();
+    await executeCommand(
+      command,
+      ctx,
+      createJsonLogger({ write: (line) => lines.push(line) }),
+      cooldowns,
+    );
+    expect(runs()).toBe(1);
+    expect(ctx.replies).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
+      level: "warn",
+      msg: "Cooldown check failed; running the command anyway",
+      command: "slow",
+    });
+  });
+
+  test("a failed run still uses the cooldown up", async () => {
+    const cooldowns = fakeCooldowns({ now: 0 });
+    let runs = 0;
+    const command = defineCommand({
+      name: "flaky",
+      description: "Flaky",
+      cooldownMs: 10_000,
+      run: async () => {
+        runs++;
+        throw new UserError("Nie wyszło.");
+      },
+    });
+    await executeCommand(command, createFakeContext(), silentLogger, cooldowns);
+    const second = createFakeContext();
+    await executeCommand(command, second, silentLogger, cooldowns);
+    expect(runs).toBe(1);
+    expect(replyText(second.replies[0])).toBe("Zwolnij. Spróbuj ponownie za 10 s.");
+  });
+
+  test("a subcommand-level permission denial does not consume the cooldown", async () => {
+    const cooldowns = fakeCooldowns({ now: 0 });
+    let runs = 0;
+    const command = defineCommand({
+      name: "admin",
+      description: "Admin",
+      subcommands: {
+        wipe: defineSubcommand({
+          description: "Wipe",
+          permissions: BAN,
+          cooldownMs: 10_000,
+          run: async () => {
+            runs++;
+          },
+        }),
+      },
+    });
+    const denied = createFakeContext({ subcommand: "wipe", memberPermissions: 0n });
+    await executeCommand(command, denied, silentLogger, cooldowns);
+    expect(replyText(denied.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
+    await executeCommand(
+      command,
+      createFakeContext({ subcommand: "wipe", memberPermissions: BAN }),
+      silentLogger,
+      cooldowns,
+    );
+    expect(runs).toBe(1);
   });
 });
