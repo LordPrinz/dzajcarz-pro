@@ -94,7 +94,7 @@ interaction responses only.
    the module needs (ADR 5); the module never reads env variables or creates clients itself.
 3. Define commands with `defineCommand` and event handlers with `defineEvent`. Throw `UserError` for
    anything the caller should read; other errors are logged and replaced by a generic message. Rate-limit a
-   command that hits an external service or floods a channel with `cooldownMs` (per member, enforced by the
+   command that hits an external service or floods a channel with `cooldownMs` (per user across servers, enforced by the
    dispatcher; a subcommand's value overrides the command's).
 4. Add the module to `apps/bot/src/modules.ts` and pass its dependencies from `apps/bot/src/index.ts`.
 5. Test commands with `createFakeContext` from `@dzajcarz/core/testing`, without Discord.

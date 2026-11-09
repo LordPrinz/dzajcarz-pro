@@ -300,7 +300,7 @@ describe("cooldownMs", () => {
 
   test("accepts a positive integer on a command and on a subcommand", () => {
     expect(build({ cooldownMs: 5000 })).not.toThrow();
-    expect(
+    expect(() =>
       createRegistry([
         {
           name: "m",
@@ -315,7 +315,7 @@ describe("cooldownMs", () => {
           ],
         },
       ]),
-    ).toBeDefined();
+    ).not.toThrow();
   });
 
   test("rejects zero, negative and fractional values", () => {

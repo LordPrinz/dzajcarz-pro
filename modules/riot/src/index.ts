@@ -143,14 +143,10 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     }
   }
 
-  // Each lookup spends several Riot API calls from a shared key budget.
-  const RIOT_COOLDOWN_MS = 10_000;
-
   const valorant = defineCommand({
     name: "valorant",
     description: "Statystyki gracza Valorant: ranga i ostatnie mecze",
     contexts: EVERYWHERE,
-    cooldownMs: RIOT_COOLDOWN_MS,
     options: {
       riot_id: {
         type: "string",
@@ -169,7 +165,6 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     name: "lol",
     description: "Statystyki gracza League of Legends: rangi i najlepsi bohaterowie",
     contexts: EVERYWHERE,
-    cooldownMs: RIOT_COOLDOWN_MS,
     options: {
       riot_id: {
         type: "string",

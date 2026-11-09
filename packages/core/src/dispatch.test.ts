@@ -589,4 +589,52 @@ describe("executeCommand cooldowns", () => {
       command: "slow",
     });
   });
+
+  test("a failed run still uses the cooldown up", async () => {
+    const cooldowns = fakeCooldowns({ now: 0 });
+    let runs = 0;
+    const command = defineCommand({
+      name: "flaky",
+      description: "Flaky",
+      cooldownMs: 10_000,
+      run: async () => {
+        runs++;
+        throw new UserError("Nie wyszło.");
+      },
+    });
+    await executeCommand(command, createFakeContext(), silentLogger, cooldowns);
+    const second = createFakeContext();
+    await executeCommand(command, second, silentLogger, cooldowns);
+    expect(runs).toBe(1);
+    expect(replyText(second.replies[0])).toBe("Zwolnij. Spróbuj ponownie za 10 s.");
+  });
+
+  test("a subcommand-level permission denial does not consume the cooldown", async () => {
+    const cooldowns = fakeCooldowns({ now: 0 });
+    let runs = 0;
+    const command = defineCommand({
+      name: "admin",
+      description: "Admin",
+      subcommands: {
+        wipe: defineSubcommand({
+          description: "Wipe",
+          permissions: BAN,
+          cooldownMs: 10_000,
+          run: async () => {
+            runs++;
+          },
+        }),
+      },
+    });
+    const denied = createFakeContext({ subcommand: "wipe", memberPermissions: 0n });
+    await executeCommand(command, denied, silentLogger, cooldowns);
+    expect(replyText(denied.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
+    await executeCommand(
+      command,
+      createFakeContext({ subcommand: "wipe", memberPermissions: BAN }),
+      silentLogger,
+      cooldowns,
+    );
+    expect(runs).toBe(1);
+  });
 });

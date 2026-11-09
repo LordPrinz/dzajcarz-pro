@@ -52,15 +52,18 @@ export async function executeCommand(
       if (deniedAction) throw new UserError(deniedAction);
       await enforceCooldown(
         cooldowns,
-        command,
-        ctx,
+        `cooldown:${command.name}:${subcommand}:${ctx.user.id}`,
         target.cooldownMs ?? command.cooldownMs,
         log,
-        ctx.subcommand,
       );
       await target.run(ctx);
     } else {
-      await enforceCooldown(cooldowns, command, ctx, command.cooldownMs, log);
+      await enforceCooldown(
+        cooldowns,
+        `cooldown:${command.name}:${ctx.user.id}`,
+        command.cooldownMs,
+        log,
+      );
       await command.run?.(ctx);
     }
   } catch (error) {
@@ -75,17 +78,14 @@ export async function executeCommand(
   }
 }
 
-/** Refuses the call while the member's previous one is inside the window. Fails open if the store is down. */
+/** Refuses the call while the user's previous one is inside the window. Fails open if the store is down. */
 async function enforceCooldown(
   cooldowns: CooldownStore | undefined,
-  command: AnyCommand,
-  ctx: CommandContext,
+  key: string,
   cooldownMs: number | undefined,
   log: Logger,
-  subcommand?: string,
 ): Promise<void> {
   if (!cooldowns || cooldownMs === undefined) return;
-  const key = `cooldown:${command.name}${subcommand ? `:${subcommand}` : ""}:${ctx.user.id}`;
   let counter: { count: number; ttlMs: number };
   try {
     counter = await cooldowns.increment(key, cooldownMs);

@@ -127,9 +127,9 @@ failing module cannot take the process down.
 ### Cooldowns
 
 `cooldownMs` on a command (or on a subcommand, which wins over the command's value) limits how often one
-member can run it. The dispatcher counts calls with `KeyValueStore.increment` under
+user can run it (across servers). The dispatcher counts calls with `KeyValueStore.increment` under
 `cooldown:<command>[:<subcommand>]:<userId>`, after the access checks, so a refused call does not start the
-wait. A second call inside the window gets a `UserError` with the seconds left. If the store is down the
+wait; a run that fails still uses the cooldown up. A subcommand that inherits the command's value keeps its own window. A second call inside the window gets a `UserError` with the seconds left. If the store is down the
 command runs anyway and a warning is logged: Redis only holds losable state (ADR 3).
 
 ### Prefix per guild

@@ -165,8 +165,10 @@ interface CommandBase {
   /** Discord permission bits (PermissionFlagsBits) the member needs. Needs a guild-only command. */
   permissions?: bigint;
   /**
-   * Minimum time between two runs by the same member, in milliseconds (a positive integer). Checked after
-   * access, so a refused call does not start the wait. A subcommand's own value wins over this one.
+   * Minimum time between two runs by the same user (across servers), in milliseconds (a positive integer).
+   * Checked after access, so a refused call does not start the wait; a run that fails still uses it up.
+   * A subcommand's own value wins over this one. Each subcommand keeps its own window, so a value set here
+   * is not one limit shared by all of them.
    */
   cooldownMs?: number;
 }
