@@ -10,6 +10,7 @@ import {
   createGuildSettingsRepository,
   createModuleToggleRepository,
   createPartyRepository,
+  createScheduledMessageRepository,
   createScheduledSongRepository,
   createWelcomeRepository,
 } from "@dzajcarz/db";
@@ -20,6 +21,7 @@ import { attachHandlers } from "./bot.ts";
 import { deployOnStartup } from "./deploy.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
+import { createMessageChannels, createScheduledMessageSender } from "./discord/messages.ts";
 import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./discord/music.ts";
 import {
   createPartyChannels,
@@ -133,6 +135,11 @@ const modules = createModules({
   scheduledSongPlayer: createScheduledSongPlayer(musicPlayer),
   scheduledSongs: SCHEDULED_SONGS,
   scheduledSongCron: { expression: env.SCHEDULED_SONG_CRON, timeZone: env.SCHEDULED_SONG_TIMEZONE },
+  scheduledMessages: createScheduledMessageRepository(sql),
+  scheduledMessageSender: createScheduledMessageSender(client),
+  guildModuleEnabled: (guildId, module) => gate.isEnabled(guildId, null, module),
+  messageLock: createRedisStore(redis),
+  messageChannels: createMessageChannels(client),
   logger,
 });
 const registry = createRegistry(modules);

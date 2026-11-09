@@ -30,6 +30,8 @@ describe.skipIf(!sql)("migrator", () => {
       "module_disabled",
       "party_area",
       "party_channel",
+      "scheduled_message",
+      "scheduled_message_opt_out",
       "scheduled_song_config",
       "scheduled_song_exclusion",
       "schema_migrations",

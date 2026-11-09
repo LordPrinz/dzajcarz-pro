@@ -149,8 +149,9 @@ through the `GuildChannels` port. `general`, `settings` and `status` cannot be d
 message limit). `renderWelcome` fills `{user}`, `{username}`, `{server}` and `{memberCount}` in a single
 pass, so substituted text is never re-expanded and unknown placeholders stay as written. The
 `guildMemberAdd` handler skips bots and never throws: a missing config, channel or permission is a logged
-warning. It needs the privileged `GuildMembers` intent. The welcome sender is the one place that overrides
-`NO_MENTIONS`: it allows a ping for the joining member only (`allowedMentions: { users: [memberId] }`).
+warning. It needs the privileged `GuildMembers` intent. The welcome sender overrides `NO_MENTIONS`
+to allow a ping for the joining member only (`allowedMentions: { users: [memberId] }`); scheduled DMs do the
+same for their recipient.
 
 ### Party areas
 
@@ -357,6 +358,59 @@ the song off per server or channel. The schedule defaults to `0 9,21 * * *` in `
 `SCHEDULED_SONG_CRON` and `SCHEDULED_SONG_TIMEZONE` to change it. Both are checked at startup.
 
 The old bot's other scheduled entries (messages at fixed times, birthdays) are not part of this module.
+
+### Scheduled messages
+
+`modules/messages` posts a server's own text every day at a set time: in a text or announcement channel of
+the server, or as a DM to one of its members. Rows live in `scheduled_message` (time of day as `HH:MM` in
+`Europe/Warsaw`, 1 to 1900 characters, exactly one of `channel_id` and `user_id`). `/messages add` (Manage
+Server) opens a form with the time, a channel or a member, and the text; the prefix form is
+`messages add <HH:MM> <#kanał|@osoba> <tekst...>`. Both go through the same checks: a real time, one target,
+a channel of this server that the bot can see and send messages in, or a member who is not a bot. When the
+form is refused, the typed text comes back in code blocks. `{user}` in a channel message stays as written,
+and the reply says so.
+
+Caps: 25 messages per server, 3 DMs per member per server, and one message per target and time. The
+repository checks them and inserts in one transaction that holds a per-server advisory lock
+(`pg_advisory_xact_lock`), so two adds at the same moment cannot both take the 25th place. The refusals say
+nothing about opt-outs.
+
+`list` shows one line per message, the text as a 40-character inline-code preview (markdown and mentions show
+as typed; backticks become `ˋ` so they cannot end the span), cut to fit 2000 characters ("… i jeszcze N").
+`remove <id>` only finds messages of the server it runs in. When the bot leaves a server (`guildDelete`, which
+runs whatever the toggles say), that server's messages are deleted.
+
+Sending is a `CronScheduler` job at `* * * * *` in `Europe/Warsaw`. Each tick rounds the clock to the
+nearest minute (a job a few milliseconds early still counts for its minute), reads the Warsaw minute
+(`warsawMinute`, `Intl.DateTimeFormat`) and at most 500 rows due at that time across all servers (a warning
+when that is hit), and sends them five at a time. Each row is handled on its own: a failure is a warning
+with the row id, and the whole tick is wrapped too.
+
+- skip a server the bot is no longer in;
+- the module toggle: a channel message asks for its channel, a DM for the server as a whole (it has no
+  channel), so `/modules disable messages #kanał` stops only messages to that channel;
+- take `messages:sent:<id>:<date>T<time>` in Redis with `setIfAbsent` (2 h TTL). The lock stops a double
+  cron fire, a second instance and October's repeated 02:xx hour from sending twice. A minute missed while
+  the bot was down is not caught up, and a time the March change skips does not fire that day;
+- a DM goes out only while the recipient is still a member, is not a bot and has not opted out. `{user}`
+  becomes a ping of the recipient, a footer names the server (with markdown and mention characters
+  stripped from the name), and a "Nie wysyłaj mi więcej" button sits under it. Closed DMs (50007) are
+  logged at info.
+
+The DM can grow past what was typed, so `add` checks the worst case: every `{user}` replaced by the
+recipient's mention, plus the footer with a 100-character server name, must fit Discord's 2000 characters.
+
+Opt-outs (`scheduled_message_opt_out`) belong to the recipient, not the server. A row has a guild id, or NULL
+for every server (unique with `NULLS NOT DISTINCT`). The button under a DM and `/dm off` on a server opt
+out of that server; `/dm off` in a DM with the bot opts out of all of them. `/dm on` removes exactly the
+row of the place it runs in. On a server it says so when the every-server opt-out still applies. In a DM it
+leaves the per-server ones and points to `/dm on` on that server for them. The button carries the guild id
+in its custom_id and checks it is a snowflake before using it; only the recipient can press it.
+
+Channel posts use `NO_MENTIONS`, so an admin's `@everyone` stays text. A scheduled DM is the second exception
+after the welcome greeting: `allowedMentions: { users: [recipientId] }`, the recipient and nobody else. The
+module reaches Discord through its own ports (`ScheduledMessageSender`, `MessageChannels`) and imports no
+other module.
 
 ### Rotating status
 

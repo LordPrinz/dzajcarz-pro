@@ -15,6 +15,7 @@
     "@dzajcarz/db": "workspace:*",
     "@dzajcarz/kv": "workspace:*",
     "@dzajcarz/module-general": "workspace:*",
+    "@dzajcarz/module-messages": "workspace:*",
     "@dzajcarz/module-music": "workspace:*",
     "@dzajcarz/module-party": "workspace:*",
     "@dzajcarz/module-schedule": "workspace:*",

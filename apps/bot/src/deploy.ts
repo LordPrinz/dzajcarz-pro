@@ -307,6 +307,12 @@ export const createDeployRegistry = () =>
       scheduledSongPlayer: unusedServices(),
       scheduledSongs: SCHEDULED_SONGS,
       scheduledSongCron: { expression: "0 9,21 * * *", timeZone: "Europe/Warsaw" },
+      // messages (its cron job is the shared stand-in above, so nothing is sent while deploying)
+      scheduledMessages: unusedServices(),
+      scheduledMessageSender: unusedServices(),
+      guildModuleEnabled: unusedServices(),
+      messageLock: unusedServices(),
+      messageChannels: unusedServices(),
       logger: silentLogger,
     }),
   );
