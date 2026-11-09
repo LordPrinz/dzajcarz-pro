@@ -10,13 +10,13 @@ const allUp: Probes = { gateway: up, postgres: up, redis: up };
 const logger = createJsonLogger({ write: () => {} });
 
 const servers: Bun.Server<undefined>[] = [];
-function start(probes: Probes): string {
+function start(probes: Probes, probeTimeoutMs = 50): string {
   const server = startHealthServer({
     port: 0,
     hostname: "127.0.0.1",
     probes,
     logger,
-    probeTimeoutMs: 50,
+    probeTimeoutMs,
   });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
@@ -94,12 +94,32 @@ describe("runHealthcheck", () => {
   });
 
   test("exits 1 when nothing listens", async () => {
-    // Port 1 is privileged and unused, so the connection is refused without racing a freed port.
+    // Nothing listens on port 1 on dev machines or CI runners, so the connection is refused at once instead of
+    // racing a freed ephemeral port.
     expect(await runHealthcheck({ HEALTH_PORT: "1" })).toBe(1);
+  });
+
+  test("exits 1 for a HEALTH_PORT that is not a port number", async () => {
+    expect(await runHealthcheck({ HEALTH_PORT: "80@example.com" })).toBe(1);
+    expect(await runHealthcheck({ HEALTH_PORT: "8080/x" })).toBe(1);
   });
 
   test("exits 1 when the endpoint is disabled with HEALTH_PORT=0", async () => {
     expect(await runHealthcheck({ HEALTH_PORT: "0" })).toBe(1);
+  });
+});
+
+describe("a hung probe", () => {
+  test("is not started again while the earlier run is still pending", async () => {
+    let calls = 0;
+    const hang = () => {
+      calls++;
+      return new Promise<boolean>(() => {});
+    };
+    const base = start({ ...allUp, postgres: hang });
+    expect((await fetch(`${base}/health`)).status).toBe(503);
+    expect((await fetch(`${base}/health`)).status).toBe(503);
+    expect(calls).toBe(1);
   });
 });
 
@@ -127,15 +147,19 @@ describe("coalescing", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const base = start({
-      ...allUp,
-      postgres: async () => {
-        calls++;
-        await gate;
-        return true;
+    const base = start(
+      {
+        ...allUp,
+        postgres: async () => {
+          calls++;
+          await gate;
+          return true;
+        },
       },
-    });
+      5_000,
+    );
     const pending = Array.from({ length: 5 }, () => fetch(`${base}/health`));
+    while (calls < 1) await Bun.sleep(5);
     await Bun.sleep(20);
     release();
     const responses = await Promise.all(pending);

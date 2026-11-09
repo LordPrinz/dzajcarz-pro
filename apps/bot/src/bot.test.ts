@@ -7,6 +7,7 @@ import {
   defineEvent,
   defineModal,
   defineUserSelect,
+  type Logger,
   PUBLIC_OWNER,
   silentLogger,
   UNKNOWN_MODAL,
@@ -384,6 +385,18 @@ describe("components in routing", () => {
   });
 });
 
+/** A client that only records the listeners `attachHandlers` registers, so a test can fire events at them. */
+function fakeClient() {
+  const listeners = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const client = {
+    on: (event: string, listener: (...args: unknown[]) => Promise<void>) =>
+      void listeners.set(event, listener),
+    once: () => {},
+    user: { id: BOT },
+  } as unknown as Client;
+  return { client, listeners };
+}
+
 describe("slash commands in a guild the bot is not in", () => {
   const GUILD = "100000000000000001";
 
@@ -405,13 +418,7 @@ describe("slash commands in a guild the bot is not in", () => {
       },
       forget: async () => {},
     };
-    const listeners = new Map<string, (...args: unknown[]) => Promise<void>>();
-    const client = {
-      on: (event: string, listener: (...args: unknown[]) => Promise<void>) =>
-        void listeners.set(event, listener),
-      once: () => {},
-      user: { id: BOT },
-    } as unknown as Client;
+    const { client, listeners } = fakeClient();
     attachHandlers(client, {
       registry: createRegistry([{ name: "fun", commands: [ping] }]),
       gate,
@@ -451,6 +458,85 @@ describe("slash commands in a guild the bot is not in", () => {
     expect(result.ran).toEqual([]);
     expect(result.gateReads).toBe(1);
     expect(result.replies).toHaveLength(1);
+  });
+});
+
+describe("failure logs carry where they happened", () => {
+  const GUILD = "100000000000000001";
+  const gate: ModuleGate = { isEnabled: async () => true, forget: async () => {} };
+
+  function recordingLogger() {
+    const errors: { message: string; fields: Record<string, unknown> | undefined }[] = [];
+    const logger: Logger = {
+      ...silentLogger,
+      error: (message, fields) => void errors.push({ message, fields }),
+      child: () => logger,
+    };
+    return { logger, errors };
+  }
+
+  function attach(logger: Logger) {
+    const { client, listeners } = fakeClient();
+    attachHandlers(client, {
+      registry: createRegistry([{ name: "fun" }]),
+      gate,
+      prefixes: {
+        resolve: async () => {
+          throw new Error("redis down");
+        },
+        forget: async () => {},
+      },
+      botInGuild: () => true,
+      logger,
+    });
+    return listeners;
+  }
+
+  test("an alwaysRun event handler failure logs the guild and module", async () => {
+    const { logger, errors } = recordingLogger();
+    const boom = defineEvent({
+      name: "boom",
+      event: "messageCreate",
+      alwaysRun: true,
+      run: () => {
+        throw new Error("nope");
+      },
+    });
+    const [entry] = createRegistry([{ name: "fun", events: [boom] }]).events();
+    if (!entry) throw new Error("event missing");
+    const message = { guildId: GUILD, channelId: "3", channel: null };
+    await createEventListener(entry, gate, logger)(message);
+    expect(errors[0]?.fields).toMatchObject({ handler: "boom", module: "fun", guildId: GUILD });
+  });
+
+  test("a message that fails to be handled logs the guild", async () => {
+    const { logger, errors } = recordingLogger();
+    const message = {
+      id: "9",
+      guildId: GUILD,
+      author: { bot: false },
+      webhookId: null,
+      content: "!x",
+    };
+    await attach(logger).get("messageCreate")?.(message);
+    expect(errors[0]).toMatchObject({
+      message: "Message handling failed",
+      fields: { messageId: "9", guildId: GUILD },
+    });
+  });
+
+  test("a failed interaction logs the guild and the command or custom id", async () => {
+    const { logger, errors } = recordingLogger();
+    const listener = attach(logger).get("interactionCreate");
+    const boom = () => {
+      throw new Error("nope");
+    };
+    await listener?.({ id: "1", guildId: GUILD, commandName: "ping", isMessageComponent: boom });
+    await listener?.({ id: "2", guildId: GUILD, customId: "menu:1", isMessageComponent: boom });
+    expect(errors.map((entry) => entry.fields)).toMatchObject([
+      { interactionId: "1", guildId: GUILD, command: "ping" },
+      { interactionId: "2", guildId: GUILD, customId: "menu:1" },
+    ]);
   });
 });
 

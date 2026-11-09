@@ -48,8 +48,7 @@ const EnvFields = z.object({
     .string()
     .default("Europe/Warsaw")
     .refine(isTimeZone, "expected an IANA time zone, e.g. Europe/Warsaw"),
-  // The health endpoint (GET /health). 0 turns it off. The Docker image sets HEALTH_HOSTNAME=0.0.0.0 so a
-  // published port reaches it.
+  // The health endpoint (GET /health). 0 turns it off.
   HEALTH_PORT: z.coerce.number().int().min(0).max(65535).default(8080),
   HEALTH_HOSTNAME: z.string().min(1).default("127.0.0.1"),
   // On unless set to 0/false: the bot registers its slash commands at startup. Turn it off when several

@@ -222,7 +222,7 @@ if (env.HEALTH_PORT !== 0) {
       },
     });
   } catch (error) {
-    // Port taken: the bot is more useful without a health endpoint than not running.
+    // Port taken or hostname unusable: a bot without a health endpoint beats a bot that does not start.
     logger.warn("Health endpoint could not start; continuing without it", { error });
   }
 }

@@ -1,16 +1,16 @@
 import type { Logger } from "@dzajcarz/core";
 import { Status } from "discord.js";
 
-export type CheckName = "gateway" | "postgres" | "redis";
+type CheckName = "gateway" | "postgres" | "redis";
 export type Probes = Record<CheckName, () => Promise<boolean>>;
 
-export interface HealthReport {
+interface HealthReport {
   ok: boolean;
   checks: Record<CheckName, boolean>;
 }
 
-/** Longest a single probe may take; a hanging database must not hang the endpoint (or Docker's check). */
-export const PROBE_TIMEOUT_MS = 2_000;
+/** Longest a single probe may take; a hanging database must not hang the endpoint (or a supervisor's check). */
+const PROBE_TIMEOUT_MS = 2_000;
 
 /**
  * discord.js sets `client.ws.status` to Ready once and never resets it; a dropped connection only changes the
@@ -49,7 +49,7 @@ export async function checkHealth(
   return { ok: gateway && postgres && redis, checks: { gateway, postgres, redis } };
 }
 
-export interface HealthServerOptions {
+interface HealthServerOptions {
   port: number;
   hostname: string;
   probes: Probes;
@@ -69,6 +69,22 @@ export function startHealthServer({
   logger,
   probeTimeoutMs,
 }: HealthServerOptions): Bun.Server<undefined> {
+  // A probe still pending from an earlier run is reused, so a hung database gets one `select 1`, not one per
+  // request.
+  const shared = Object.fromEntries(
+    Object.entries(probes).map(([name, probe]) => {
+      let pending: Promise<boolean> | undefined;
+      return [
+        name,
+        () => {
+          pending ??= probe().finally(() => {
+            pending = undefined;
+          });
+          return pending;
+        },
+      ];
+    }),
+  ) as Probes;
   // Concurrent requests share one run, so hammering /health cannot queue up `select 1` and pings.
   let inFlight: Promise<HealthReport> | undefined;
   const server = Bun.serve({
@@ -79,7 +95,7 @@ export function startHealthServer({
       if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });
       if (pathname === "/health/live") return Response.json({ ok: true });
       if (pathname !== "/health") return new Response("Not Found", { status: 404 });
-      inFlight ??= checkHealth(probes, probeTimeoutMs).finally(() => {
+      inFlight ??= checkHealth(shared, probeTimeoutMs).finally(() => {
         inFlight = undefined;
       });
       const report = await inFlight;
