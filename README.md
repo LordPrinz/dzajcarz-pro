@@ -37,6 +37,7 @@ modules/
   general/          ping, help (interactive menu: categories, pages, install links)
   settings/         prefix (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set through a form, off, test), greets new members
+  fun/              czy_wiedziałeś, time
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, special invite with a message and attachment, block, hide, show), a voice channel per member who joins the party area
   schedule/         schedule (list, exclude, include, song), plays "Lato z Radiem" at 9:00 and 21:00 in the busiest voice channel
   status/           rotates the bot's activity (the old bot's song)

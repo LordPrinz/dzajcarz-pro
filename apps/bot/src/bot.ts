@@ -114,7 +114,7 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
         logger.warn("Unknown slash command", { command: interaction.commandName });
         return;
       }
-      const ctx = contextFromInteraction(interaction);
+      const ctx = contextFromInteraction(interaction, logger);
       const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
       if (!(await commandEnabled(deps, command, ctx.guildId, toggleChannel))) {
         await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
@@ -232,7 +232,7 @@ export async function handleMessage(
     return;
 
   // Checked before parsing so a member without access never learns the usage of a command they cannot run.
-  const context = contextFromMessage(message, {});
+  const context = contextFromMessage(message, {}, undefined, logger);
   const denied = checkPrefixAccess(command, invocation.rest, context);
   if (denied) {
     await message.reply({ content: denied, allowedMentions: NO_MENTIONS });
@@ -246,7 +246,7 @@ export async function handleMessage(
   }
   await executeCommand(
     command,
-    contextFromMessage(message, parsed.args, parsed.subcommand),
+    contextFromMessage(message, parsed.args, parsed.subcommand, logger),
     logger,
   );
 }
