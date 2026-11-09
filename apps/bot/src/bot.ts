@@ -80,9 +80,14 @@ export function createEventListener(
   return async (...args) => {
     let guildId: string | undefined;
     try {
-      const scope = handler.alwaysRun ? undefined : eventScope(handler.event, args);
+      const scope = eventScope(handler.event, args);
       guildId = scope?.guildId;
-      if (scope && !(await gate.isEnabled(scope.guildId, scope.channelId, module))) return;
+      if (
+        scope &&
+        !handler.alwaysRun &&
+        !(await gate.isEnabled(scope.guildId, scope.channelId, module))
+      )
+        return;
       await handler.run(...args);
     } catch (error) {
       logger.error("Event handler failed", {
@@ -133,7 +138,8 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
       logger.error("Interaction handling failed", {
         interactionId: interaction.id,
         guildId: interaction.guildId,
-        command: interaction.isCommand() ? interaction.commandName : undefined,
+        command: "commandName" in interaction ? interaction.commandName : undefined,
+        customId: "customId" in interaction ? interaction.customId : undefined,
         error,
       });
     }

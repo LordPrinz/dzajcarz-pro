@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createJsonLogger } from "@dzajcarz/core";
-import { checkHealth, type Probes, startHealthServer } from "./health.ts";
+import { Status } from "discord.js";
+import { checkHealth, gatewayReady, type Probes, startHealthServer } from "./health.ts";
 import { runHealthcheck } from "./healthcheck.ts";
 
 const up = async () => true;
@@ -93,14 +94,54 @@ describe("runHealthcheck", () => {
   });
 
   test("exits 1 when nothing listens", async () => {
-    const server = startHealthServer({
-      port: 0,
-      hostname: "127.0.0.1",
-      probes: allUp,
-      logger,
+    // Port 1 is privileged and unused, so the connection is refused without racing a freed port.
+    expect(await runHealthcheck({ HEALTH_PORT: "1" })).toBe(1);
+  });
+
+  test("exits 1 when the endpoint is disabled with HEALTH_PORT=0", async () => {
+    expect(await runHealthcheck({ HEALTH_PORT: "0" })).toBe(1);
+  });
+});
+
+describe("gatewayReady", () => {
+  const shards = (...statuses: number[]) => new Map(statuses.map((status, id) => [id, { status }]));
+
+  test("is ready when every shard is ready", () => {
+    expect(gatewayReady(shards(Status.Ready, Status.Ready))).toBe(true);
+  });
+
+  test("is not ready while any shard reconnects or is disconnected", () => {
+    expect(gatewayReady(shards(Status.Ready, Status.Reconnecting))).toBe(false);
+    expect(gatewayReady(shards(Status.Disconnected))).toBe(false);
+  });
+
+  test("is not ready before any shard exists", () => {
+    expect(gatewayReady(shards())).toBe(false);
+  });
+});
+
+describe("coalescing", () => {
+  test("concurrent requests share one probe run", async () => {
+    let calls = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    const { port } = server;
-    await server.stop(true);
-    expect(await runHealthcheck({ HEALTH_PORT: String(port) })).toBe(1);
+    const base = start({
+      ...allUp,
+      postgres: async () => {
+        calls++;
+        await gate;
+        return true;
+      },
+    });
+    const pending = Array.from({ length: 5 }, () => fetch(`${base}/health`));
+    await Bun.sleep(20);
+    release();
+    const responses = await Promise.all(pending);
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
+    expect(calls).toBe(1);
+    await fetch(`${base}/health`);
+    expect(calls).toBe(2);
   });
 });

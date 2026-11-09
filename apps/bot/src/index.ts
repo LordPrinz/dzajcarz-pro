@@ -19,7 +19,7 @@ import {
 import { createRedisStore, keepConnected } from "@dzajcarz/kv";
 import { DZAJCO_GIF } from "@dzajcarz/module-dzajco";
 import { RedisClient } from "bun";
-import { Client, Events, GatewayIntentBits, Partials, Status } from "discord.js";
+import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { deployOnStartup } from "./deploy.ts";
 import { createDzajcoResponder } from "./discord/dzajco.ts";
@@ -40,7 +40,7 @@ import { createScheduleVoice } from "./discord/schedule.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleEnabled } from "./event-scope.ts";
-import { startHealthServer } from "./health.ts";
+import { gatewayReady, startHealthServer } from "./health.ts";
 import { runHealthcheck } from "./healthcheck.ts";
 import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
@@ -204,26 +204,35 @@ process.on("uncaughtException", (error) => {
 });
 client.on(Events.Error, (error) => logger.error("Discord client error", { error }));
 
-const healthServer = startHealthServer({
-  port: env.HEALTH_PORT,
-  hostname: env.HEALTH_HOSTNAME,
-  logger: logger.child({ component: "health" }),
-  probes: {
-    gateway: async () => client.ws.status === Status.Ready,
-    postgres: async () => {
-      await sql`select 1`;
-      return true;
-    },
-    redis: () => createRedisStore(redis).ping(),
-  },
-});
+const probeStore = createRedisStore(redis);
+let healthServer: ReturnType<typeof startHealthServer> | undefined;
+if (env.HEALTH_PORT !== 0) {
+  try {
+    healthServer = startHealthServer({
+      port: env.HEALTH_PORT,
+      hostname: env.HEALTH_HOSTNAME,
+      logger: logger.child({ component: "health" }),
+      probes: {
+        gateway: async () => gatewayReady(client.ws.shards),
+        postgres: async () => {
+          await sql`select 1`;
+          return true;
+        },
+        redis: () => probeStore.ping(),
+      },
+    });
+  } catch (error) {
+    // Port taken: the bot is more useful without a health endpoint than not running.
+    logger.warn("Health endpoint could not start; continuing without it", { error });
+  }
+}
 
 let stopping = false;
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
   logger.info("Shutting down", { signal });
-  await healthServer.stop();
+  await healthServer?.stop(true);
   for (const module of modules) {
     try {
       await module.dispose?.();

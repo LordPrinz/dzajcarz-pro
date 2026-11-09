@@ -129,24 +129,28 @@ policy starts a clean instance.
 ### Health endpoint
 
 The bot serves a small HTTP endpoint (`Bun.serve`) on `HEALTH_HOSTNAME:HEALTH_PORT` (default
-`0.0.0.0:8080`).
+`127.0.0.1:8080`; the Docker image sets `HEALTH_HOSTNAME=0.0.0.0`). `HEALTH_PORT=0` turns it off, and so
+does a port that is already taken (a warning is logged and the bot keeps running).
 
-- `GET /health` (readiness) probes the Discord gateway, Postgres (`select 1`) and Redis (`ping`) in
-  parallel, each with a 2 second timeout; a probe that throws or hangs counts as down. It answers `200`
+- `GET /health` (readiness) probes the Discord gateway (every shard is ready), Postgres (`select 1`) and Redis (`ping`) in
+  parallel, each with a 2 second timeout; a probe that throws or hangs counts as down. Concurrent requests
+  share one run. It answers `200`
   when all three are up and `503` otherwise:
 
   ```json
   { "ok": false, "checks": { "gateway": true, "postgres": true, "redis": false } }
   ```
 
-- `GET /health/live` (liveness) answers `200 {"ok":true}` whenever the process responds. A supervisor can
-  restart on a missing answer, while a `503` on `/health` means a dependency is down and a restart alone
-  would not help.
+- `GET /health/live` (liveness) answers `200 {"ok":true}` whenever the process responds. It is for
+  supervisors that restart on no answer; a `503` on `/health` means a dependency is down, which a restart
+  alone would not fix.
 - Any other path is `404`, any other method `405`.
 
 The compiled binary has no curl, so `bot healthcheck` fetches `http://127.0.0.1:$HEALTH_PORT/health` and
-exits `0` on a `200` and `1` otherwise. It reads only `HEALTH_PORT`, so it works without the bot's secrets.
-Use it as the Docker `HEALTHCHECK`.
+exits `0` on a `200` and `1` otherwise (also when `HEALTH_PORT=0`). It reads only `HEALTH_PORT`, so it
+works without the bot's secrets. The Docker `HEALTHCHECK` uses `/health`, so `docker ps` shows the container
+as unhealthy while a dependency or the gateway is down. Plain Docker does not restart on unhealthy; crashes
+restart through the exit code 1 and the restart policy.
 
 ### Prefix per guild
 

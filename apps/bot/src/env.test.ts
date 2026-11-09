@@ -23,13 +23,17 @@ describe("RIOT_API_KEY", () => {
 });
 
 describe("health endpoint", () => {
-  test("listens on 0.0.0.0:8080 by default", () => {
+  test("listens on 127.0.0.1:8080 by default", () => {
     const env = loadEnv(REQUIRED);
-    expect([env.HEALTH_HOSTNAME, env.HEALTH_PORT]).toEqual(["0.0.0.0", 8080]);
+    expect([env.HEALTH_HOSTNAME, env.HEALTH_PORT]).toEqual(["127.0.0.1", 8080]);
   });
 
   test("takes a port and hostname from the environment", () => {
-    const env = loadEnv({ ...REQUIRED, HEALTH_PORT: "9000", HEALTH_HOSTNAME: "127.0.0.1" });
-    expect([env.HEALTH_HOSTNAME, env.HEALTH_PORT]).toEqual(["127.0.0.1", 9000]);
+    const env = loadEnv({ ...REQUIRED, HEALTH_PORT: "9000", HEALTH_HOSTNAME: "0.0.0.0" });
+    expect([env.HEALTH_HOSTNAME, env.HEALTH_PORT]).toEqual(["0.0.0.0", 9000]);
+  });
+
+  test("port 0 disables the endpoint", () => {
+    expect(loadEnv({ ...REQUIRED, HEALTH_PORT: "0" }).HEALTH_PORT).toBe(0);
   });
 });

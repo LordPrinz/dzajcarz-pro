@@ -1,4 +1,5 @@
 import type { Logger } from "@dzajcarz/core";
+import { Status } from "discord.js";
 
 export type CheckName = "gateway" | "postgres" | "redis";
 export type Probes = Record<CheckName, () => Promise<boolean>>;
@@ -10,6 +11,17 @@ export interface HealthReport {
 
 /** Longest a single probe may take; a hanging database must not hang the endpoint (or Docker's check). */
 export const PROBE_TIMEOUT_MS = 2_000;
+
+/**
+ * discord.js sets `client.ws.status` to Ready once and never resets it; a dropped connection only changes the
+ * status of the shard, so readiness has to look at every shard.
+ */
+export function gatewayReady(shards: {
+  size: number;
+  values(): Iterable<{ status: number }>;
+}): boolean {
+  return shards.size > 0 && [...shards.values()].every((shard) => shard.status === Status.Ready);
+}
 
 async function runProbe(probe: () => Promise<boolean>, timeoutMs: number): Promise<boolean> {
   let timer: Timer | undefined;
@@ -57,6 +69,8 @@ export function startHealthServer({
   logger,
   probeTimeoutMs,
 }: HealthServerOptions): Bun.Server<undefined> {
+  // Concurrent requests share one run, so hammering /health cannot queue up `select 1` and pings.
+  let inFlight: Promise<HealthReport> | undefined;
   const server = Bun.serve({
     port,
     hostname,
@@ -65,7 +79,10 @@ export function startHealthServer({
       if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });
       if (pathname === "/health/live") return Response.json({ ok: true });
       if (pathname !== "/health") return new Response("Not Found", { status: 404 });
-      const report = await checkHealth(probes, probeTimeoutMs);
+      inFlight ??= checkHealth(probes, probeTimeoutMs).finally(() => {
+        inFlight = undefined;
+      });
+      const report = await inFlight;
       return Response.json(report, { status: report.ok ? 200 : 503 });
     },
     error(error) {
