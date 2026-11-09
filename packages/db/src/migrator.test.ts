@@ -26,6 +26,7 @@ describe.skipIf(!sql)("migrator", () => {
       SELECT table_name FROM information_schema.tables WHERE table_schema = ${schema}
     `;
     expect(tables.map((t) => t.table_name).sort()).toEqual([
+      "dzajco_channel_config",
       "guild_settings",
       "module_disabled",
       "party_area",

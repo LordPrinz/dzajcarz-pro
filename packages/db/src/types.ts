@@ -54,3 +54,11 @@ export interface ScheduledSongExclusionRow {
   channel_id: string;
   created_at: Date;
 }
+
+export interface DzajcoChannelConfigRow {
+  guild_id: string;
+  channel_id: string;
+  chance_percent: number;
+  cooldown_seconds: number;
+  updated_at: Date;
+}

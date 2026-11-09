@@ -35,6 +35,7 @@ packages/
   kv/               KeyValueStore port with Redis and in-memory adapters
 modules/
   general/          ping, help (interactive menu: categories, pages, install links)
+  dzajco/           answers "what" in any language with the DŻAJCO gif (dzajco show, set, reset)
   settings/         prefix (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set through a form, off, test), greets new members
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, special invite with a message and attachment, block, hide, show), a voice channel per member who joins the party area

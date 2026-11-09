@@ -18,6 +18,7 @@
         "@dzajcarz/core": "workspace:*",
         "@dzajcarz/db": "workspace:*",
         "@dzajcarz/kv": "workspace:*",
+        "@dzajcarz/module-dzajco": "workspace:*",
         "@dzajcarz/module-general": "workspace:*",
         "@dzajcarz/module-music": "workspace:*",
         "@dzajcarz/module-party": "workspace:*",
@@ -28,6 +29,17 @@
         "discord.js": "14.27.0",
         "lavalink-client": "2.11.0",
         "zod": "4.6.7",
+      },
+    },
+    "modules/dzajco": {
+      "name": "@dzajcarz/module-dzajco",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dzajcarz/core": "workspace:*",
+        "@dzajcarz/kv": "workspace:*",
+      },
+      "devDependencies": {
+        "discord.js": "14.27.0",
       },
     },
     "modules/general": {
@@ -150,6 +162,8 @@
     "@dzajcarz/db": ["@dzajcarz/db@workspace:packages/db"],
 
     "@dzajcarz/kv": ["@dzajcarz/kv@workspace:packages/kv"],
+
+    "@dzajcarz/module-dzajco": ["@dzajcarz/module-dzajco@workspace:modules/dzajco"],
 
     "@dzajcarz/module-general": ["@dzajcarz/module-general@workspace:modules/general"],
 

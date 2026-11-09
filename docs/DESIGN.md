@@ -152,6 +152,42 @@ pass, so substituted text is never re-expanded and unknown placeholders stay as 
 warning. It needs the privileged `GuildMembers` intent. The welcome sender is the one place that overrides
 `NO_MENTIONS`: it allows a ping for the joining member only (`allowedMentions: { users: [memberId] }`).
 
+### Dżajco
+
+The `dzajco` module answers a message that says "what" in any language with an egg reaction and the DŻAJCO
+gif. The word list comes from the old bot (111 entries); `normalizeWords` strips zero-width spaces, folds to
+NFC lowercase and drops repeats, which leaves 104. Short common words (`me`, `co`, `que`) stay on purpose.
+
+`createWhatMatcher` compiles the list into one regex, once. Every character of a word may repeat (`whaaat`)
+and inner whitespace is any run of whitespace. Words in scripts written without spaces (Han, kana, Thai, Lao,
+Khmer, Myanmar) match anywhere in the text; every other word needs a non-letter, non-mark, non-digit on both
+sides, so `whatever` and `somewhat` do not count.
+
+The `messageCreate` handler stops at the first failing check, in this order:
+
+1. no guild, a bot or webhook author, or empty text;
+2. no word matches (a regex test, so most messages cost no I/O);
+3. the text starts with the guild prefix (a command such as `!play what is love`) or with a mention of the bot;
+4. the channel's cooldown key is set;
+5. the dice roll (`random() * 100 >= chancePercent`) fails;
+6. another message took the cooldown key first.
+
+Edits are not handled, and a thread uses its own channel id. At most one answer per message. The matcher
+collapses runs of one character in the words and in the text (so `whaaat` matches `what` without a quadratic
+regex) and searches only the first 2000 characters.
+
+The cooldown lives in Redis under `dzajco:cooldown:<channelId>` (`setIfAbsent` with the TTL, so two messages
+racing for it cannot both answer) and starts only when the bot answers. A Redis error fails closed: no gif,
+a logged warning, so an outage never turns into gif spam. The default is a 3% chance and 60 s, per channel.
+
+`dzajco_channel_config` holds per-channel overrides, edited with `/dzajco set`, `show` and `reset` (Manage
+Server). A channel without a row uses the defaults. The handler reads settings through a Redis cache
+(`dzajco:settings:<channelId>`, 10 minutes, an unreadable entry is reloaded); `set` and `reset` delete that
+key and the running cooldown, so new values apply at once. If the invalidation fails, or a read races a
+write, the old settings can stay for up to the cache TTL. We accept that. Chance 0 switches the gif off in a
+channel. The random source is injected (`Math.random` in `modules.ts`), so the tests are deterministic. The
+reaction needs the Add Reactions permission; without it the bot logs a warning and still sends the gif.
+
 ### Party areas
 
 `/party create` opens a form (a modal, see Modals) with the category name, the join channel name, a channel
