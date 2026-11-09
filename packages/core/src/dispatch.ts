@@ -22,8 +22,8 @@ export const GENERIC_ERROR = "Coś poszło nie tak. Spróbuj ponownie za chwilę
 /**
  * Runs a command with the checks every command shares (DMs, member permissions) and one error policy:
  * a UserError is shown to the caller, anything else is logged and replaced by a generic message.
- * With `cooldowns`, a command or subcommand that sets `cooldownMs` is limited per member; when the store
- * fails the command runs anyway.
+ * With `cooldowns`, a command or subcommand that sets `cooldownMs` is limited per user across servers; when
+ * the store fails the command runs anyway.
  */
 export async function executeCommand(
   command: AnyCommand,
