@@ -8,6 +8,12 @@ import {
 import { createFunModule } from "@dzajcarz/module-fun";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
+  createMessagesModule,
+  type MessageChannels,
+  type ScheduledMessageSender,
+  type ScheduledMessageStore,
+} from "@dzajcarz/module-messages";
+import {
   createModerationModule,
   type ModerationGuild,
   type ModerationLog,
@@ -96,6 +102,12 @@ export interface ModuleServices {
   // riot
   riotStats: RiotStats | null;
   riotStore: KeyValueStore;
+  // messages
+  scheduledMessages: ScheduledMessageStore;
+  scheduledMessageSender: ScheduledMessageSender;
+  guildModuleEnabled: (guildId: string, module: string) => Promise<boolean>;
+  messageLock: KeyValueStore;
+  messageChannels: MessageChannels;
   logger: Logger;
 }
 
@@ -172,6 +184,19 @@ export function createModules(services: ModuleServices): BotModule[] {
       store: services.riotStore,
       now: Date.now,
       logger: services.logger.child({ module: "riot" }),
+    }),
+    createMessagesModule({
+      store: services.scheduledMessages,
+      sender: services.scheduledMessageSender,
+      channels: services.messageChannels,
+      cron: services.cron,
+      lock: services.messageLock,
+      botInGuild: services.botInGuild,
+      moduleEnabled: services.moduleEnabled,
+      guildModuleEnabled: services.guildModuleEnabled,
+      now: () => new Date(),
+      timeZone: "Europe/Warsaw",
+      logger: services.logger.child({ module: "messages" }),
     }),
   ];
 }

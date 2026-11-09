@@ -21,6 +21,7 @@
         "@dzajcarz/module-dzajco": "workspace:*",
         "@dzajcarz/module-fun": "workspace:*",
         "@dzajcarz/module-general": "workspace:*",
+        "@dzajcarz/module-messages": "workspace:*",
         "@dzajcarz/module-moderation": "workspace:*",
         "@dzajcarz/module-music": "workspace:*",
         "@dzajcarz/module-party": "workspace:*",
@@ -58,6 +59,14 @@
       "version": "0.0.0",
       "dependencies": {
         "@dzajcarz/core": "workspace:*",
+      },
+    },
+    "modules/messages": {
+      "name": "@dzajcarz/module-messages",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dzajcarz/core": "workspace:*",
+        "@dzajcarz/kv": "workspace:*",
       },
     },
     "modules/moderation": {
@@ -195,6 +204,8 @@
     "@dzajcarz/module-fun": ["@dzajcarz/module-fun@workspace:modules/fun"],
 
     "@dzajcarz/module-general": ["@dzajcarz/module-general@workspace:modules/general"],
+
+    "@dzajcarz/module-messages": ["@dzajcarz/module-messages@workspace:modules/messages"],
 
     "@dzajcarz/module-moderation": ["@dzajcarz/module-moderation@workspace:modules/moderation"],
 

@@ -17,6 +17,7 @@
     "@dzajcarz/module-dzajco": "workspace:*",
     "@dzajcarz/module-fun": "workspace:*",
     "@dzajcarz/module-general": "workspace:*",
+    "@dzajcarz/module-messages": "workspace:*",
     "@dzajcarz/module-moderation": "workspace:*",
     "@dzajcarz/module-music": "workspace:*",
     "@dzajcarz/module-party": "workspace:*",

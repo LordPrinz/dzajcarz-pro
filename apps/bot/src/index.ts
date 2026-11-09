@@ -12,6 +12,7 @@ import {
   createModerationRepository,
   createModuleToggleRepository,
   createPartyRepository,
+  createScheduledMessageRepository,
   createScheduledSongRepository,
   createWelcomeRepository,
 } from "@dzajcarz/db";
@@ -24,6 +25,7 @@ import { deployOnStartup } from "./deploy.ts";
 import { createDzajcoResponder } from "./discord/dzajco.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
+import { createMessageChannels, createScheduledMessageSender } from "./discord/messages.ts";
 import { createModerationGuild } from "./discord/moderation.ts";
 import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./discord/music.ts";
 import {
@@ -158,6 +160,11 @@ const modules = createModules({
   moderationDmLimit: createRedisStore(redis),
   riotStats,
   riotStore,
+  scheduledMessages: createScheduledMessageRepository(sql),
+  scheduledMessageSender: createScheduledMessageSender(client),
+  guildModuleEnabled: (guildId, module) => gate.isEnabled(guildId, null, module),
+  messageLock: createRedisStore(redis),
+  messageChannels: createMessageChannels(client),
   logger,
 });
 const registry = createRegistry(modules);

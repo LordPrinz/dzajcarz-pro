@@ -42,6 +42,7 @@ modules/
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, special invite with a message and attachment, block, hide, show), a voice channel per member who joins the party area
   moderation/       ban, kick, timeout, untimeout, warn, warnings, purge (every action stored with its reason)
   schedule/         schedule (list, exclude, include, song), plays "Lato z Radiem" at 9:00 and 21:00 in the busiest voice channel
+  messages/         messages (add through a form, list, remove), dm (on, off): scheduled messages to channels or members' DMs at a set time
   status/           rotates the bot's activity (the old bot's song)
   music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), loop, shuffle, seek, volume, filter, remove, jump, back, clear, save (sv), a now playing panel with buttons
   riot/             valorant, lol (player stats from the Riot API, needs RIOT_API_KEY)

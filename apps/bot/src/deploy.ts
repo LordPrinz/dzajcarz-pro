@@ -316,6 +316,12 @@ export const createDeployRegistry = () =>
       moderationDmLimit: unusedServices(),
       riotStats: null,
       riotStore: unusedServices(),
+      // messages (its cron job is the shared stand-in above, so nothing is sent while deploying)
+      scheduledMessages: unusedServices(),
+      scheduledMessageSender: unusedServices(),
+      guildModuleEnabled: unusedServices(),
+      messageLock: unusedServices(),
+      messageChannels: unusedServices(),
       logger: silentLogger,
     }),
   );

@@ -77,3 +77,21 @@ export interface ModerationActionRow {
   message_count: number | null;
   created_at: Date;
 }
+
+export interface ScheduledMessageRow {
+  /** bigint comes back from Bun.SQL as a string. */
+  id: string;
+  guild_id: string;
+  time_of_day: string;
+  content: string;
+  channel_id: string | null;
+  user_id: string | null;
+  created_by: string;
+  created_at: Date;
+}
+
+export interface ScheduledMessageOptOutRow {
+  user_id: string;
+  guild_id: string | null;
+  created_at: Date;
+}
