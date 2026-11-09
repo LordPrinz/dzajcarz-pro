@@ -314,6 +314,8 @@ export const createDeployRegistry = () =>
       moderationGuild: unusedServices(),
       moderationLog: unusedServices(),
       moderationDmLimit: unusedServices(),
+      riotStats: null,
+      riotStore: unusedServices(),
       logger: silentLogger,
     }),
   );

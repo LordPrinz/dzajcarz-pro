@@ -27,6 +27,7 @@ import {
   type PartyPermissions,
   type PartyRepository,
 } from "@dzajcarz/module-party";
+import { createRiotModule, type RiotStats } from "@dzajcarz/module-riot";
 import {
   createScheduleModule,
   type ScheduledSong,
@@ -92,6 +93,9 @@ export interface ModuleServices {
   moderationGuild: ModerationGuild;
   moderationLog: ModerationLog;
   moderationDmLimit: Pick<KeyValueStore, "setIfAbsent">;
+  // riot
+  riotStats: RiotStats | null;
+  riotStore: KeyValueStore;
   logger: Logger;
 }
 
@@ -162,6 +166,12 @@ export function createModules(services: ModuleServices): BotModule[] {
       log: services.moderationLog,
       dmLimit: services.moderationDmLimit,
       logger: services.logger.child({ module: "moderation" }),
+    }),
+    createRiotModule({
+      stats: services.riotStats,
+      store: services.riotStore,
+      now: Date.now,
+      logger: services.logger.child({ module: "riot" }),
     }),
   ];
 }
