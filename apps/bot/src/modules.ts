@@ -1,5 +1,6 @@
 import type { BotModule, CommandSummary, CronScheduler, Logger, Scheduler } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
+import { createFunModule } from "@dzajcarz/module-fun";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
   createMusicModule,
@@ -128,5 +129,6 @@ export function createModules(services: ModuleServices): BotModule[] {
       clock: services.clock,
       logger: services.logger.child({ module: "status" }),
     }),
+    createFunModule({ random: Math.random, now: () => new Date(), timeZone: "Europe/Warsaw" }),
   ];
 }

@@ -366,6 +366,15 @@ interval; a repeated `clientReady` (reconnect) does not start another, and `disp
 two ports, `Presence` and `Clock`, so the rotation is tested with a fake clock. A failing `setActivity` is
 logged and the next tick tries again. The handler is `alwaysRun`: the status belongs to the bot, not a guild.
 
+### Fun commands
+
+`modules/fun` holds `/czy_wiedziałeś` (a coin flip: "Wiedział!" with a 🙋‍♂️ reaction, or "Nie wiedział sadge
+bruh") and `/time` (the time in Europe/Warsaw as `HH:MM:SS`, midnight is `00`). The random source, the clock and
+the zone are injected, so tests pin both answers and the DST changes. `/time` does not mention the caller.
+A reply may carry `reactions`, unicode emoji the adapter adds to the sent message. Adding them is best effort:
+on a user install or in a group DM the bot cannot react, so a failed reaction is logged at `warn` and never fails the
+reply. Only command replies (slash and prefix) apply it; other senders ignore it.
+
 ### Mentions
 
 The client and every reply set `allowedMentions: { parse: [] }`. Commands echo user input (song titles,

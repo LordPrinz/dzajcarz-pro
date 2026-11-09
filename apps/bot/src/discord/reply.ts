@@ -11,11 +11,19 @@ export interface ReplyPayload {
   files: { attachment: Buffer; name: string }[];
   components: ComponentRows;
   ephemeral: boolean;
+  reactions: readonly string[];
 }
 
 export function toReplyPayload(reply: Reply): ReplyPayload {
   if (typeof reply === "string")
-    return { content: reply, embeds: [], files: [], components: [], ephemeral: false };
+    return {
+      content: reply,
+      embeds: [],
+      files: [],
+      components: [],
+      ephemeral: false,
+      reactions: [],
+    };
   return {
     content: reply.content,
     embeds: (reply.embeds ?? []).map((embed) => ({
@@ -37,5 +45,6 @@ export function toReplyPayload(reply: Reply): ReplyPayload {
     })),
     components: toComponentRows(reply.components),
     ephemeral: reply.ephemeral ?? false,
+    reactions: reply.reactions ?? [],
   };
 }

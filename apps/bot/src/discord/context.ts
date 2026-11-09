@@ -1,4 +1,4 @@
-import type { CommandContext, CommandPlace } from "@dzajcarz/core";
+import { type CommandContext, type CommandPlace, type Logger, silentLogger } from "@dzajcarz/core";
 import {
   ApplicationCommandOptionType,
   type ChatInputCommandInteraction,
@@ -8,6 +8,26 @@ import {
 } from "discord.js";
 import { toModalPayload } from "./modals.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
+
+/**
+ * Adds the emoji one by one. Best effort: on a user install, in a group DM or without Add Reactions the call
+ * fails after the reply already went out, so the failure is only logged at warn and the rest are skipped.
+ */
+async function reactAll(
+  message: Message | undefined,
+  reactions: readonly string[],
+  logger: Logger,
+) {
+  if (!message) return;
+  for (const emoji of reactions) {
+    try {
+      await message.react(emoji);
+    } catch (error) {
+      logger.warn("Reaction failed", { emoji, error });
+      return;
+    }
+  }
+}
 
 export const MODAL_NOT_FIRST =
   "showModal() must be the first answer to the interaction, but it was already deferred, replied to or updated";
@@ -48,7 +68,10 @@ export function placeOf(
   }
 }
 
-export function contextFromInteraction(interaction: ChatInputCommandInteraction): CommandContext {
+export function contextFromInteraction(
+  interaction: ChatInputCommandInteraction,
+  logger: Logger = silentLogger,
+): CommandContext {
   return {
     args: slashArgs(interaction),
     invocation: "slash",
@@ -61,17 +84,23 @@ export function contextFromInteraction(interaction: ChatInputCommandInteraction)
       ? (interaction.memberPermissions?.bitfield ?? 0n)
       : null,
     async reply(reply) {
-      const { content, embeds, components, ephemeral } = toReplyPayload(reply);
+      const { content, embeds, components, ephemeral, reactions } = toReplyPayload(reply);
       const payload = { content, embeds, components, allowedMentions: NO_MENTIONS };
       const flags = ephemeral ? MessageFlags.Ephemeral : undefined;
+      let sent: Message | undefined;
       if (interaction.replied) {
-        await interaction.followUp({ ...payload, flags });
+        sent = await interaction.followUp({ ...payload, flags });
       } else if (interaction.deferred) {
         // A deferred reply's visibility was fixed by defer(), so `ephemeral` cannot change it here.
-        await interaction.editReply(payload);
+        sent = await interaction.editReply(payload);
+      } else if (reactions.length > 0) {
+        // Only ask Discord for the message when there is something to react to.
+        const response = await interaction.reply({ ...payload, flags, withResponse: true });
+        sent = response.resource?.message ?? undefined;
       } else {
         await interaction.reply({ ...payload, flags });
       }
+      await reactAll(sent, reactions, logger);
     },
     async defer(options) {
       if (!interaction.deferred && !interaction.replied) {
@@ -92,6 +121,7 @@ export function contextFromMessage(
   message: Message,
   args: Record<string, unknown>,
   subcommand?: string,
+  logger: Logger = silentLogger,
 ): CommandContext {
   const member = message.member;
   const channel = message.channel;
@@ -107,8 +137,14 @@ export function contextFromMessage(
     memberPermissions:
       member && !channel.isDMBased() ? member.permissionsIn(channel).bitfield : null,
     async reply(reply) {
-      const { content, embeds, components } = toReplyPayload(reply);
-      await message.reply({ content, embeds, components, allowedMentions: NO_MENTIONS });
+      const { content, embeds, components, reactions } = toReplyPayload(reply);
+      const sent = await message.reply({
+        content,
+        embeds,
+        components,
+        allowedMentions: NO_MENTIONS,
+      });
+      await reactAll(sent, reactions, logger);
     },
     async defer() {
       if (channel.isSendable()) await channel.sendTyping();
