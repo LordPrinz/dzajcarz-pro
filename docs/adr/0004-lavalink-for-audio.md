@@ -84,7 +84,13 @@ track starts right away):
 - SoundCloud: does not work. Search fails with "Did not detect any supported formats"; upstream also
   reports 404s on playback (lavaplayer #189 and #203, still open; Lavaplayer 2.2.7 does not fix it).
   The only reported workaround is an unofficial fork plugin from JitPack, which we do not run. The
-  source stays enabled so it starts working again with a fixed Lavalink release.
+  source is switched off (DZAJ-54): `soundcloud: false` and `soundcloudSearchEnabled: false` in
+  `application.yml`, and `/play` refuses SoundCloud links. To bring it back once Lavaplayer fixes both
+  issues and a Lavalink release ships the fix: bump Lavalink, set both flags to `true`, add
+  `soundcloud.com`, `m.soundcloud.com` and `on.soundcloud.com` to `LINK_HOSTS` in
+  `modules/music/src/format.ts`, restore SoundCloud in `UNSUPPORTED_LINK`, the `/play` option description
+  and `docs/DESIGN.md`, verify `scsearch:` and a track URL against the node, then recreate the Lavalink
+  container.
 - Vimeo: does not work. Loading succeeds, playback fails inside the Lavaplayer bundled with Lavalink
   4.2.2, the latest release.
 
@@ -185,8 +191,7 @@ Caveats for the music ticket:
   retried four times, and the player recovery after the restart ended in a `trackException`.
 - **SoundCloud search fails on the node, not in the clients.** `scsearch:` returns `loadType: error`
   ("Did not detect any supported formats", Lavaplayer 2.2.6) from plain REST too, for several queries and a
-  direct track URL. YouTube is unaffected. SoundCloud stays enabled in `application.yml` but should not be
-  advertised until a Lavalink bump fixes it.
+  direct track URL. YouTube is unaffected. SoundCloud has since been switched off (DZAJ-54, see above).
 - **YouTube plugin 1.18.2 works** with the configured clients (`MUSIC`, `WEB`, `ANDROID_VR`,
   `TVHTML5EMBEDDED`): search, URL, playlist and playback all succeeded, no login or OAuth needed so far.
   Breakage is expected over time; the fix is a plugin bump in `application.yml`.

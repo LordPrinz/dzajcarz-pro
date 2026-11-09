@@ -102,8 +102,7 @@ const wordIn = <T>(words: Readonly<Record<string, T>>, input: string): T | undef
 export const UNAVAILABLE = "Odtwarzacz muzyki jest teraz niedostępny.";
 export const NOT_IN_VOICE = "Najpierw wejdź na kanał głosowy.";
 export const NOTHING_PLAYING = "Nic teraz nie gra.";
-export const UNSUPPORTED_LINK =
-  "Obsługuję tylko linki z YouTube, SoundCloud, Bandcamp, Twitch i Vimeo.";
+export const UNSUPPORTED_LINK = "Obsługuję tylko linki z YouTube, Bandcamp, Twitch i Vimeo.";
 export const trackFailedText = (title: string) =>
   `Nie udało się odtworzyć **${escapeMarkdown(title)}**, gram dalej.`;
 export const EMPTY_QUEUE = "Kolejka jest pusta.";
@@ -538,7 +537,7 @@ export function createMusicModule({
   const queryOption = {
     query: {
       type: "string",
-      description: "Link (YouTube, SoundCloud…) albo czego szukać",
+      description: "Link (YouTube…) albo czego szukać",
       required: true,
       rest: true,
     },
