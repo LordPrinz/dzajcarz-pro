@@ -8,6 +8,7 @@ import {
 import {
   createDb,
   createGuildSettingsRepository,
+  createModerationRepository,
   createModuleToggleRepository,
   createPartyRepository,
   createScheduledSongRepository,
@@ -20,6 +21,7 @@ import { attachHandlers } from "./bot.ts";
 import { deployOnStartup } from "./deploy.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
+import { createModerationGuild } from "./discord/moderation.ts";
 import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./discord/music.ts";
 import {
   createPartyChannels,
@@ -133,6 +135,9 @@ const modules = createModules({
   scheduledSongPlayer: createScheduledSongPlayer(musicPlayer),
   scheduledSongs: SCHEDULED_SONGS,
   scheduledSongCron: { expression: env.SCHEDULED_SONG_CRON, timeZone: env.SCHEDULED_SONG_TIMEZONE },
+  moderationGuild: createModerationGuild(client),
+  moderationLog: createModerationRepository(sql),
+  moderationDmLimit: createRedisStore(redis),
   logger,
 });
 const registry = createRegistry(modules);

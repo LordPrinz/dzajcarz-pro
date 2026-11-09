@@ -371,6 +371,60 @@ logged and the next tick tries again. The handler is `alwaysRun`: the status bel
 The client and every reply set `allowedMentions: { parse: [] }`. Commands echo user input (song titles,
 reasons), and nothing the bot says should ping `@everyone`, a role or a user unless a command opts in.
 
+### Moderation
+
+`modules/moderation` has `/ban`, `/kick`, `/timeout <user> <30s|10m|2h|1d>`, `/untimeout`, `/warn`,
+`/warnings` and `/purge <1 to 100>`, all guild only. Each declares its Discord permission (Ban Members, Kick
+Members, Moderate Members for timeout, untimeout, warn and warnings, Manage Messages for purge), so the
+dispatcher checks prefix calls too. Ban, kick and Moderate Members are guild-wide powers, but the member
+permissions Discord hands a command include channel overwrites. The module therefore checks the caller's
+role permissions once more through its own `ModerationGuild` port (an administrator passes). Manage
+Messages is a channel permission, so purge relies on the dispatcher alone.
+
+Before acting, the module applies Discord's hierarchy rules itself and answers with the reason, in this
+order: not yourself, not the bot, not the server owner, not a member whose highest role is equal to or above
+the caller's (the owner as caller skips this one), and not one at or above the bot's highest role. Another
+bot that ranks lower is fair game. Kick, timeout, untimeout and warn need a member. A ban also takes
+the id of someone who already left; only the id rules apply then. For ban, kick, timeout and untimeout the
+bot's own role permissions must hold the bit (or Administrator), and an administrator cannot be timed out.
+These checks, the reason length (at most 512 characters, Discord's audit log limit) and the duration
+(`parseDuration`, more than 0 and at most 28 days) all run before `defer()`, so a refusal stays ephemeral
+and no DM goes out for an action that cannot happen. A refusal Discord still sends (Missing Permissions or
+Missing Access) becomes a Polish `UserError` in the adapter.
+
+The action comes first, then the record in `moderation_action` (guild, action, moderator, target, reason,
+duration for a timeout, channel and count for a purge, time). If the insert fails, the error is logged
+and the reply still confirms the action, with "(nie udało się zapisać w historii)" appended: the member
+is already banned, so pretending otherwise would be worse. The audit log reason is
+`<moderator>: <reason or "brak powodu">`, cut to 512 characters. Replies are public and echo the reason as
+typed; NO_MENTIONS keeps `@everyone` and role mentions in it silent.
+
+The target gets a direct message with the server name, the action, the reason and, for a timeout, the
+length, worded without grammatical gender ("Ban na serwerze X. Powód: …"). It is best effort: a closed DM or
+a failure is logged and never stops the action. For a kick or ban it goes out before the action, because
+afterwards the bot may share no server with them; if Discord then refuses the action, a second DM says it
+did not happen. For a warn or timeout it follows the action. Untimeout sends none. Warning DMs are limited to
+one per member and server every 10 minutes (a `KeyValueStore` key taken with `setIfAbsent`), so a burst of
+`/warn` cannot flood an inbox; every warning is still recorded, and if Redis fails the DM goes out anyway.
+
+`/warnings` shows the count and the 10 newest warnings in Warsaw time. Each reason is cut to 120
+characters, and whole lines are dropped if the text would still pass Discord's 2000 characters; the header
+is written after that, so "N najnowszych" matches the lines shown. The slash form answers ephemerally. A
+prefix reply would be public, so `!warnings` sends the list to the moderator by DM and only says so in the
+channel, or tells them to use `/warnings` when the DM fails.
+
+`/purge` fetches the newest messages of the channel (at most 100), deletes up to `count` of them through
+`bulkDelete` (a single message too) and leaves pinned messages and those older than 14 days minus a minute,
+which bulk delete cannot remove. The reply says how many of each were skipped. A purge that deleted nothing
+is not recorded. The slash form answers ephemerally. The prefix form skips the newest message, its own
+command, so the reply has something to answer. A message that arrives between the command and the fetch is
+the one skipped instead, and the command message is deleted; that race is accepted, and prefix replies use
+`failIfNotExists: false` so the answer still goes out without the reference. For the same reason
+`!purge 100` deletes at most 99.
+
+The guild install asks for Ban Members, Kick Members and Moderate Members for this module, and for Add
+Reactions, which Dżajco and the fun commands use; see CONTRIBUTING.
+
 ### Text in two languages
 
 Code, docs and logs are English. Everything users read on Discord is Polish.

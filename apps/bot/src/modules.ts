@@ -2,6 +2,11 @@ import type { BotModule, CommandSummary, CronScheduler, Logger, Scheduler } from
 import type { KeyValueStore } from "@dzajcarz/kv";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
+  createModerationModule,
+  type ModerationGuild,
+  type ModerationLog,
+} from "@dzajcarz/module-moderation";
+import {
   createMusicModule,
   type DirectMessages,
   type MusicPlayer,
@@ -73,6 +78,10 @@ export interface ModuleServices {
   scheduledSongPlayer: ScheduledSongPlayer;
   scheduledSongs: readonly [ScheduledSong, ...ScheduledSong[]];
   scheduledSongCron: { expression: string; timeZone: string };
+  // moderation
+  moderationGuild: ModerationGuild;
+  moderationLog: ModerationLog;
+  moderationDmLimit: Pick<KeyValueStore, "setIfAbsent">;
   logger: Logger;
 }
 
@@ -127,6 +136,12 @@ export function createModules(services: ModuleServices): BotModule[] {
       presence: services.presence,
       clock: services.clock,
       logger: services.logger.child({ module: "status" }),
+    }),
+    createModerationModule({
+      guild: services.moderationGuild,
+      log: services.moderationLog,
+      dmLimit: services.moderationDmLimit,
+      logger: services.logger.child({ module: "moderation" }),
     }),
   ];
 }

@@ -7,6 +7,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import { contextFromInteraction, contextFromMessage, placeOf, slashArgs } from "./context.ts";
+import { NO_MENTIONS } from "./reply.ts";
 
 function fakeInteraction(data: unknown[], subcommand: string | null, deferReply = async () => {}) {
   return {
@@ -91,5 +92,29 @@ describe("place", () => {
       }) as unknown as Message;
     expect(contextFromMessage(message("5"), {}).place).toBe("guild");
     expect(contextFromMessage(message(null), {}).place).toBe("bot-dm");
+  });
+});
+
+describe("prefix replies", () => {
+  test("pass NO_MENTIONS and still go out when the command message is gone", async () => {
+    const sent: unknown[] = [];
+    const message = {
+      guildId: "5",
+      channelId: "2",
+      author: { id: "1", displayName: "t" },
+      member: null,
+      channel: { isDMBased: () => false },
+      reply: async (payload: unknown) => void sent.push(payload),
+    } as unknown as Message;
+    await contextFromMessage(message, {}).reply("hej");
+    expect(sent).toEqual([
+      {
+        content: "hej",
+        embeds: [],
+        components: [],
+        allowedMentions: NO_MENTIONS,
+        failIfNotExists: false,
+      },
+    ]);
   });
 });

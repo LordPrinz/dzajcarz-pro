@@ -108,7 +108,15 @@ export function contextFromMessage(
       member && !channel.isDMBased() ? member.permissionsIn(channel).bitfield : null,
     async reply(reply) {
       const { content, embeds, components } = toReplyPayload(reply);
-      await message.reply({ content, embeds, components, allowedMentions: NO_MENTIONS });
+      // A command may delete its own message (a purge racing a new message); the reply then goes out
+      // without the reference instead of failing.
+      await message.reply({
+        content,
+        embeds,
+        components,
+        allowedMentions: NO_MENTIONS,
+        failIfNotExists: false,
+      });
     },
     async defer() {
       if (channel.isSendable()) await channel.sendTyping();

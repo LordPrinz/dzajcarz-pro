@@ -307,6 +307,10 @@ export const createDeployRegistry = () =>
       scheduledSongPlayer: unusedServices(),
       scheduledSongs: SCHEDULED_SONGS,
       scheduledSongCron: { expression: "0 9,21 * * *", timeZone: "Europe/Warsaw" },
+      // moderation
+      moderationGuild: unusedServices(),
+      moderationLog: unusedServices(),
+      moderationDmLimit: unusedServices(),
       logger: silentLogger,
     }),
   );
