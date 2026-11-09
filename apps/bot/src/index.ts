@@ -40,6 +40,8 @@ import { createScheduleVoice } from "./discord/schedule.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleEnabled } from "./event-scope.ts";
+import { gatewayReady, startHealthServer } from "./health.ts";
+import { runHealthcheck } from "./healthcheck.ts";
 import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
 import { createModules } from "./modules.ts";
@@ -50,6 +52,9 @@ import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
 import { createPrefixResolver } from "./prefix-resolver.ts";
 import { createPrefixSettings } from "./prefix-settings.ts";
 import { createRiotStats } from "./riot/stats.ts";
+
+// `bot healthcheck` is the container HEALTHCHECK: it needs no token or database, so it runs before loadEnv.
+if (process.argv[2] === "healthcheck") process.exit(await runHealthcheck(Bun.env));
 
 const env = loadEnv();
 const logger = createJsonLogger({ level: env.LOG_LEVEL });
@@ -191,13 +196,43 @@ client.once(Events.ClientReady, (ready) => {
 process.on("unhandledRejection", (reason) =>
   logger.error("Unhandled rejection", { error: reason }),
 );
+// Unlike a rejection, a thrown error nobody caught leaves the process in an unknown state: log it and exit
+// so the container's restart policy brings up a clean instance.
+process.on("uncaughtException", (error) => {
+  logger.error("Uncaught exception", { error });
+  process.exit(1);
+});
 client.on(Events.Error, (error) => logger.error("Discord client error", { error }));
+
+const probeStore = createRedisStore(redis);
+let healthServer: ReturnType<typeof startHealthServer> | undefined;
+if (env.HEALTH_PORT !== 0) {
+  try {
+    healthServer = startHealthServer({
+      port: env.HEALTH_PORT,
+      hostname: env.HEALTH_HOSTNAME,
+      logger: logger.child({ component: "health" }),
+      probes: {
+        gateway: async () => gatewayReady(client.ws.shards),
+        postgres: async () => {
+          await sql`select 1`;
+          return true;
+        },
+        redis: () => probeStore.ping(),
+      },
+    });
+  } catch (error) {
+    // Port taken or hostname unusable: a bot without a health endpoint beats a bot that does not start.
+    logger.warn("Health endpoint could not start; continuing without it", { error });
+  }
+}
 
 let stopping = false;
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
   logger.info("Shutting down", { signal });
+  await healthServer?.stop(true);
   for (const module of modules) {
     try {
       await module.dispose?.();
