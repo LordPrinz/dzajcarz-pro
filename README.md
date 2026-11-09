@@ -48,7 +48,7 @@ modules/
   music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), loop, shuffle, seek, volume, filter, remove, jump, back, clear, save (sv), a now playing panel with buttons
   riot/             valorant, lol (player stats from the Riot API, needs RIOT_API_KEY)
   …                 moderation, fun (see the board)
-infra/              docker-compose: Postgres, Redis, Lavalink and yt-cipher (profile "music"); the production compose
+infra/              docker-compose files: development (Postgres, Redis, Lavalink and yt-cipher in profile "music") and production (docker-compose.prod.yml)
 Dockerfile          the bot compiled into one binary (docs/DEPLOYMENT.md)
 scripts/            git hooks and GitHub automation (Bun scripts)
 docs/               design doc and ADRs

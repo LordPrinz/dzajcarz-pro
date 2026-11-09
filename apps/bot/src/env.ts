@@ -29,7 +29,8 @@ function isTimeZone(value: string): boolean {
 /**
  * Whether the credentials of `scheme://user:password@host/…` parse as written. An unencoded `/`, `?` or `#`
  * in the password ends the host part early, and a second `@` is read differently by different parsers, so
- * the client would connect somewhere else or without the password.
+ * the client would connect somewhere else or without the password. An `@` in the query string trips it too,
+ * which is fine: compose never builds such a URL.
  */
 export function credentialsIntact(value: string): boolean {
   const afterScheme = value.slice(value.indexOf("://") + 3);

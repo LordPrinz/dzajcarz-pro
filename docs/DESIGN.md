@@ -164,7 +164,7 @@ The bot applies pending migrations at startup, before it touches the database or
 code 1 when one fails. A separate migration step or container would add a moving part for a deployment of
 one bot. `migrate` holds a Postgres advisory lock on one connection while it runs, so a second caller (a
 restarted container that overlaps the old one, or `db:migrate` by hand) waits instead of applying the same
-file twice.
+file twice. It waits at most 60 seconds (`lock_timeout`), then fails like any other migration error.
 
 ### Prefix per guild
 

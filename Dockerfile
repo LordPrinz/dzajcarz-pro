@@ -28,6 +28,6 @@ USER nonroot
 EXPOSE 8080
 # start-period covers the migrations and the Discord login before /health can report ready.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 CMD ["/app/bot", "healthcheck"]
-# The bot closes Discord, Lavalink, Redis and Postgres on SIGTERM; compose waits stop_grace_period for it.
-STOPSIGNAL SIGTERM
+# SIGTERM (Docker's default stop signal) makes the bot close Discord, Lavalink, Redis and Postgres;
+# compose waits stop_grace_period for it.
 ENTRYPOINT ["/app/bot"]

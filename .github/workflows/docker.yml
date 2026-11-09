@@ -9,6 +9,7 @@ on:
       - package.json
       - bun.lock
       - bunfig.toml
+      - tsconfig.base.json
       - apps/**
       - packages/**
       - modules/**
@@ -22,6 +23,7 @@ on:
       - package.json
       - bun.lock
       - bunfig.toml
+      - tsconfig.base.json
       - apps/**
       - packages/**
       - modules/**

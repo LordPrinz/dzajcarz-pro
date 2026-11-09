@@ -52,6 +52,16 @@ volume. To move back to a release once one contains these fixes (anything newer 
 version in `infra/lavalink/application.yml`, set `snapshot: false`, recreate `lavalink`, check the log
 says `Loaded 'youtube-plugin-<version>.jar'`, and run the per-client check below again.
 
+Lavalink downloads the jar at runtime and does not verify it, so we record its hash and compare after a
+deploy (`prod exec lavalink sha256sum /opt/Lavalink/plugins/*.jar`, see [Deployment](../DEPLOYMENT.md)).
+Downloaded on 2026-11-09:
+
+```
+b062effdda6abeaa46913dfd1b5d5600120b65f239ce88f30948c7213a3ca1c0  youtube-plugin-2be8e542d3f6f178e048dca565892684c2e40177.jar
+```
+
+A plugin bump in `application.yml` must replace this line with the hash of the new jar.
+
 **Clients.** Per-client results on 2026-11-08, from a home connection in Poland, snapshot plus cipher,
 streamed through the plugin's `/youtube/stream/{id}?withClient=` route. Every client was tried on 4 fixed
 videos (`dQw4w9WgXcQ`, `7FwDP17XPlk`, the Lato z Radiem jingle `k4FITH0BtYA`, `S7sN-cFhwuk`); the two

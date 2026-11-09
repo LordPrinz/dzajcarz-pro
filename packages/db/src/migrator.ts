@@ -6,21 +6,27 @@ import { MIGRATIONS, type Migration } from "./migrations.ts";
 export const MIGRATIONS_DIR = `${import.meta.dir}/../migrations/`;
 
 // Arbitrary, fixed key of the session-level advisory lock that serialises concurrent `migrate` calls.
-const MIGRATION_LOCK = 724_591_305;
+export const MIGRATION_LOCK = 724_591_305;
 
 /**
  * Applies the migrations in order, each in its own transaction, and records them in `schema_migrations`.
  * Applied files must never be edited. An advisory lock makes a second caller (another bot starting, or
- * `db:migrate` next to a running deploy) wait instead of applying the same migration twice.
+ * `db:migrate` next to a running deploy) wait instead of applying the same migration twice, for at most
+ * `lockTimeout` (a Postgres interval): then it throws.
  */
 export async function migrate(
   sql: SQL,
   migrations: readonly Migration[] = MIGRATIONS,
+  { lockTimeout = "60s" }: { lockTimeout?: string } = {},
 ): Promise<string[]> {
   const connection = await sql.reserve();
   let unlocked = false;
   try {
+    // A caller stuck behind a lock that is never released fails instead of hanging the start forever.
+    await connection`SELECT set_config('lock_timeout', ${lockTimeout}, false)`;
     await connection`SELECT pg_advisory_lock(${MIGRATION_LOCK})`;
+    // The migrations themselves keep the server's default, and so does the pool after release.
+    await connection`RESET lock_timeout`;
     try {
       return await applyPending(connection, migrations);
     } finally {
@@ -31,8 +37,9 @@ export async function migrate(
       );
     }
   } finally {
-    // Closing ends the session, which drops a lock that is still held instead of pooling it.
-    await (unlocked ? connection.release() : connection.close());
+    // Closing ends the session, which drops a lock that is still held instead of pooling it. Neither may
+    // replace the original error.
+    await (unlocked ? connection.release() : connection.close()).catch(() => {});
   }
 }
 

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { MIGRATIONS } from "./migrations.ts";
-import { migrate } from "./migrator.ts";
+import { MIGRATION_LOCK, migrate } from "./migrator.ts";
 
 // Integration test: runs only when a disposable database is available (CI provides one).
 const url = Bun.env.TEST_DATABASE_URL;
@@ -20,9 +20,15 @@ describe("migrator lock", () => {
     const calls: string[] = [];
     const connection = (strings: TemplateStringsArray) => {
       const text = strings.join("?");
-      calls.push(text.includes("unlock") ? "unlock" : text.includes("lock") ? "lock" : "query");
+      calls.push(
+        text.includes("pg_advisory_unlock")
+          ? "unlock"
+          : text.includes("pg_advisory_lock")
+            ? "lock"
+            : "query",
+      );
       if (text.includes("CREATE TABLE")) return Promise.reject(new Error("migration failed"));
-      if (text.includes("unlock")) return Promise.reject(new Error("unlock failed"));
+      if (text.includes("pg_advisory_unlock")) return Promise.reject(new Error("unlock failed"));
       return Promise.resolve([]);
     };
     const reserved = Object.assign(connection, {
@@ -35,7 +41,8 @@ describe("migrator lock", () => {
   test("a failed unlock keeps the migration's error and closes the connection", async () => {
     const { sql: failing, calls } = failingConnection();
     await expect(migrate(failing)).rejects.toThrow("migration failed");
-    expect(calls).toEqual(["lock", "query", "unlock", "close"]);
+    // set lock_timeout, lock, reset lock_timeout, CREATE TABLE, unlock, close
+    expect(calls).toEqual(["query", "lock", "query", "query", "unlock", "close"]);
   });
 });
 
@@ -73,12 +80,25 @@ describe.skipIf(!sql)("migrator", () => {
     const pool = new SQL({ url, max: 2, connection: { search_path: raceSchema } });
     try {
       const [first, second] = await Promise.all([migrate(pool), migrate(pool)]);
-      expect([...(first ?? []), ...(second ?? [])].sort()).toEqual(
-        MIGRATIONS.map((migration) => migration.name),
-      );
+      expect([...first, ...second].sort()).toEqual(MIGRATIONS.map((migration) => migration.name));
     } finally {
       await pool.close();
       await (sql as SQL).unsafe(`DROP SCHEMA IF EXISTS ${raceSchema} CASCADE`);
+    }
+  });
+
+  test("gives up when another session holds the lock past the timeout", async () => {
+    const holder = new SQL({ url, max: 1 });
+    const waiter = new SQL({ url, max: 1 });
+    try {
+      await holder`SELECT pg_advisory_lock(${MIGRATION_LOCK})`;
+      await expect(migrate(waiter, MIGRATIONS, { lockTimeout: "100ms" })).rejects.toThrow(
+        /lock timeout/,
+      );
+    } finally {
+      await holder`SELECT pg_advisory_unlock(${MIGRATION_LOCK})`;
+      await holder.close();
+      await waiter.close();
     }
   });
 });

@@ -5,9 +5,14 @@ The bot is a single image: the [`Dockerfile`](../Dockerfile) compiles it with `b
 binary that migrates the database, connects to Discord and deploys the slash commands. Postgres 17, Redis 8,
 Lavalink 4.2.2 and yt-cipher run next to it as separate services. Music is always on in production.
 
-Nothing is published to the network except the health endpoint, bound to `127.0.0.1:8080` on the host.
-The services find each other by name, and compose builds `DATABASE_URL`, `REDIS_URL` and `LAVALINK_URL`
-from the passwords in `.env.production`.
+Nothing is published to the network except the health endpoint, which compose always binds to
+`127.0.0.1:<HEALTH_PUBLISH_PORT>` (default 8080) on the host, never to a public address. The services find
+each other by name, and compose builds `DATABASE_URL`, `REDIS_URL` and `LAVALINK_URL` from the passwords in
+`.env.production`. Postgres and Redis sit on an internal network with no route out; Lavalink and yt-cipher
+on one that reaches the internet. The bot is on both and reaches Discord through the second. The Postgres,
+Redis and Lavalink images are pinned by digest, and Lavalink and yt-cipher run read-only with every
+capability dropped. Redis reads its password from a config file on a tmpfs, so it shows up neither in `ps`
+nor in the command `docker inspect` prints.
 
 The deployed version is the commit checked out on the server. Every start builds the image from that
 checkout and tags it `dzajcarz-bot:<short commit>`, so `docker ps` shows which commit runs (the image also
@@ -41,8 +46,8 @@ In the [Discord developer portal](https://discord.com/developers/applications), 
 page, turn on the **Message Content** and **Server Members** intents. Without them prefix commands and
 welcome messages stay silent (see the [README](../README.md#getting-started)).
 
-The host needs Docker with the compose plugin, git and a checkout of this repository: the image is built
-from it, and Lavalink mounts `infra/lavalink/application.yml` and the scheduled songs in
+The host needs Docker with the compose plugin, and Bun (or the `prod` function above), git and a checkout
+of this repository: the image is built from it, and Lavalink mounts `infra/lavalink/application.yml` and the scheduled songs in
 `infra/lavalink/music`.
 
 ```bash
@@ -54,20 +59,34 @@ bun run prod:up
 
 The passwords end up inside `DATABASE_URL` and `REDIS_URL`. The bot refuses to start when one of them breaks
 the URL (an unencoded `@`, `/`, `?` or `#`), so stick to hex passwords. The first start of Lavalink downloads
-the YouTube plugin, so music can take a minute to come up.
+the YouTube plugin, so music can take a minute to come up. Check that the downloaded jar is the one
+recorded in [ADR 4](adr/0004-lavalink-for-audio.md#youtube-setup-dzaj-50):
+
+```bash
+prod exec lavalink sha256sum /opt/Lavalink/plugins/*.jar
+```
+
+`POSTGRES_PASSWORD` only takes effect when the `postgres-data` volume is first created. To change it later,
+change it in the database first, then in `.env.production`, then run `bun run prod:up`:
+
+```bash
+prod exec postgres psql -U dzajcarz -c "ALTER USER dzajcarz PASSWORD '<new hex password>'"
+```
 
 ## Release
 
 ```bash
 git pull            # or: git checkout <tag or commit>
+# A release that adds a migration: take a dump first (see Backups), because the bot migrates as it starts.
 bun run prod:up     # builds the checked-out commit and recreates what changed
 ```
 
 Compose recreates only the containers whose image or settings changed; the bot gets `SIGTERM` and 30 seconds
 to leave voice channels and close its connections. Then the new bot:
 
-1. applies the pending migrations under a Postgres advisory lock, before it logs in. A failed migration exits
-   with code 1 and the bot never logs in; the restart policy keeps retrying, and the log says why.
+1. applies the pending migrations under a Postgres advisory lock (waiting at most 60 seconds for it), before
+   it logs in. A failed migration exits with code 1 and the bot never logs in; the restart policy keeps
+   retrying, and the log says why.
 2. logs in to Discord.
 3. once the gateway is ready, deploys the slash commands globally, because production sets no
    `DISCORD_DEV_GUILD_ID`. It sends them only when Discord's set differs from the code. Discord can take a
