@@ -28,6 +28,7 @@ describe.skipIf(!sql)("migrator", () => {
     expect(tables.map((t) => t.table_name).sort()).toEqual([
       "dzajco_channel_config",
       "guild_settings",
+      "moderation_action",
       "module_disabled",
       "party_area",
       "party_channel",

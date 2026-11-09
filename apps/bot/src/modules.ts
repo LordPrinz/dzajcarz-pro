@@ -8,6 +8,11 @@ import {
 import { createFunModule } from "@dzajcarz/module-fun";
 import { createGeneralModule } from "@dzajcarz/module-general";
 import {
+  createModerationModule,
+  type ModerationGuild,
+  type ModerationLog,
+} from "@dzajcarz/module-moderation";
+import {
   createMusicModule,
   type DirectMessages,
   type MusicPlayer,
@@ -83,6 +88,10 @@ export interface ModuleServices {
   dzajcoSettings: DzajcoSettingsStore;
   dzajcoResponder: DzajcoResponder;
   dzajcoStore: KeyValueStore;
+  // moderation
+  moderationGuild: ModerationGuild;
+  moderationLog: ModerationLog;
+  moderationDmLimit: Pick<KeyValueStore, "setIfAbsent">;
   logger: Logger;
 }
 
@@ -147,6 +156,12 @@ export function createModules(services: ModuleServices): BotModule[] {
       random: Math.random,
       prefixFor: services.prefixFor,
       logger: services.logger.child({ module: "dzajco" }),
+    }),
+    createModerationModule({
+      guild: services.moderationGuild,
+      log: services.moderationLog,
+      dmLimit: services.moderationDmLimit,
+      logger: services.logger.child({ module: "moderation" }),
     }),
   ];
 }

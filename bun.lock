@@ -21,6 +21,7 @@
         "@dzajcarz/module-dzajco": "workspace:*",
         "@dzajcarz/module-fun": "workspace:*",
         "@dzajcarz/module-general": "workspace:*",
+        "@dzajcarz/module-moderation": "workspace:*",
         "@dzajcarz/module-music": "workspace:*",
         "@dzajcarz/module-party": "workspace:*",
         "@dzajcarz/module-schedule": "workspace:*",
@@ -55,6 +56,14 @@
       "version": "0.0.0",
       "dependencies": {
         "@dzajcarz/core": "workspace:*",
+      },
+    },
+    "modules/moderation": {
+      "name": "@dzajcarz/module-moderation",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dzajcarz/core": "workspace:*",
+        "@dzajcarz/kv": "workspace:*",
       },
     },
     "modules/music": {
@@ -176,6 +185,8 @@
     "@dzajcarz/module-fun": ["@dzajcarz/module-fun@workspace:modules/fun"],
 
     "@dzajcarz/module-general": ["@dzajcarz/module-general@workspace:modules/general"],
+
+    "@dzajcarz/module-moderation": ["@dzajcarz/module-moderation@workspace:modules/moderation"],
 
     "@dzajcarz/module-music": ["@dzajcarz/module-music@workspace:modules/music"],
 

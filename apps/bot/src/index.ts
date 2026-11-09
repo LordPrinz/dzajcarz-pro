@@ -9,6 +9,7 @@ import {
   createDb,
   createDzajcoRepository,
   createGuildSettingsRepository,
+  createModerationRepository,
   createModuleToggleRepository,
   createPartyRepository,
   createScheduledSongRepository,
@@ -23,6 +24,7 @@ import { deployOnStartup } from "./deploy.ts";
 import { createDzajcoResponder } from "./discord/dzajco.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
+import { createModerationGuild } from "./discord/moderation.ts";
 import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./discord/music.ts";
 import {
   createPartyChannels,
@@ -139,6 +141,9 @@ const modules = createModules({
   dzajcoSettings: createDzajcoRepository(sql),
   dzajcoResponder: createDzajcoResponder(client, logger.child({ component: "dzajco" }), DZAJCO_GIF),
   dzajcoStore: createRedisStore(redis),
+  moderationGuild: createModerationGuild(client),
+  moderationLog: createModerationRepository(sql),
+  moderationDmLimit: createRedisStore(redis),
   logger,
 });
 const registry = createRegistry(modules);

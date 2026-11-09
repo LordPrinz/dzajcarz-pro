@@ -11,7 +11,11 @@ const GUILD_INSTALL_PERMISSIONS =
   PermissionFlagsBits.ManageRoles |
   PermissionFlagsBits.MoveMembers |
   PermissionFlagsBits.Connect |
-  PermissionFlagsBits.Speak;
+  PermissionFlagsBits.Speak |
+  PermissionFlagsBits.BanMembers |
+  PermissionFlagsBits.KickMembers |
+  PermissionFlagsBits.ModerateMembers |
+  PermissionFlagsBits.AddReactions;
 
 function authorizeUrl(params: Record<string, string>): string {
   return `https://discord.com/oauth2/authorize?${new URLSearchParams(params)}`;

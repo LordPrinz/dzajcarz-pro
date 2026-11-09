@@ -138,11 +138,14 @@ export function contextFromMessage(
       member && !channel.isDMBased() ? member.permissionsIn(channel).bitfield : null,
     async reply(reply) {
       const { content, embeds, components, reactions } = toReplyPayload(reply);
+      // A command may delete its own message (a purge racing a new message); the reply then goes out
+      // without the reference instead of failing.
       const sent = await message.reply({
         content,
         embeds,
         components,
         allowedMentions: NO_MENTIONS,
+        failIfNotExists: false,
       });
       await reactAll(sent, reactions, logger);
     },
