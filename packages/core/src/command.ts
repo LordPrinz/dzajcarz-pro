@@ -164,6 +164,11 @@ interface CommandBase {
   contexts?: CommandContexts;
   /** Discord permission bits (PermissionFlagsBits) the member needs. Needs a guild-only command. */
   permissions?: bigint;
+  /**
+   * Minimum time between two runs by the same member, in milliseconds (a positive integer). Checked after
+   * access, so a refused call does not start the wait. A subcommand's own value wins over this one.
+   */
+  cooldownMs?: number;
 }
 
 /** A command that runs directly. */
@@ -178,6 +183,8 @@ export interface Subcommand<O extends OptionsDef = OptionsDef> {
   options?: O;
   /** Extra permission bits, checked when the subcommand runs (Discord only gates the whole command). */
   permissions?: bigint;
+  /** Overrides the command's `cooldownMs` for this subcommand. */
+  cooldownMs?: number;
   run(ctx: CommandContext<OptionValues<O>>): Promise<void>;
 }
 

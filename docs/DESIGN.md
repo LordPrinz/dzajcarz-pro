@@ -124,6 +124,14 @@ command with the same filters; an unknown or hidden name gets the same "not foun
 guild and user, and the caller gets a generic message. Event handlers are wrapped the same way, so one
 failing module cannot take the process down.
 
+### Cooldowns
+
+`cooldownMs` on a command (or on a subcommand, which wins over the command's value) limits how often one
+member can run it. The dispatcher counts calls with `KeyValueStore.increment` under
+`cooldown:<command>[:<subcommand>]:<userId>`, after the access checks, so a refused call does not start the
+wait. A second call inside the window gets a `UserError` with the seconds left. If the store is down the
+command runs anyway and a warning is logged: Redis only holds losable state (ADR 3).
+
 ### Prefix per guild
 
 The prefix is stored in `guild_settings.prefix` (null means the default from `BOT_PREFIX`) and cached in

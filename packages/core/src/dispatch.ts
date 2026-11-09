@@ -11,16 +11,25 @@ type AccessContext = Pick<CommandContext, "guildId" | "place" | "memberPermissio
 /** PermissionFlagsBits.Administrator: Discord grants every permission to it. */
 const ADMINISTRATOR = 1n << 3n;
 
+/** What the cooldown check needs from a store; `KeyValueStore` from `@dzajcarz/kv` fits. */
+export interface CooldownStore {
+  /** Counts a call in a window that the first call opens for `ttlMs`. */
+  increment(key: string, ttlMs: number): Promise<{ count: number; ttlMs: number }>;
+}
+
 export const GENERIC_ERROR = "Coś poszło nie tak. Spróbuj ponownie za chwilę.";
 
 /**
  * Runs a command with the checks every command shares (DMs, member permissions) and one error policy:
  * a UserError is shown to the caller, anything else is logged and replaced by a generic message.
+ * With `cooldowns`, a command or subcommand that sets `cooldownMs` is limited per member; when the store
+ * fails the command runs anyway.
  */
 export async function executeCommand(
   command: AnyCommand,
   ctx: CommandContext,
   logger: Logger,
+  cooldowns?: CooldownStore,
 ): Promise<void> {
   const log = logger.child({
     command: command.name,
@@ -41,8 +50,17 @@ export async function executeCommand(
       if (!target) throw new UserError(`Nieznana podkomenda. ${usage(command)}`);
       const deniedAction = checkAccess(target, ctx);
       if (deniedAction) throw new UserError(deniedAction);
+      await enforceCooldown(
+        cooldowns,
+        command,
+        ctx,
+        target.cooldownMs ?? command.cooldownMs,
+        log,
+        ctx.subcommand,
+      );
       await target.run(ctx);
     } else {
+      await enforceCooldown(cooldowns, command, ctx, command.cooldownMs, log);
       await command.run?.(ctx);
     }
   } catch (error) {
@@ -54,6 +72,30 @@ export async function executeCommand(
       // The interaction may have expired or the channel may be gone; nothing left to tell the user.
       log.warn("Could not report a command error to the caller", { error: replyError });
     }
+  }
+}
+
+/** Refuses the call while the member's previous one is inside the window. Fails open if the store is down. */
+async function enforceCooldown(
+  cooldowns: CooldownStore | undefined,
+  command: AnyCommand,
+  ctx: CommandContext,
+  cooldownMs: number | undefined,
+  log: Logger,
+  subcommand?: string,
+): Promise<void> {
+  if (!cooldowns || cooldownMs === undefined) return;
+  const key = `cooldown:${command.name}${subcommand ? `:${subcommand}` : ""}:${ctx.user.id}`;
+  let counter: { count: number; ttlMs: number };
+  try {
+    counter = await cooldowns.increment(key, cooldownMs);
+  } catch (error) {
+    log.warn("Cooldown check failed; running the command anyway", { error });
+    return;
+  }
+  if (counter.count > 1) {
+    const seconds = Math.max(1, Math.ceil(counter.ttlMs / 1000));
+    throw new UserError(`Zwolnij. Spróbuj ponownie za ${seconds} s.`);
   }
 }
 

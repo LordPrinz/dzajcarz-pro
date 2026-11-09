@@ -2,6 +2,7 @@ import {
   type AnyCommand,
   type CommandRegistry,
   type ComponentKind,
+  type CooldownStore,
   checkPrefixAccess,
   executeCommand,
   executeComponent,
@@ -38,6 +39,8 @@ export interface BotDeps {
   gate: ModuleGate;
   /** Whether the bot is a member of the guild; false for a server reached through a user install. */
   botInGuild: (guildId: string) => boolean;
+  /** Counts command calls for `cooldownMs`; without it cooldowns are not enforced. */
+  cooldowns?: CooldownStore;
   logger: Logger;
 }
 
@@ -120,7 +123,7 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
         await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
         return;
       }
-      await executeCommand(command, ctx, logger);
+      await executeCommand(command, ctx, logger, deps.cooldowns);
     } catch (error) {
       logger.error("Interaction handling failed", { interactionId: interaction.id, error });
     }
@@ -248,6 +251,7 @@ export async function handleMessage(
     command,
     contextFromMessage(message, parsed.args, parsed.subcommand, logger),
     logger,
+    deps.cooldowns,
   );
 }
 

@@ -293,3 +293,53 @@ describe("contexts", () => {
     );
   });
 });
+
+describe("cooldownMs", () => {
+  const build = (extra: Partial<AnyCommand>) => () =>
+    createRegistry([{ name: "m", commands: [command("c", extra)] }]);
+
+  test("accepts a positive integer on a command and on a subcommand", () => {
+    expect(build({ cooldownMs: 5000 })).not.toThrow();
+    expect(
+      createRegistry([
+        {
+          name: "m",
+          commands: [
+            defineCommand({
+              name: "c",
+              description: "c",
+              subcommands: {
+                a: defineSubcommand({ description: "a", cooldownMs: 1, run: async () => {} }),
+              },
+            }),
+          ],
+        },
+      ]),
+    ).toBeDefined();
+  });
+
+  test("rejects zero, negative and fractional values", () => {
+    for (const cooldownMs of [0, -1, 1.5, Number.NaN]) {
+      expect(build({ cooldownMs })).toThrow('"cooldownMs"');
+    }
+  });
+
+  test("rejects a bad subcommand value", () => {
+    expect(() =>
+      createRegistry([
+        {
+          name: "m",
+          commands: [
+            defineCommand({
+              name: "c",
+              description: "c",
+              subcommands: {
+                a: defineSubcommand({ description: "a", cooldownMs: 0, run: async () => {} }),
+              },
+            }),
+          ],
+        },
+      ]),
+    ).toThrow('subcommand "a"');
+  });
+});
