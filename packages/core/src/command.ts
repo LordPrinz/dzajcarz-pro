@@ -97,6 +97,12 @@ export type Reply =
       components?: ComponentRow[];
       /** Slash: only the caller sees it. Prefix: ignored (messages cannot be ephemeral). */
       ephemeral?: boolean;
+      /**
+       * Unicode emoji the adapter adds to the sent message. Best effort: a missing permission or a place where
+       * the bot cannot react (user install, group DM) is logged at warn and never fails the reply. Only command
+       * replies (slash and prefix) apply it; other senders ignore it.
+       */
+      reactions?: readonly string[];
     };
 
 export type Invocation = "slash" | "prefix";

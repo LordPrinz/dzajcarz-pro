@@ -14,15 +14,21 @@
     "@dzajcarz/core": "workspace:*",
     "@dzajcarz/db": "workspace:*",
     "@dzajcarz/kv": "workspace:*",
+    "@dzajcarz/module-dzajco": "workspace:*",
+    "@dzajcarz/module-fun": "workspace:*",
     "@dzajcarz/module-general": "workspace:*",
+    "@dzajcarz/module-messages": "workspace:*",
+    "@dzajcarz/module-moderation": "workspace:*",
     "@dzajcarz/module-music": "workspace:*",
     "@dzajcarz/module-party": "workspace:*",
+    "@dzajcarz/module-riot": "workspace:*",
     "@dzajcarz/module-schedule": "workspace:*",
     "@dzajcarz/module-settings": "workspace:*",
     "@dzajcarz/module-status": "workspace:*",
     "@dzajcarz/module-welcome": "workspace:*",
     "discord.js": "14.27.0",
     "lavalink-client": "2.11.0",
+    "wrapper-valorant-api": "3.0.1",
     "zod": "4.6.7"
   }
 }

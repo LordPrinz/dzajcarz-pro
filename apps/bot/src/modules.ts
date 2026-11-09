@@ -1,6 +1,23 @@
 import type { BotModule, CommandSummary, CronScheduler, Logger, Scheduler } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
+import {
+  createDzajcoModule,
+  type DzajcoResponder,
+  type DzajcoSettingsStore,
+} from "@dzajcarz/module-dzajco";
+import { createFunModule } from "@dzajcarz/module-fun";
 import { createGeneralModule } from "@dzajcarz/module-general";
+import {
+  createMessagesModule,
+  type MessageChannels,
+  type ScheduledMessageSender,
+  type ScheduledMessageStore,
+} from "@dzajcarz/module-messages";
+import {
+  createModerationModule,
+  type ModerationGuild,
+  type ModerationLog,
+} from "@dzajcarz/module-moderation";
 import {
   createMusicModule,
   type DirectMessages,
@@ -16,6 +33,7 @@ import {
   type PartyPermissions,
   type PartyRepository,
 } from "@dzajcarz/module-party";
+import { createRiotModule, type RiotStats } from "@dzajcarz/module-riot";
 import {
   createScheduleModule,
   type ScheduledSong,
@@ -73,6 +91,23 @@ export interface ModuleServices {
   scheduledSongPlayer: ScheduledSongPlayer;
   scheduledSongs: readonly [ScheduledSong, ...ScheduledSong[]];
   scheduledSongCron: { expression: string; timeZone: string };
+  // dzajco
+  dzajcoSettings: DzajcoSettingsStore;
+  dzajcoResponder: DzajcoResponder;
+  dzajcoStore: KeyValueStore;
+  // moderation
+  moderationGuild: ModerationGuild;
+  moderationLog: ModerationLog;
+  moderationDmLimit: Pick<KeyValueStore, "setIfAbsent">;
+  // riot
+  riotStats: RiotStats | null;
+  riotStore: KeyValueStore;
+  // messages
+  scheduledMessages: ScheduledMessageStore;
+  scheduledMessageSender: ScheduledMessageSender;
+  guildModuleEnabled: (guildId: string, module: string) => Promise<boolean>;
+  messageLock: KeyValueStore;
+  messageChannels: MessageChannels;
   logger: Logger;
 }
 
@@ -127,6 +162,41 @@ export function createModules(services: ModuleServices): BotModule[] {
       presence: services.presence,
       clock: services.clock,
       logger: services.logger.child({ module: "status" }),
+    }),
+    createFunModule({ random: Math.random, now: () => new Date(), timeZone: "Europe/Warsaw" }),
+    createDzajcoModule({
+      settings: services.dzajcoSettings,
+      responder: services.dzajcoResponder,
+      kv: services.dzajcoStore,
+      channels: services.channels,
+      random: Math.random,
+      prefixFor: services.prefixFor,
+      logger: services.logger.child({ module: "dzajco" }),
+    }),
+    createModerationModule({
+      guild: services.moderationGuild,
+      log: services.moderationLog,
+      dmLimit: services.moderationDmLimit,
+      logger: services.logger.child({ module: "moderation" }),
+    }),
+    createRiotModule({
+      stats: services.riotStats,
+      store: services.riotStore,
+      now: Date.now,
+      logger: services.logger.child({ module: "riot" }),
+    }),
+    createMessagesModule({
+      store: services.scheduledMessages,
+      sender: services.scheduledMessageSender,
+      channels: services.messageChannels,
+      cron: services.cron,
+      lock: services.messageLock,
+      botInGuild: services.botInGuild,
+      moduleEnabled: services.moduleEnabled,
+      guildModuleEnabled: services.guildModuleEnabled,
+      now: () => new Date(),
+      timeZone: "Europe/Warsaw",
+      logger: services.logger.child({ module: "messages" }),
     }),
   ];
 }

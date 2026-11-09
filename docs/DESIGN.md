@@ -149,8 +149,45 @@ through the `GuildChannels` port. `general`, `settings` and `status` cannot be d
 message limit). `renderWelcome` fills `{user}`, `{username}`, `{server}` and `{memberCount}` in a single
 pass, so substituted text is never re-expanded and unknown placeholders stay as written. The
 `guildMemberAdd` handler skips bots and never throws: a missing config, channel or permission is a logged
-warning. It needs the privileged `GuildMembers` intent. The welcome sender is the one place that overrides
-`NO_MENTIONS`: it allows a ping for the joining member only (`allowedMentions: { users: [memberId] }`).
+warning. It needs the privileged `GuildMembers` intent. The welcome sender overrides `NO_MENTIONS`
+to allow a ping for the joining member only (`allowedMentions: { users: [memberId] }`); scheduled DMs do the
+same for their recipient.
+
+### Dżajco
+
+The `dzajco` module answers a message that says "what" in any language with an egg reaction and the DŻAJCO
+gif. The word list comes from the old bot (111 entries); `normalizeWords` strips zero-width spaces, folds to
+NFC lowercase and drops repeats, which leaves 104. Short common words (`me`, `co`, `que`) stay on purpose.
+
+`createWhatMatcher` compiles the list into one regex, once. Every character of a word may repeat (`whaaat`)
+and inner whitespace is any run of whitespace. Words in scripts written without spaces (Han, kana, Thai, Lao,
+Khmer, Myanmar) match anywhere in the text; every other word needs a non-letter, non-mark, non-digit on both
+sides, so `whatever` and `somewhat` do not count.
+
+The `messageCreate` handler stops at the first failing check, in this order:
+
+1. no guild, a bot or webhook author, or empty text;
+2. no word matches (a regex test, so most messages cost no I/O);
+3. the text starts with the guild prefix (a command such as `!play what is love`) or with a mention of the bot;
+4. the channel's cooldown key is set;
+5. the dice roll (`random() * 100 >= chancePercent`) fails;
+6. another message took the cooldown key first.
+
+Edits are not handled, and a thread uses its own channel id. At most one answer per message. The matcher
+collapses runs of one character in the words and in the text (so `whaaat` matches `what` without a quadratic
+regex) and searches only the first 2000 characters.
+
+The cooldown lives in Redis under `dzajco:cooldown:<channelId>` (`setIfAbsent` with the TTL, so two messages
+racing for it cannot both answer) and starts only when the bot answers. A Redis error fails closed: no gif,
+a logged warning, so an outage never turns into gif spam. The default is a 3% chance and 60 s, per channel.
+
+`dzajco_channel_config` holds per-channel overrides, edited with `/dzajco set`, `show` and `reset` (Manage
+Server). A channel without a row uses the defaults. The handler reads settings through a Redis cache
+(`dzajco:settings:<channelId>`, 10 minutes, an unreadable entry is reloaded); `set` and `reset` delete that
+key and the running cooldown, so new values apply at once. If the invalidation fails, or a read races a
+write, the old settings can stay for up to the cache TTL. We accept that. Chance 0 switches the gif off in a
+channel. The random source is injected (`Math.random` in `modules.ts`), so the tests are deterministic. The
+reaction needs the Add Reactions permission; without it the bot logs a warning and still sends the gif.
 
 ### Party areas
 
@@ -358,6 +395,59 @@ the song off per server or channel. The schedule defaults to `0 9,21 * * *` in `
 
 The old bot's other scheduled entries (messages at fixed times, birthdays) are not part of this module.
 
+### Scheduled messages
+
+`modules/messages` posts a server's own text every day at a set time: in a text or announcement channel of
+the server, or as a DM to one of its members. Rows live in `scheduled_message` (time of day as `HH:MM` in
+`Europe/Warsaw`, 1 to 1900 characters, exactly one of `channel_id` and `user_id`). `/messages add` (Manage
+Server) opens a form with the time, a channel or a member, and the text; the prefix form is
+`messages add <HH:MM> <#kanał|@osoba> <tekst...>`. Both go through the same checks: a real time, one target,
+a channel of this server that the bot can see and send messages in, or a member who is not a bot. When the
+form is refused, the typed text comes back in code blocks. `{user}` in a channel message stays as written,
+and the reply says so.
+
+Caps: 25 messages per server, 3 DMs per member per server, and one message per target and time. The
+repository checks them and inserts in one transaction that holds a per-server advisory lock
+(`pg_advisory_xact_lock`), so two adds at the same moment cannot both take the 25th place. The refusals say
+nothing about opt-outs.
+
+`list` shows one line per message, the text as a 40-character inline-code preview (markdown and mentions show
+as typed; backticks become `ˋ` so they cannot end the span), cut to fit 2000 characters ("… i jeszcze N").
+`remove <id>` only finds messages of the server it runs in. When the bot leaves a server (`guildDelete`, which
+runs whatever the toggles say), that server's messages are deleted.
+
+Sending is a `CronScheduler` job at `* * * * *` in `Europe/Warsaw`. Each tick rounds the clock to the
+nearest minute (a job a few milliseconds early still counts for its minute), reads the Warsaw minute
+(`warsawMinute`, `Intl.DateTimeFormat`) and at most 500 rows due at that time across all servers (a warning
+when that is hit), and sends them five at a time. Each row is handled on its own: a failure is a warning
+with the row id, and the whole tick is wrapped too.
+
+- skip a server the bot is no longer in;
+- the module toggle: a channel message asks for its channel, a DM for the server as a whole (it has no
+  channel), so `/modules disable messages #kanał` stops only messages to that channel;
+- take `messages:sent:<id>:<date>T<time>` in Redis with `setIfAbsent` (2 h TTL). The lock stops a double
+  cron fire, a second instance and October's repeated 02:xx hour from sending twice. A minute missed while
+  the bot was down is not caught up, and a time the March change skips does not fire that day;
+- a DM goes out only while the recipient is still a member, is not a bot and has not opted out. `{user}`
+  becomes a ping of the recipient, a footer names the server (with markdown and mention characters
+  stripped from the name), and a "Nie wysyłaj mi więcej" button sits under it. Closed DMs (50007) are
+  logged at info.
+
+The DM can grow past what was typed, so `add` checks the worst case: every `{user}` replaced by the
+recipient's mention, plus the footer with a 100-character server name, must fit Discord's 2000 characters.
+
+Opt-outs (`scheduled_message_opt_out`) belong to the recipient, not the server. A row has a guild id, or NULL
+for every server (unique with `NULLS NOT DISTINCT`). The button under a DM and `/dm off` on a server opt
+out of that server; `/dm off` in a DM with the bot opts out of all of them. `/dm on` removes exactly the
+row of the place it runs in. On a server it says so when the every-server opt-out still applies. In a DM it
+leaves the per-server ones and points to `/dm on` on that server for them. The button carries the guild id
+in its custom_id and checks it is a snowflake before using it; only the recipient can press it.
+
+Channel posts use `NO_MENTIONS`, so an admin's `@everyone` stays text. A scheduled DM is the second exception
+after the welcome greeting: `allowedMentions: { users: [recipientId] }`, the recipient and nobody else. The
+module reaches Discord through its own ports (`ScheduledMessageSender`, `MessageChannels`) and imports no
+other module.
+
 ### Rotating status
 
 `modules/status` cycles the bot's activity through a list (defaults in `DEFAULT_ACTIVITIES`: the old bot's song, one phrase every 15 s;
@@ -366,10 +456,73 @@ interval; a repeated `clientReady` (reconnect) does not start another, and `disp
 two ports, `Presence` and `Clock`, so the rotation is tested with a fake clock. A failing `setActivity` is
 logged and the next tick tries again. The handler is `alwaysRun`: the status belongs to the bot, not a guild.
 
+### Fun commands
+
+`modules/fun` holds `/czy_wiedziałeś` (a coin flip: "Wiedział!" with a 🙋‍♂️ reaction, or "Nie wiedział sadge
+bruh") and `/time` (the time in Europe/Warsaw as `HH:MM:SS`, midnight is `00`). The random source, the clock and
+the zone are injected, so tests pin both answers and the DST changes. `/time` does not mention the caller.
+A reply may carry `reactions`, unicode emoji the adapter adds to the sent message. Adding them is best effort:
+on a user install or in a group DM the bot cannot react, so a failed reaction is logged at `warn` and never fails the
+reply. Only command replies (slash and prefix) apply it; other senders ignore it.
+
 ### Mentions
 
 The client and every reply set `allowedMentions: { parse: [] }`. Commands echo user input (song titles,
 reasons), and nothing the bot says should ping `@everyone`, a role or a user unless a command opts in.
+
+### Moderation
+
+`modules/moderation` has `/ban`, `/kick`, `/timeout <user> <30s|10m|2h|1d>`, `/untimeout`, `/warn`,
+`/warnings` and `/purge <1 to 100>`, all guild only. Each declares its Discord permission (Ban Members, Kick
+Members, Moderate Members for timeout, untimeout, warn and warnings, Manage Messages for purge), so the
+dispatcher checks prefix calls too. Ban, kick and Moderate Members are guild-wide powers, but the member
+permissions Discord hands a command include channel overwrites. The module therefore checks the caller's
+role permissions once more through its own `ModerationGuild` port (an administrator passes). Manage
+Messages is a channel permission, so purge relies on the dispatcher alone.
+
+Before acting, the module applies Discord's hierarchy rules itself and answers with the reason, in this
+order: not yourself, not the bot, not the server owner, not a member whose highest role is equal to or above
+the caller's (the owner as caller skips this one), and not one at or above the bot's highest role. Another
+bot that ranks lower is fair game. Kick, timeout, untimeout and warn need a member. A ban also takes
+the id of someone who already left; only the id rules apply then. For ban, kick, timeout and untimeout the
+bot's own role permissions must hold the bit (or Administrator), and an administrator cannot be timed out.
+These checks, the reason length (at most 512 characters, Discord's audit log limit) and the duration
+(`parseDuration`, more than 0 and at most 28 days) all run before `defer()`, so a refusal stays ephemeral
+and no DM goes out for an action that cannot happen. A refusal Discord still sends (Missing Permissions or
+Missing Access) becomes a Polish `UserError` in the adapter.
+
+The action comes first, then the record in `moderation_action` (guild, action, moderator, target, reason,
+duration for a timeout, channel and count for a purge, time). If the insert fails, the error is logged
+and the reply still confirms the action, with "(nie udało się zapisać w historii)" appended: the member
+is already banned, so pretending otherwise would be worse. The audit log reason is
+`<moderator>: <reason or "brak powodu">`, cut to 512 characters. Replies are public and echo the reason as
+typed; NO_MENTIONS keeps `@everyone` and role mentions in it silent.
+
+The target gets a direct message with the server name, the action, the reason and, for a timeout, the
+length, worded without grammatical gender ("Ban na serwerze X. Powód: …"). It is best effort: a closed DM or
+a failure is logged and never stops the action. For a kick or ban it goes out before the action, because
+afterwards the bot may share no server with them; if Discord then refuses the action, a second DM says it
+did not happen. For a warn or timeout it follows the action. Untimeout sends none. Warning DMs are limited to
+one per member and server every 10 minutes (a `KeyValueStore` key taken with `setIfAbsent`), so a burst of
+`/warn` cannot flood an inbox; every warning is still recorded, and if Redis fails the DM goes out anyway.
+
+`/warnings` shows the count and the 10 newest warnings in Warsaw time. Each reason is cut to 120
+characters, and whole lines are dropped if the text would still pass Discord's 2000 characters; the header
+is written after that, so "N najnowszych" matches the lines shown. The slash form answers ephemerally. A
+prefix reply would be public, so `!warnings` sends the list to the moderator by DM and only says so in the
+channel, or tells them to use `/warnings` when the DM fails.
+
+`/purge` fetches the newest messages of the channel (at most 100), deletes up to `count` of them through
+`bulkDelete` (a single message too) and leaves pinned messages and those older than 14 days minus a minute,
+which bulk delete cannot remove. The reply says how many of each were skipped. A purge that deleted nothing
+is not recorded. The slash form answers ephemerally. The prefix form skips the newest message, its own
+command, so the reply has something to answer. A message that arrives between the command and the fetch is
+the one skipped instead, and the command message is deleted; that race is accepted, and prefix replies use
+`failIfNotExists: false` so the answer still goes out without the reference. For the same reason
+`!purge 100` deletes at most 99.
+
+The guild install asks for Ban Members, Kick Members and Moderate Members for this module, and for Add
+Reactions, which Dżajco and the fun commands use; see CONTRIBUTING.
 
 ### Text in two languages
 
@@ -488,6 +641,43 @@ and Discord refuses it (4006); a player with a current track then replays it fro
 the node went away, or plays the next one when that position is past the track's end (the queue ends
 when nothing is next). A player that cannot be brought back is destroyed. Shutdown removes the panels (module `dispose`), then
 destroys the players and the node connection before the Discord client.
+
+### Riot stats
+
+`modules/riot` has `/valorant <riot_id>` and `/lol <riot_id> [region]`, both usable everywhere like `/help`.
+The module talks to a `RiotStats` port (`valorant(id)`, `lol(id, platform)`) and a small
+`KeyValueStore` slice; `apps/bot/src/riot/` implements the port (clients: ADR 8). Without `RIOT_API_KEY` the
+port is `null` and both commands answer that stats are off.
+
+- **Input.** `Name#TAG` is split on the last `#`: name 3 to 16 characters, tag 3 to 5 letters or digits.
+  `/valorant` takes the rest of the line, so the name may hold spaces; `/lol` quotes such a name in the
+  prefix form (`!lol "Nazwa ze spacją#TAG" euw`). Every path segment sent to Riot goes through
+  `encodeURIComponent`, and names from Riot are markdown-escaped before they reach an embed.
+- **Routing.** Account-v1 always uses `europe`, which serves every Riot account. The Valorant shard comes
+  from `active-shards`; the League platform is the `region` option (`eun1` by default).
+- **Cache.** Only the projection the bot uses (validated fields, the newest five matches, Polish names) lives
+  in Redis for the TTLs below, never a raw response. A cache that fails or holds an entry that no longer
+  parses only costs a request. Redis runs with `--maxmemory 256mb --maxmemory-policy allkeys-lru`: it holds
+  only state that can be lost (ADR 3), so evicting a cache entry is always safe.
+
+  | Data                                           | TTL   |
+  | ---------------------------------------------- | ----- |
+  | Account, Valorant active shard                 | 1 h   |
+  | Valorant match, content, Data Dragon           | 24 h  |
+  | Valorant matchlist, summoner, entries, mastery | 5 min |
+
+- **Rate limits.** A budget of 30 lookups per minute for all users together (`riot:global`, a fixed window)
+  answers "za chwilę" when spent. A per-user cooldown (`riot:user:<id>`, 10 s) comes after the shared pause check, so a
+  blocked user does not use it up. A 429 stores the deadline `now + Retry-After` (10 s without the header or with a zero one, at most 120 s)
+  as the value of `riot:retry-after`, with the same duration as its TTL; until then every lookup answers
+  "Spróbuj za N s" without calling Riot.
+- **Errors.** 404 is "not found", 401 and 403 are "the key has no access", 429 is the pause above, and
+  timeouts, 5xx and malformed answers are "Riot does not respond". A development key gets a 403 on
+  `val/match/v1`, so `/valorant` with one answers that match history needs a production key; `/lol` says the
+  key expired or has no access. One Valorant match that fails or has an unexpected shape is dropped from the
+  list instead of failing the command.
+- **Valorant profile.** The five newest matches, each with result, map, agent and K/D/A; the rank is the tier of
+  the newest competitive match among them. A player with no matches gets "Brak ostatnich meczów."
 
 ## Testing
 

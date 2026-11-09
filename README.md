@@ -35,12 +35,17 @@ packages/
   kv/               KeyValueStore port with Redis and in-memory adapters
 modules/
   general/          ping, help (interactive menu: categories, pages, install links)
+  dzajco/           answers "what" in any language with the DŻAJCO gif (dzajco show, set, reset)
   settings/         prefix (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set through a form, off, test), greets new members
+  fun/              czy_wiedziałeś, time
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, special invite with a message and attachment, block, hide, show), a voice channel per member who joins the party area
+  moderation/       ban, kick, timeout, untimeout, warn, warnings, purge (every action stored with its reason)
   schedule/         schedule (list, exclude, include, song), plays "Lato z Radiem" at 9:00 and 21:00 in the busiest voice channel
+  messages/         messages (add through a form, list, remove), dm (on, off): scheduled messages to channels or members' DMs at a set time
   status/           rotates the bot's activity (the old bot's song)
   music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), loop, shuffle, seek, volume, filter, remove, jump, back, clear, save (sv), a now playing panel with buttons
+  riot/             valorant, lol (player stats from the Riot API, needs RIOT_API_KEY)
   …                 moderation, fun (see the board)
 infra/              docker-compose: Postgres, Redis, Lavalink and yt-cipher (profile "music")
 scripts/            git hooks and GitHub automation (Bun scripts)
@@ -84,6 +89,10 @@ Lavalink needs that directory mounted: after pulling this change recreate it wit
 At 9:00 and 21:00 Warsaw time the bot joins the voice channel with the most people in each server, unless
 music is already playing there. Servers manage it with `/schedule` (Manage Server) or switch it off with
 `/modules disable schedule`. `SCHEDULED_SONG_CRON` and `SCHEDULED_SONG_TIMEZONE` change the time.
+
+`RIOT_API_KEY` is optional. Without it `/valorant` and `/lol` answer that stats are off. A development key
+from the [Riot developer portal](https://developer.riotgames.com) is enough for `/lol`; Valorant match
+history needs a production key (ADR 8).
 
 ## Scripts
 

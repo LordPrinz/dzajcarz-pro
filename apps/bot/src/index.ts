@@ -7,19 +7,26 @@ import {
 } from "@dzajcarz/core";
 import {
   createDb,
+  createDzajcoRepository,
   createGuildSettingsRepository,
+  createModerationRepository,
   createModuleToggleRepository,
   createPartyRepository,
+  createScheduledMessageRepository,
   createScheduledSongRepository,
   createWelcomeRepository,
 } from "@dzajcarz/db";
 import { createRedisStore, keepConnected } from "@dzajcarz/kv";
+import { DZAJCO_GIF } from "@dzajcarz/module-dzajco";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { deployOnStartup } from "./deploy.ts";
+import { createDzajcoResponder } from "./discord/dzajco.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
+import { createMessageChannels, createScheduledMessageSender } from "./discord/messages.ts";
+import { createModerationGuild } from "./discord/moderation.ts";
 import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./discord/music.ts";
 import {
   createPartyChannels,
@@ -42,6 +49,7 @@ import { SCHEDULED_SONGS } from "./music/scheduled-songs.ts";
 import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
 import { createPrefixResolver } from "./prefix-resolver.ts";
 import { createPrefixSettings } from "./prefix-settings.ts";
+import { createRiotStats } from "./riot/stats.ts";
 
 const env = loadEnv();
 const logger = createJsonLogger({ level: env.LOG_LEVEL });
@@ -95,6 +103,17 @@ const musicPlayer =
     : createUnavailableMusicPlayer();
 if (!env.LAVALINK_URL) logger.info("LAVALINK_URL is not set; music is off");
 
+// Without a key the module still loads, so its commands explain that Riot stats are off.
+const riotStore = createRedisStore(redis);
+const riotStats = env.RIOT_API_KEY
+  ? createRiotStats({
+      apiKey: env.RIOT_API_KEY,
+      cache: riotStore,
+      logger: logger.child({ component: "riot" }),
+    })
+  : null;
+if (!env.RIOT_API_KEY) logger.info("RIOT_API_KEY is not set; Riot stats are off");
+
 const botInGuild = (guildId: string) => client.guilds.cache.has(guildId);
 
 const modules = createModules({
@@ -133,6 +152,19 @@ const modules = createModules({
   scheduledSongPlayer: createScheduledSongPlayer(musicPlayer),
   scheduledSongs: SCHEDULED_SONGS,
   scheduledSongCron: { expression: env.SCHEDULED_SONG_CRON, timeZone: env.SCHEDULED_SONG_TIMEZONE },
+  dzajcoSettings: createDzajcoRepository(sql),
+  dzajcoResponder: createDzajcoResponder(client, logger.child({ component: "dzajco" }), DZAJCO_GIF),
+  dzajcoStore: createRedisStore(redis),
+  moderationGuild: createModerationGuild(client),
+  moderationLog: createModerationRepository(sql),
+  moderationDmLimit: createRedisStore(redis),
+  riotStats,
+  riotStore,
+  scheduledMessages: createScheduledMessageRepository(sql),
+  scheduledMessageSender: createScheduledMessageSender(client),
+  guildModuleEnabled: (guildId, module) => gate.isEnabled(guildId, null, module),
+  messageLock: createRedisStore(redis),
+  messageChannels: createMessageChannels(client),
   logger,
 });
 const registry = createRegistry(modules);
