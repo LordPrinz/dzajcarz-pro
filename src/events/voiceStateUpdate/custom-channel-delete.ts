@@ -1,59 +1,51 @@
-import { VoiceBasedChannel, type VoiceState } from "discord.js";
-import { sleep } from "@/utils";
-import { checkElementExists, deleteElement } from "@/helpers/redis/list";
+import { database } from '@/lib/db';
+import { sleep } from 'bun';
+import type { VoiceBasedChannel, VoiceState } from 'discord.js';
 
-const handleChannelDelete = async (
-	oldChannel: VoiceBasedChannel,
-	channelId: string
-) => {
-	await deleteElement("customChannels", channelId);
-	return await oldChannel.delete();
+const handleChannelDelete = async ({ oldChannel, guildId, voiceChannelId }: { oldChannel: VoiceBasedChannel; guildId: string; voiceChannelId: string }) => {
+  await database.deleteCustomVoiceChannel(guildId, voiceChannelId);
+  return oldChannel.delete().catch(() => console.warn('Error deleting channel'));
 };
 
 export default async (oldState: VoiceState, newState: VoiceState) => {
-	const oldChannel = oldState.channel;
-	const newChannel = newState.channel;
+  const oldChannel = oldState.channel;
+  const newChannel = newState.channel;
 
-	//* Detects if the user left the channel
+  //* Detects if the user left the channel
 
-	if (
-		(oldChannel === null ||
-			newChannel !== null ||
-			oldChannel?.id === newChannel?.id) &&
-		(oldChannel === null ||
-			newChannel === null ||
-			oldChannel?.id === newChannel?.id)
-	) {
-		return;
-	}
+  if (
+    (oldChannel === null || newChannel !== null || oldChannel?.id === (newChannel! as VoiceBasedChannel)?.id) &&
+    (oldChannel === null || newChannel === null || oldChannel?.id === newChannel?.id)
+  ) {
+    return;
+  }
 
-	const targetChannelId = oldChannel.id;
-	const members = oldChannel.members.filter((member) => !member.user.bot);
+  const targetChannelId = oldChannel.id;
+  const members = oldChannel.members.filter((member) => !member.user.bot);
 
-	if (members.size > 0) {
-		return;
-	}
+  if (members.size > 0) {
+    return;
+  }
 
-	const shouldBeDeleted = await checkElementExists(
-		"customChannels",
-		targetChannelId
-	);
+  const guildId = oldChannel.guild.id;
 
-	if (!shouldBeDeleted) {
-		return;
-	}
+  const isCustomVoiceChannel = await database.isCustomVoiceChannel(guildId, targetChannelId);
 
-	if (oldChannel.members.size === 0) {
-		return await handleChannelDelete(oldChannel, targetChannelId);
-	}
+  if (!isCustomVoiceChannel) {
+    return;
+  }
 
-	//* Delete after 1 minute if the channel has only bots
+  if (oldChannel.members.size === 0) {
+    return handleChannelDelete({ guildId: guildId, oldChannel: oldChannel, voiceChannelId: targetChannelId });
+  }
 
-	await sleep(1000 * 60);
+  //* Delete after 1 minute if the channel has only bots
 
-	const bots = oldChannel.members.filter((member) => member.user.bot);
+  await sleep(1000 * 60);
 
-	if (oldChannel.members.size === bots.size) {
-		await handleChannelDelete(oldChannel, targetChannelId);
-	}
+  const bots = oldChannel.members.filter((member) => member.user.bot);
+
+  if (oldChannel.members.size === bots.size) {
+    await handleChannelDelete({ oldChannel, guildId, voiceChannelId: targetChannelId });
+  }
 };

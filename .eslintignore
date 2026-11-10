@@ -1,0 +1,9 @@
+# deps
+node_modules/
+.env
+.DS_Store
+.idea/
+.vsc/
+dist/
+cli/
+bun.lockb

@@ -1,22 +1,17 @@
-import { type TextChannel, type GuildMember } from "discord.js";
-
-import { getOneByIDWelcomeChannel } from "@/db/welcomeChannel";
-import { pingUser, replaceTagToUser } from "@/utils";
+import { database } from '@/lib/db';
+import type { TextChannel} from 'discord.js';
+import { type GuildMember } from 'discord.js';
 
 export default async (member: GuildMember) => {
-	const { guild, id } = member;
+  const { guild } = member;
 
-	const data = await getOneByIDWelcomeChannel(guild.id);
+  const data = await database.getWelcomeChannel(guild.id);
 
-	if (!data) return;
+  if (!data) return;
 
-	const { channelId, content } = data;
+  const channel = await guild.channels.fetch(data.channelid || data.channelId);
 
-	const channel = guild.channels.cache.get(channelId) as TextChannel;
+  if (!channel) return;
 
-	if (!channel) return;
-
-	const welcomeMessage = replaceTagToUser(content, pingUser(id));
-
-	channel.send(welcomeMessage);
+  await (channel as TextChannel).send(data.message.replaceAll('@', `<@${member.id}>`)).catch(() => console.warn('Failed to send welcome message'));
 };

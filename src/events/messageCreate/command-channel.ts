@@ -1,22 +1,19 @@
-import { getElements } from "@/helpers/redis/set";
-import { PartyAreaData } from "@/models/partyAreaModel";
-import { sleep } from "@/utils";
-import { type Message } from "discord.js";
+import { database } from '@/lib/db';
+import { sleep } from 'bun';
+import { type Message } from 'discord.js';
 
 export default async (message: Message) => {
-	const partyData = await getElements<PartyAreaData[]>("partyAreas");
+  if (message.guild === null) return;
 
-	const isCommandChannel = partyData.some(
-		(party) => party.commandsChannel === message.channel.id
-	);
+  const isCommandChannel = await database.isCommandChannel(message.guild.id, message.channel.id);
 
-	if (!isCommandChannel) return;
+  if (!isCommandChannel) return;
 
-	await sleep(1000 * 16);
+  await sleep(1000 * 16);
 
-	try {
-		if (message.deletable) {
-			await message.delete();
-		}
-	} catch (err) {}
+  if (message.deletable) {
+    await message.delete().catch(() => {
+      console.warn('Failed to delete message');
+    });
+  }
 };

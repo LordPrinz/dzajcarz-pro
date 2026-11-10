@@ -1,78 +1,84 @@
-import { ActionRow, Embed } from "@/components";
-import {
-	StringSelectMenu,
-	createStringSelectMenuCollector,
-	type StringSelectOptions,
-} from "@/components/select";
-import { authorFooter } from "@/conf/bot";
-import { filterCommandsByPermission, getCommands } from "@/utils/discord";
-import { CommandType, type CommandObject } from "wokcommands";
+import { dzajcarz } from '@/app';
+import type { DzajCommand } from '@/core/commander';
+import { getCommandsMap } from '@/core/commander/utils/fs';
+import { ActionRow, Embed } from '@/core/components';
+import { createStringSelectMenuCollector, StringSelectMenu, type StringSelectOptions } from '@/core/components/select';
+import { filterCommandsByPermissions } from '@/utils';
+import { authorFooter } from 'config/bot';
+import { MessageFlags, type ChatInputCommandInteraction } from 'discord.js';
 
 export default {
-	description: "Help command, returns all possible for you commands",
-	type: CommandType.BOTH,
-	guildOnly: true,
-	callback: async ({ interaction, member, guild }) => {
-		const commands = getCommands();
+  description: 'Help command, returns all possible for you commands',
+  type: 'both',
+  guildOnly: true,
+  callback: async ({ interaction, member, guild }) => {
+    if (!interaction || !('reply' in interaction)) {
+      console.error('Invalid interaction');
+      return;
+    }
 
-		const filteredCommands = filterCommandsByPermission(commands, member);
+    const commandsWithCategories = await getCommandsMap(dzajcarz.getCommandsDir());
 
-		const keysArray = Array.from(filteredCommands.keys());
+    const filteredCommands = filterCommandsByPermissions(commandsWithCategories, member!);
 
-		const options: StringSelectOptions = keysArray.map((key) => {
-			return {
-				label: key,
-				value: key,
-			};
-		});
+    const categories = Array.from(filteredCommands.keys());
 
-		const select = StringSelectMenu({
-			placeholder: "Select a command category",
-			interaction,
-			options,
-		});
+    const options: StringSelectOptions = categories.map((category) => ({
+      label: category,
+      value: category,
+    }));
 
-		const actionRow = ActionRow(select);
+    const selectMenu = StringSelectMenu({
+      placeholder: 'Select a command category',
+      interaction: interaction as ChatInputCommandInteraction,
+      options,
+    });
 
-		const reply = await interaction.reply({
-			components: [actionRow],
-			ephemeral: true,
-		});
+    const actionRow = ActionRow(selectMenu);
 
-		const collector = createStringSelectMenuCollector({
-			interaction,
-			reply,
-			time: 1000 * 60 * 5,
-		});
+    const reply = await interaction.reply({
+      components: [actionRow],
+      flags: MessageFlags.Ephemeral,
+    });
 
-		collector.on("collect", async (i) => {
-			if (!i.values.length) return;
+    const collector = createStringSelectMenuCollector({
+      interaction: interaction as ChatInputCommandInteraction,
+      reply,
+      time: 1000 * 60 * 5,
+    });
 
-			const selectedCategory = i.values[0];
+    collector.on('collect', async (i) => {
+      if (!i.values.length) return;
 
-			const categoryCommands = filteredCommands.get(selectedCategory);
+      const selectedCategory = i.values[0];
+      const categoryCommands = filteredCommands.get(selectedCategory);
 
-			const embed = Embed({
-				title: `${selectedCategory} commands`,
-				description: "List of all comands in this category",
+      if (!categoryCommands || categoryCommands.size === 0) {
+        await i.update({
+          content: 'No commands found in this category.',
+          embeds: [],
+          components: [],
+        });
+        return;
+      }
 
-				thumbnail: {
-					url: guild.iconURL({ size: 512 }),
-				},
-				timestamp: new Date(),
-				footer: {
-					text: authorFooter,
-				},
+      const embed = Embed({
+        title: `${selectedCategory} Commands`,
+        description: 'Here is a list of commands in this category:',
+        thumbnail: {
+          url: guild?.iconURL({ size: 512 }) || '',
+        },
+        timestamp: new Date(),
+        footer: {
+          text: authorFooter,
+        },
+        fields: Array.from(categoryCommands.entries()).map(([commandName, command]) => ({
+          name: commandName,
+          value: command.description || 'No description available.',
+        })),
+      }).setColor('Random');
 
-				fields: categoryCommands.map((command) => {
-					return {
-						name: command.name,
-						value: command.description,
-					};
-				}),
-			}).setColor("Random");
-
-			await i.update({ embeds: [embed] });
-		});
-	},
-} as CommandObject;
+      await i.update({ embeds: [embed] });
+    });
+  },
+} as DzajCommand;

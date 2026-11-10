@@ -1,40 +1,19 @@
-import { Client } from "discord.js";
+import { DzajCommander } from '@/core/commander';
+import { botOwners, intents, partials } from 'config/bot';
+import { Client } from 'discord.js';
+import { join } from 'node:path';
 
-import WOK from "wokcommands";
-import path from "path";
-
-import { botOwners, intents, partials, testServers } from "@/conf/bot";
-import { syncCoRedis, syncPartyRedisMongo, syncVCRedis } from "./helpers/redis";
-import { configureRedis } from "./lib/redisClient";
-
-export const client = new Client({
-	intents,
-	partials,
+const client = new Client({
+  intents,
+  partials,
 });
 
-client.on("ready", async () => {
-	new WOK({
-		client,
-		defaultPrefix: "$",
-		mongoUri: process.env.MONGO_URI,
-		commandsDir: path.join(__dirname, "commands"),
-		events: {
-			dir: path.join(__dirname, "events"),
-		},
-		featuresDir: path.join(__dirname, "features"),
-		botOwners,
-		testServers,
-	});
-
-	console.log(`Logged in as ${client.user?.tag}!`);
-
-	// Sync VC with redis
-
-	await configureRedis();
-
-	await syncPartyRedisMongo();
-
-	await syncVCRedis(client);
-
-	await syncCoRedis();
+export const dzajcarz = new DzajCommander({
+  client,
+  prefix: '!',
+  featuresDir: join(__dirname, 'features'),
+  commandsDir: join(__dirname, 'commands'),
+  eventsDir: join(__dirname, 'events'),
+  redisUrl: process.env.REDIS_URL,
+  ownersIds: botOwners,
 });

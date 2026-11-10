@@ -1,25 +1,22 @@
-import { deletePartyArea } from "@/db/partyArea";
-import { getElements, setElements } from "@/helpers/redis/set";
-import { PartyAreaData } from "@/models/partyAreaModel";
-import { ChannelType, type Channel } from "discord.js";
+import { database } from '@/lib/db';
+import { ChannelType, type Channel } from 'discord.js';
 
 export default async (channel: Channel) => {
-	if (channel.type !== ChannelType.GuildCategory) {
-		return;
-	}
+  if (channel.type !== ChannelType.GuildCategory) {
+    return;
+  }
 
-	const partyAreas = await getElements<PartyAreaData[]>("partyAreas");
+  const isPartyChannel = await database.isPartyChannel(channel.guild.id, channel.id);
 
-	const channelIdToDelete = channel.id;
+  if (!isPartyChannel) {
+    return;
+  }
 
-	const filteredPartyAreas = partyAreas.filter(
-		(el) => el.id !== channelIdToDelete
-	);
+  const partyArea = await database.getPartyArea(channel.guild.id, channel.id);
 
-	if (filteredPartyAreas.length === partyAreas.length) {
-		return;
-	}
+  if (!partyArea) {
+    return;
+  }
 
-	await setElements("partyAreas", filteredPartyAreas);
-	await deletePartyArea(channelIdToDelete);
+  await database.deletePartyArea(channel.guild.id, channel.id, partyArea.splitChannelId);
 };

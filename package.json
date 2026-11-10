@@ -1,32 +1,59 @@
 {
-	"dependencies": {
-		"discord.js": "^14.15.3",
-		"dotenv": "^16.4.5",
-		"mongoose": "^8.3.4",
-		"redis": "^4.6.14",
-		"tsconfig-paths": "^4.2.0",
-		"wokcommands": "^2.1.9"
-	},
-	"devDependencies": {
-		"@types/node": "^20.12.11",
-		"@types/redis": "^4.0.11",
-		"typescript": "^5.4.5"
-	},
-	"name": "dzajcarz",
-	"version": "3.0.0",
-	"main": "src/main.ts",
-	"scripts": {
-		"start": "ts-node src/main.ts",
-		"start:prod": "NODE_ENV=production ts-node src/main.ts",
-		"dev": "nodemon src/main.ts",
-		"test": "jest",
-		"reset:commands": "ts-node src/admin/reset-commands/main.ts"
-	},
-	"keywords": [
-		"bot",
-		"discord"
-	],
-	"author": "LordPrinz",
-	"license": "ISC",
-	"description": "Not popular but powerful discord bot."
+  "name": "dzajcarz",
+  "module": "src/main.ts",
+  "type": "module",
+  "description": "Not popular but powerful discord bot.",
+  "author": "LordPrinz",
+  "license": "ISC",
+  "keywords": [
+    "bot",
+    "discord",
+    "dzajcarz"
+  ],
+  "version": "4.0.0",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "start:prod": "NODE_ENV=production bun run src/main.ts",
+    "test": "bun test",
+    "checkdeps": "bun outdated | awk '!/eslint/'",
+    "reset:commands": "bun run scripts/reset-commands.ts",
+    "reset:commands:prod": "NODE_ENV=production bun run scripts/reset-commands.ts",
+    "prepare": "bun run scripts/runner.ts --prepare",
+    "build": "bun run scripts/runner.ts --build",
+    "format": "bun run scripts/runner.ts --format",
+    "lint": "bun run scripts/runner.ts --lint",
+    "clean": "bun run scripts/runner.ts --clean",
+    "dev": "bun run scripts/runner.ts --start:dev",
+    "start:dev": "bun run scripts/runner.ts --start:dev",
+    "test:cov": "bun run scripts/runner.ts --test:cov",
+    "test:watch": "bun run scripts/runner.ts --test:watch",
+    "compile": "bun run scripts/runner.ts --compile"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/eslint-plugin-security": "^3.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.21.0",
+    "eslint": "8.47.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-security": "^3.0.1",
+    "eslint-plugin-unused-imports": "^4.1.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.4.3",
+    "prettier": "^3.4.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.17.3",
+    "redis": "^4.7.0"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ]
+  }
 }

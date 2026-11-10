@@ -1,38 +1,39 @@
-import { getElements } from "@/helpers/redis/list";
-import { type CommandObject, CommandType } from "wokcommands";
+import type { DzajCommand } from '@/core/commander';
+import { database } from '@/lib/db';
+import { MessageFlags } from 'discord.js';
 
 export default {
-	description: "Shows party channel",
-	type: CommandType.BOTH,
-	guildOnly: true,
-	callback: async ({ guild, member }) => {
-		if (!member?.voice.channel) {
-			return {
-				content: "You need to be in a voice channel to show a channel",
-				ephemeral: true,
-			};
-		}
+  description: 'Shows party channel',
+  type: 'both',
+  guildOnly: true,
+  callback: async ({ guild, member }) => {
+    if (!member?.voice.channel) {
+      return {
+        content: 'You need to be in a voice channel to show a channel',
+        flags: MessageFlags.Ephemeral,
+      };
+    }
 
-		const channel = member.voice.channel;
+    const channel = member.voice.channel;
 
-		const customChannels = await getElements("customChannels");
+    const isCustomChannel = await database.isCustomVoiceChannel(guild!.id, channel.id);
 
-		if (!customChannels.includes(channel.id)) {
-			return {
-				content: "You can only show party channels",
-				ephemeral: true,
-			};
-		}
+    if (!isCustomChannel) {
+      return {
+        content: 'You can only show party channels',
+        flags: MessageFlags.Ephemeral,
+      };
+    }
 
-		const roleID = guild.roles.everyone.id;
+    const roleID = guild!.roles.everyone.id;
 
-		channel.permissionOverwrites.edit(roleID, {
-			ViewChannel: true,
-		});
+    channel.permissionOverwrites.edit(roleID, {
+      ViewChannel: true,
+    });
 
-		return {
-			content: `Channel shown`,
-			ephemeral: true,
-		};
-	},
-} as CommandObject;
+    return {
+      content: `Channel shown`,
+      flags: MessageFlags.Ephemeral,
+    };
+  },
+} as DzajCommand;

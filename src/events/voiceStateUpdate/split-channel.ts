@@ -1,50 +1,47 @@
-import { appendElement } from "@/helpers/redis/list";
-import { getElements } from "@/helpers/redis/set";
-import { PartyAreaData } from "@/models/partyAreaModel";
-import { replaceTagToUser } from "@/utils";
-import { type VoiceChannel, type VoiceState } from "discord.js";
+import { database } from '@/lib/db';
+import { type VoiceChannel, type VoiceState } from 'discord.js';
 
 export default async (oldState: VoiceState, newState: VoiceState) => {
-	const oldChannel = oldState.channel;
-	const newChannel = newState.channel;
+  const oldChannel = oldState.channel;
+  const newChannel = newState.channel;
 
-	//* Detects if the user joined the channel
+  //* Detects if the user joined the channel
 
-	if (
-		(oldChannel !== null || newChannel === null) &&
-		(oldChannel === null ||
-			newChannel === null ||
-			oldChannel?.id === newChannel?.id)
-	) {
-		return;
-	}
+  if ((oldChannel !== null || newChannel === null) && (oldChannel === null || newChannel === null || oldChannel?.id === newChannel?.id)) {
+    return;
+  }
 
-	const targetChannelId = newChannel.id;
+  const targetChannelId = newChannel.id;
 
-	const guildId = newChannel.guild.id;
+  const guildId = newChannel.guild.id;
 
-	const partyAreas = await getElements<PartyAreaData[]>("partyAreas");
+  const serverSplitChannels = await database.isSplitChannel(guildId, targetChannelId);
 
-	const desiredParty = partyAreas.find(
-		(area) => area.guildId === guildId && area.splitChannelId === targetChannelId
-	); // It finds the desired party area by splitChannelId, it works that if the splitChannel with certain id exists and was clicked, it will return the desired party area
+  if (!serverSplitChannels) {
+    return;
+  }
 
-	if (!desiredParty) {
-		return;
-	}
+  const categoryId = newChannel.parent!.id;
 
-	const user = newState.member;
+  const partyArea = await database.getPartyArea(guildId, categoryId);
 
-	const userName = user.nickname || user.user.username;
+  if (!partyArea) {
+    return;
+  }
 
-	const newChannelName = replaceTagToUser(desiredParty.newChannelName, userName);
+  const user = newState.member!;
 
-	const customChannel = (await newChannel.clone({
-		name: newChannelName,
-	})) as VoiceChannel;
+  const userName = user.nickname || user.user.username;
 
-	await user.voice.setChannel(customChannel);
-	await appendElement("customChannels", customChannel.id);
+  const newChannelName = partyArea.generationTemplate.replace('@', userName);
 
-	// sendCommandsToChannel(customChannel);
+  const customChannel = (await newChannel.clone({
+    name: newChannelName,
+  })) as VoiceChannel;
+
+  await user.voice.setChannel(customChannel);
+
+  await database.addCustomVoiceChannel(guildId, customChannel.id);
+
+  //TODO: sendCommandsToChannel(customChannel);
 };
