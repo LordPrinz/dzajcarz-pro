@@ -9,6 +9,7 @@ import {
   defineCommand,
   defineEvent,
   defineSelect,
+  escapeMarkdown,
   type LogFields,
   type Logger,
   PUBLIC_OWNER,
@@ -18,7 +19,7 @@ import {
   truncate,
   UserError,
 } from "@dzajcarz/core";
-import { escapeMarkdown, formatDuration, httpUrl, parseQuery, parseTime } from "./format.ts";
+import { formatDuration, httpUrl, parseQuery, parseTime } from "./format.ts";
 import {
   FILTER_LABELS,
   LOOP_LABELS,

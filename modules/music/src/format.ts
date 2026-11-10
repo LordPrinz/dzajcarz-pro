@@ -71,14 +71,6 @@ export function progressLine(positionMs: number, durationMs: number, isStream: b
   return `${bar} ${formatDuration(Math.min(positionMs, durationMs))} / ${formatDuration(durationMs)}`;
 }
 
-/**
- * Track titles are user-controlled text: keep them from turning into Markdown (or breaking a link). `#` and
- * `-` start a heading, a list or `-#` subtext at the head of a line, and `<` opens `<@…>` and `<t:…>`.
- */
-export function escapeMarkdown(text: string): string {
-  return text.replace(/[\\*_~`|>[\]()#<-]/g, "\\$&");
-}
-
 /** Longest link put into an embed; Discord refuses the whole message over its limit. */
 export const MAX_URL_LENGTH = 2048;
 

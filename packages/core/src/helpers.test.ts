@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { codeBlocks, fitLines, plural, requireGuild, truncate, UserError } from "./index.ts";
+import {
+  codeBlocks,
+  escapeMarkdown,
+  fitLines,
+  plural,
+  requireGuild,
+  truncate,
+  UserError,
+} from "./index.ts";
 
 describe("requireGuild", () => {
   test("passes a guild id through and refuses a DM with the given text", () => {
@@ -52,5 +60,15 @@ describe("truncate", () => {
   test("counts code points, not UTF-16 units", () => {
     expect(truncate("abc", 3)).toBe("abc");
     expect(truncate("🎵🎵🎵🎵", 3)).toBe("🎵🎵…");
+  });
+});
+
+describe("escapeMarkdown", () => {
+  test.each([..."\\*_~`|>[]()#<@:-"])("escapes %s", (char) => {
+    expect(escapeMarkdown(`a${char}b`)).toBe(`a\\${char}b`);
+  });
+
+  test("leaves plain text alone", () => {
+    expect(escapeMarkdown("Ola 123 żółć")).toBe("Ola 123 żółć");
   });
 });

@@ -20,6 +20,15 @@ export function requireGuild(guildId: string | null, message = GUILD_ONLY): stri
   return guildId;
 }
 
+/**
+ * Keeps user-controlled text (track titles, player and member names) from turning into Markdown or breaking
+ * a link. `#` and `-` start a heading, a list or `-#` subtext at the head of a line, `<` opens `<@…>` and
+ * `<t:…>`, and `@` and `:` stop `@everyone` and `:emoji:` from forming.
+ */
+export function escapeMarkdown(text: string): string {
+  return text.replace(/[\\*_~`|>[\]()#<@:-]/g, "\\$&");
+}
+
 /** Cuts to `max` code points with an ellipsis, for Discord's label, title and list-line limits. */
 export function truncate(text: string, max: number): string {
   const points = [...text];

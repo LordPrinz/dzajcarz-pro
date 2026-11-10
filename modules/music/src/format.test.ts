@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  escapeMarkdown,
   formatDuration,
   httpUrl,
   MAX_SEARCH_LENGTH,
@@ -94,16 +93,6 @@ describe("formatting", () => {
     expect(progressLine(100_000, 100_000, false)).toEndWith("▬🔘 1:40 / 1:40");
     expect(progressLine(500_000, 100_000, false)).toEndWith("1:40 / 1:40");
     expect(progressLine(65_000, 0, true)).toBe("🔴 Na żywo · 1:05");
-  });
-
-  test("markdown in titles is escaped", () => {
-    expect(escapeMarkdown("**a_b** [x](y) `c`")).toBe("\\*\\*a\\_b\\*\\* \\[x\\]\\(y\\) \\`c\\`");
-  });
-
-  test("headings, subtext and mention or timestamp markup in titles are escaped", () => {
-    expect(escapeMarkdown("# big")).toBe("\\# big");
-    expect(escapeMarkdown("-# small")).toBe("\\-\\# small");
-    expect(escapeMarkdown("<@123> <t:1:R>")).toBe("\\<@123\\> \\<t:1:R\\>");
   });
 
   test("only http(s) URLs pass", () => {
