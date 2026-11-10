@@ -8,7 +8,10 @@ const REQUIRED = {
   REDIS_URL: "redis://localhost:6379",
 };
 
-describe.each(["RIOT_VALORANT_API_KEY", "RIOT_LOL_API_KEY"] as const)("%s", (name) => {
+describe.each([
+  ["RIOT_VALORANT_API_KEY", "RIOT_LOL_API_KEY"],
+  ["RIOT_LOL_API_KEY", "RIOT_VALORANT_API_KEY"],
+] as const)("%s", (name, other) => {
   test("is off when unset", () => {
     expect(loadEnv(REQUIRED)[name]).toBeUndefined();
   });
@@ -20,9 +23,7 @@ describe.each(["RIOT_VALORANT_API_KEY", "RIOT_LOL_API_KEY"] as const)("%s", (nam
   test("is kept when set, without enabling the other game", () => {
     const env = loadEnv({ ...REQUIRED, [name]: "RGAPI-test" });
     expect(env[name]).toBe("RGAPI-test");
-    expect(
-      Object.values({ v: env.RIOT_VALORANT_API_KEY, l: env.RIOT_LOL_API_KEY }).filter(Boolean),
-    ).toEqual(["RGAPI-test"]);
+    expect(env[other]).toBeUndefined();
   });
 });
 

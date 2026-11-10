@@ -63,8 +63,8 @@ const EnvFields = z.object({
   LAVALINK_URL: optional(z.url({ protocol: /^https?$/ })),
   LAVALINK_PASSWORD: optional(z.string().min(1)),
   // Optional, one key per game: without it /valorant (or /lol) answers that stats are off.
-  RIOT_VALORANT_API_KEY: optional(z.string().min(1)),
-  RIOT_LOL_API_KEY: optional(z.string().min(1)),
+  RIOT_VALORANT_API_KEY: optional(z.string().trim().min(1)),
+  RIOT_LOL_API_KEY: optional(z.string().trim().min(1)),
   // When the scheduled song plays (five-field cron, read in the time zone below).
   SCHEDULED_SONG_CRON: z
     .string()
