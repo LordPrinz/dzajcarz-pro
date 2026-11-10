@@ -14,6 +14,12 @@ const SPRINT_DAYS = 14;
 const SPRINT_COUNT = 8;
 
 type Color = "GRAY" | "BLUE" | "GREEN" | "YELLOW" | "ORANGE" | "RED" | "PINK" | "PURPLE";
+interface ExistingOption {
+  id: string;
+  name: string;
+  color?: Color;
+  description?: string;
+}
 interface Option {
   name: string;
   color: Color;
@@ -42,7 +48,7 @@ const SELECT_FIELDS: Record<string, Option[]> = {
     {
       name: "Fun",
       color: "YELLOW",
-      description: "Dzajco, trivia, small commands",
+      description: "Trivia, small commands",
       label: "area:fun",
     },
     {
@@ -50,6 +56,31 @@ const SELECT_FIELDS: Record<string, Option[]> = {
       color: "ORANGE",
       description: "CI/CD, deployment, tooling",
       label: "area:infra",
+    },
+    {
+      name: "Schedule",
+      color: "BLUE",
+      description: "Scheduled songs and messages",
+      label: "area:schedule",
+    },
+    {
+      name: "Messages",
+      color: "PINK",
+      description: "Stored and scheduled messages",
+      label: "area:messages",
+    },
+    {
+      name: "Riot",
+      color: "RED",
+      description: "Riot account linking and stats",
+      label: "area:riot",
+    },
+    { name: "Dzajco", color: "YELLOW", description: '"What" to gif replies', label: "area:dzajco" },
+    {
+      name: "Settings",
+      color: "PURPLE",
+      description: "Per-guild settings",
+      label: "area:settings",
     },
     { name: "Docs", color: "GRAY", description: "DESIGN.md, ADRs", label: "area:docs" },
   ],
@@ -172,7 +203,7 @@ if (wantedStatuses.some((s) => !project.statusOptions.has(s))) {
 // --- 3. Custom fields -----------------------------------------------------------
 const existingFields = await graphql<{
   node: {
-    fields: { nodes: { id: string; name: string; options?: { id: string; name: string }[] }[] };
+    fields: { nodes: { id: string; name: string; options?: ExistingOption[] }[] };
   };
 }>(
   `query($projectId: ID!) {
@@ -181,7 +212,7 @@ const existingFields = await graphql<{
         fields(first: 50) {
           nodes {
             ... on ProjectV2FieldCommon { id name }
-            ... on ProjectV2SingleSelectField { options { id name } }
+            ... on ProjectV2SingleSelectField { options { id name color description } }
           }
         }
       }
@@ -217,6 +248,49 @@ for (const [name, options] of Object.entries(SELECT_FIELDS)) {
     );
     field = { name, ...created.createProjectV2Field.projectV2Field };
     console.info(`Created field ${name}`);
+  } else if (options.some((o) => !field?.options?.some((e) => e.name === o.name))) {
+    // Keep every existing option (including hand-added ones) with its id so items set to them survive;
+    // only the missing ones are appended.
+    const existing = field.options ?? [];
+    const appended = options
+      .filter((o) => !existing.some((e) => e.name === o.name))
+      .map(({ name, color, description }) => ({ name, color, description }));
+    try {
+      const updated = await graphql<{
+        updateProjectV2Field: { projectV2Field: { options: { id: string; name: string }[] } };
+      }>(
+        `mutation($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+          updateProjectV2Field(input: { fieldId: $fieldId, singleSelectOptions: $options }) {
+            projectV2Field { ... on ProjectV2SingleSelectField { options { id name } } }
+          }
+        }`,
+        {
+          fieldId: field.id,
+          options: [
+            ...existing.map(({ id, name, color, description }) => ({
+              id,
+              name,
+              color,
+              description,
+            })),
+            ...appended,
+          ],
+        },
+      );
+      const after = updated.updateProjectV2Field.projectV2Field.options;
+      const lost = existing.filter((e) => !after.some((o) => o.id === e.id));
+      if (lost.length > 0) {
+        console.warn(
+          `WARNING: field ${name} lost option ids for ${lost.map((o) => o.name).join(", ")}; items set to them were cleared, run sync-project.ts to restore`,
+        );
+      }
+      field = { ...field, options: after };
+      console.info(`Updated options of field ${name}`);
+    } catch (error) {
+      manual.push(
+        `Field ${name}: add options ${appended.map((o) => o.name).join(", ")} (API refused: ${(error as Error).message})`,
+      );
+    }
   }
   for (const option of options) {
     const optionId = field.options?.find((o) => o.name === option.name)?.id;
