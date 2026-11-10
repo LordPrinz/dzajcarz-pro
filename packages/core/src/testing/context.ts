@@ -1,6 +1,7 @@
 import type { CommandContext, CommandPlace, Invocation, Reply } from "../command.ts";
 import { type ComponentContext, validateRows } from "../component.ts";
 import { executeComponent, executeModal, UNKNOWN_COMPONENT, UNKNOWN_MODAL } from "../dispatch.ts";
+import { validateReplyLimits } from "../limits.ts";
 import { silentLogger } from "../logger.ts";
 import {
   type ModalBaseContext,
@@ -81,7 +82,9 @@ const NOT_FIRST_ANSWER =
 
 export const NO_MODAL_UPDATE = "update() works only on a modal opened from a message component";
 
+/** What Discord would refuse: broken component rows and text over its limits. */
 function checkComponents(reply: Reply): void {
+  validateReplyLimits(reply);
   if (typeof reply !== "string" && reply.components) validateRows(reply.components);
 }
 

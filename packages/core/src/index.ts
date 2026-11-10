@@ -4,6 +4,7 @@ export * from "./component-state.ts";
 export * from "./cron.ts";
 export * from "./dispatch.ts";
 export * from "./errors.ts";
+export * from "./limits.ts";
 export * from "./logger.ts";
 export * from "./modal.ts";
 export * from "./module.ts";

@@ -433,7 +433,7 @@ describe("/party create", () => {
     const { run, areas } = setup();
     const [reply] = await run("create", { name: "x" }, 0n, undefined, "prefix");
     expect(areas.size).toBe(0);
-    expect(reply).toBeDefined();
+    expect(reply).toBe("Nie masz uprawnień do tej komendy.");
   });
 
   test("rejects an empty or too long name", async () => {
@@ -1273,9 +1273,15 @@ describe("owner controls", () => {
     const t = await withChannel();
     expect((await t.run("invite", { user: "friend" }, none, "u1"))[0]).toContain("<@friend>");
     expect(t.calls).toEqual(["allow 1000 friend"]);
+    const refusals: Record<string, unknown> = {};
     for (const user of ["u1", "bot-self", "nobody"]) {
-      expect((await t.run("invite", { user }, none, "u1"))[0]).toBeDefined();
+      refusals[user] = (await t.run("invite", { user }, none, "u1"))[0];
     }
+    expect(refusals).toEqual({
+      u1: "Nie możesz zrobić tego sam sobie.",
+      "bot-self": "Tego nie zrobię botowi.",
+      nobody: "Nie ma takiej osoby na tym serwerze.",
+    });
     expect(t.calls).toEqual(["allow 1000 friend"]);
   });
 

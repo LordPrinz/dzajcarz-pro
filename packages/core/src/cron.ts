@@ -8,15 +8,22 @@ export interface CronScheduler {
   every(expression: string, timeZone: string, task: () => void | Promise<void>): () => void;
 }
 
+/** How a job gets started; `Bun.cron` outside tests. */
+export type StartCronJob = (
+  expression: string,
+  task: () => void | Promise<void>,
+  options: { tz: string },
+) => { stop(): void };
+
 /** The real thing: `Bun.cron`, which follows the zone's daylight saving changes. */
-export function createCronScheduler(): CronScheduler {
+export function createCronScheduler(start: StartCronJob = Bun.cron): CronScheduler {
   return {
     every(expression, timeZone, task) {
       // parse() validates both arguments now; the job itself would only fail when it first fires.
       if (Bun.cron.parse(expression, Date.now(), { tz: timeZone }) === null) {
         throw new Error(`The cron expression "${expression}" never fires`);
       }
-      const job = Bun.cron(expression, task, { tz: timeZone });
+      const job = start(expression, task, { tz: timeZone });
       return () => {
         job.stop();
       };

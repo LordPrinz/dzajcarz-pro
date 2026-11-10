@@ -44,8 +44,13 @@ interface GuildPlayer {
   history: MusicTrack[];
 }
 
+/** Player calls a test can make fail once with `failNext`. */
+export type FailingCall = "join" | "enqueue" | "search" | "skip";
+
 export interface FakePlayer extends MusicPlayer {
   up: boolean;
+  /** The next call to `method` rejects with `error` (a node that dropped, a missing Connect permission). */
+  failNext(method: FailingCall, error?: Error): void;
   /** What the next `search` returns. */
   nextResult: SearchResult;
   /** Runs while a search is in flight (a member moving channels meanwhile). */
@@ -76,12 +81,25 @@ export function createFakePlayer(): FakePlayer {
   /** Players the bot started; the next member join gives them its text channel. */
   const unclaimed = new Set<string>();
 
+  const failures = new Map<FailingCall, Error>();
+
   const emit = (fn: (listener: MusicListener) => void) => {
     for (const listener of listeners) fn(listener);
   };
 
+  function failIfAsked(method: FailingCall): void {
+    const error = failures.get(method);
+    if (!error) return;
+    failures.delete(method);
+    throw error;
+  }
+
+  /** The current track is over; like lavalink-client, the queue loop sends it to the end of the queue. */
   function advance(guildId: string, guild: GuildPlayer): void {
-    if (guild.current) guild.history.unshift(guild.current);
+    if (guild.current) {
+      guild.history.unshift(guild.current);
+      if (guild.loop === "queue") guild.upcoming.push(guild.current);
+    }
     const next = guild.upcoming.shift() ?? null;
     guild.current = next;
     guild.positionMs = 0;
@@ -96,8 +114,23 @@ export function createFakePlayer(): FakePlayer {
     return guild;
   }
 
+  /** The current track ended by itself: the track loop plays it again, adding another copy to the history. */
+  function finish(guildId: string, guild: GuildPlayer): void {
+    if (guild.loop === "track" && guild.current) {
+      guild.history.unshift(guild.current);
+      guild.positionMs = 0;
+      const again = guild.current;
+      emit((listener) => listener.trackStart(guildId, again));
+      return;
+    }
+    advance(guildId, guild);
+  }
+
   const fake: FakePlayer = {
     up: true,
+    failNext(method, error = new Error(`${method} failed`)) {
+      failures.set(method, error);
+    },
     nextResult: { kind: "tracks", tracks: [track("Pierwszy")] },
     duringSearch: null,
     shuffles: [],
@@ -109,6 +142,7 @@ export function createFakePlayer(): FakePlayer {
     available: () => fake.up,
     async search(query, requesterId) {
       fake.searches.push({ query, requesterId });
+      failIfAsked("search");
       fake.duringSearch?.();
       return fake.nextResult;
     },
@@ -120,6 +154,7 @@ export function createFakePlayer(): FakePlayer {
     },
     async join(guildId, voiceChannelId, textChannelId) {
       fake.joins.push({ guildId, voiceChannelId, textChannelId });
+      failIfAsked("join");
       // Joining waits for Discord, which is where two quick additions used to overlap.
       await new Promise((resolve) => setTimeout(resolve, 0));
       const existing = players.get(guildId);
@@ -141,12 +176,14 @@ export function createFakePlayer(): FakePlayer {
       });
     },
     async enqueue(guildId, tracks) {
+      failIfAsked("enqueue");
       const guild = need(guildId);
       guild.upcoming.push(...tracks);
       if (!guild.current) advance(guildId, guild);
     },
     async skip(guildId, expectedTrackId) {
       fake.skips.push({ guildId, expectedTrackId });
+      failIfAsked("skip");
       const guild = need(guildId);
       if (guild.current?.id === expectedTrackId) advance(guildId, guild);
     },
@@ -167,7 +204,9 @@ export function createFakePlayer(): FakePlayer {
       const guild = need(guildId);
       if (guild.current?.id !== expectedTrackId || fake.skipInFlight) return false;
       if (!guild.current.isSeekable) throw new Error("Current track is not seekable");
-      guild.positionMs = positionMs;
+      // Seeking to the very end finishes the track, as on the node.
+      if (positionMs >= guild.current.durationMs) finish(guildId, guild);
+      else guild.positionMs = positionMs;
       return true;
     },
     async setVolume(guildId, percent) {
@@ -192,9 +231,22 @@ export function createFakePlayer(): FakePlayer {
     async previous(guildId) {
       const guild = need(guildId);
       if (fake.skipInFlight) return "changed";
+      // Same rules as the Lavalink adapter: copies of the current track left by the track loop and files the
+      // bot played are not what members go back to.
+      const current = guild.current;
+      while (
+        guild.history[0] &&
+        (guild.history[0].id === current?.id || guild.history[0].byBot === true)
+      ) {
+        guild.history.shift();
+      }
       const back = guild.history.shift();
       if (!back) return "none";
-      if (guild.current) guild.upcoming.unshift(guild.current);
+      if (guild.loop === "queue") {
+        const copy = guild.upcoming.findLastIndex((queued) => queued.id === back.id);
+        if (copy >= 0) guild.upcoming.splice(copy, 1);
+      }
+      if (current && !current.byBot) guild.upcoming.unshift(current);
       guild.current = back;
       guild.positionMs = 0;
       emit((listener) => listener.trackStart(guildId, back));
@@ -211,7 +263,7 @@ export function createFakePlayer(): FakePlayer {
       return () => listeners.delete(listener);
     },
     finishTrack(guildId) {
-      advance(guildId, need(guildId));
+      finish(guildId, need(guildId));
     },
     destroy(guildId) {
       unclaimed.delete(guildId);
