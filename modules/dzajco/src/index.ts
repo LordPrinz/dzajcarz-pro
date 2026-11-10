@@ -214,7 +214,9 @@ export function createDzajcoModule({
   const dzajco = defineCommand({
     name: "dzajco",
     description: "Ustawienia odpowiedzi Dżajco na „co?” w kanałach i w prywatnej rozmowie z botem",
-    contexts: { places: ["guild", "bot-dm"], installs: ["guild", "user"] },
+    // Bot DMs need only the guild install; a user install would also offer the command in servers without
+    // the bot, where its settings would be stored for nothing and never cleaned up.
+    contexts: { places: ["guild", "bot-dm"], installs: ["guild"] },
     subcommands: {
       show: defineSubcommand({
         description: "Pokazuje ustawienia Dżajco kanału",
