@@ -134,6 +134,7 @@ export function contextFromMessage(
     // A bot cannot read prefix messages in a group DM, so a message is a server or the DM with the bot.
     place: message.guildId === null ? "bot-dm" : "guild",
     channelId: message.channelId,
+    messageId: message.id,
     memberPermissions:
       member && !channel.isDMBased() ? member.permissionsIn(channel).bitfield : null,
     async reply(reply) {

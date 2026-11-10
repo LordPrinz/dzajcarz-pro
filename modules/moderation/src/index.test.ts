@@ -58,7 +58,7 @@ function member(id: string, topRole: number, extra: Partial<MemberInfo> = {}): M
 type Call =
   | { kind: "ban" | "kick" | "untimeout"; userId: string; reason: string }
   | { kind: "timeout"; userId: string; ms: number; reason: string }
-  | { kind: "purge"; channelId: string; count: number; skipNewest: number }
+  | { kind: "purge"; channelId: string; count: number; before: string | null }
   | { kind: "dm"; userId: string; text: string };
 
 interface FakeGuildOptions {
@@ -115,8 +115,8 @@ function fakeGuild({
     async untimeout(_guildId, userId, reason) {
       calls.push({ kind: "untimeout", userId, reason });
     },
-    async purge(channelId, count, skipNewest) {
-      calls.push({ kind: "purge", channelId, count, skipNewest });
+    async purge(channelId, count, before) {
+      calls.push({ kind: "purge", channelId, count, before });
       return { deleted: 3, tooOld: 0, pinned: 0, ...purgeResult };
     },
     async sendDirect(userId, text) {
@@ -165,6 +165,7 @@ function capturingLogger() {
 interface RunOptions {
   invocation?: Invocation;
   memberPermissions?: bigint;
+  messageId?: string;
 }
 
 function setup(
@@ -182,11 +183,17 @@ function setup(
   async function run(
     name: string,
     args: Record<string, unknown>,
-    { invocation = "slash", memberPermissions = ALL }: RunOptions = {},
+    { invocation = "slash", memberPermissions = ALL, messageId }: RunOptions = {},
   ) {
     const command = registry.find(name);
     if (!command) throw new Error(`no command ${name}`);
-    const ctx = createFakeContext({ args, invocation, memberPermissions, userId: CALLER });
+    const ctx = createFakeContext({
+      args,
+      invocation,
+      memberPermissions,
+      userId: CALLER,
+      messageId,
+    });
     await executeCommand(command, ctx, silentLogger);
     return ctx;
   }
@@ -374,6 +381,15 @@ describe("warn", () => {
     expect(text(ctx.replies)).toBe(
       `Ostrzeżenie dla <@${TARGET}> (ostrzeżenie nr 2). Powód: bez spamu`,
     );
+  });
+
+  test("a member whose role is above the bot's can still be warned", async () => {
+    const { run, entries } = setup({
+      members: [member(CALLER, 30, { permissions: ALL }), member(TARGET, 25)],
+    });
+    const ctx = await run("warn", { user: TARGET });
+    expect(entries[0]).toMatchObject({ action: "warn", targetId: TARGET });
+    expect(text(ctx.replies)).toContain(`<@${TARGET}>`);
   });
 
   test("a failed record still confirms the warning, without a number and with the note", async () => {
@@ -718,7 +734,7 @@ describe("purge", () => {
   test("slash deletes the newest messages, answers privately and records the count", async () => {
     const { run, calls, entries } = setup({ purgeResult: { deleted: 5 } });
     const ctx = await run("purge", { count: 5 });
-    expect(calls).toEqual([{ kind: "purge", channelId: CHANNEL, count: 5, skipNewest: 0 }]);
+    expect(calls).toEqual([{ kind: "purge", channelId: CHANNEL, count: 5, before: null }]);
     expect(ctx.deferOptions).toEqual({ ephemeral: true });
     expect(text(ctx.replies)).toBe("Usunięto 5 wiadomości.");
     expect(entries).toEqual([
@@ -735,10 +751,12 @@ describe("purge", () => {
     ]);
   });
 
-  test("prefix skips its own message so the reply has something to answer", async () => {
+  test("prefix purges only what came before its own message", async () => {
     const { run, calls } = setup();
-    await run("purge", { count: 10 }, { invocation: "prefix" });
-    expect(calls).toEqual([{ kind: "purge", channelId: CHANNEL, count: 10, skipNewest: 1 }]);
+    await run("purge", { count: 10 }, { invocation: "prefix", messageId: "400000000000000004" });
+    expect(calls).toEqual([
+      { kind: "purge", channelId: CHANNEL, count: 10, before: "400000000000000004" },
+    ]);
   });
 
   test("old and pinned messages are reported with the right plural", async () => {

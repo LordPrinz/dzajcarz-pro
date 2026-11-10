@@ -54,6 +54,18 @@ describe("checkHierarchy", () => {
     expect(check(member("3", 30), "3", strong)).toBe(HIGHER_THAN_BOT);
   });
 
+  test("when the bot does not act, its role position is not checked, the other rules still are", () => {
+    const above = (target: MemberInfo, who = actor) =>
+      checkHierarchy({ actor: who, bot, targetId: target.id, target, botActs: false });
+    expect(above(member("3", 5))).toBeNull();
+    const owner = member("1", 0, { isOwner: true });
+    expect(above(member("3", 25), owner)).toBeNull();
+    expect(above(member("3", 25))).toBe(HIGHER_THAN_ACTOR);
+    expect(above(member("3", 0, { isOwner: true }))).toBe(OWNER_TARGET);
+    expect(above(bot)).toBe(BOT_TARGET);
+    expect(above(member("1", 10))).toBe(SELF_TARGET);
+  });
+
   test("a non-member is checked by id only", () => {
     expect(check(null, "3")).toBeNull();
     expect(check(null, actor.id)).toBe(SELF_TARGET);

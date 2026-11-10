@@ -1,5 +1,5 @@
 import { UserError } from "@dzajcarz/core";
-import type { MemberInfo, ModerationGuild } from "@dzajcarz/module-moderation";
+import { MAX_TIMEOUT_MS, type MemberInfo, type ModerationGuild } from "@dzajcarz/module-moderation";
 import {
   type Client,
   type Guild,
@@ -20,6 +20,12 @@ export const NOT_A_TEXT_CHANNEL = "Tu nie mogę usuwać wiadomości.";
 const MAX_FETCH = 100;
 /** Bulk delete works up to 14 days; stay a minute inside so a message does not age out in flight. */
 const BULK_MAX_AGE_MS = 14 * 24 * 3_600_000 - 60_000;
+
+/**
+ * Discord validates the timeout end against its own clock, so exactly 28 days from a host clock that runs
+ * ahead is refused (50035). A minute less is invisible to the moderator and always accepted.
+ */
+const TIMEOUT_CEILING_MS = MAX_TIMEOUT_MS - 60_000;
 
 /** The refusals a moderator can act on become UserErrors; anything else stays an error to log. */
 function explain(error: unknown): never {
@@ -99,7 +105,7 @@ export function createModerationGuild(
 
     async timeout(guildId, userId, durationMs, auditReason) {
       const member = await memberOf(guildId, userId);
-      await member.timeout(durationMs, auditReason).catch(explain);
+      await member.timeout(Math.min(durationMs, TIMEOUT_CEILING_MS), auditReason).catch(explain);
     },
 
     async untimeout(guildId, userId, auditReason) {
@@ -107,23 +113,16 @@ export function createModerationGuild(
       await member.timeout(null, auditReason).catch(explain);
     },
 
-    async purge(channelId, count, skipNewest) {
+    async purge(channelId, count, beforeMessageId) {
       const channel = await client.channels.fetch(channelId);
       if (!channel?.isTextBased() || channel.isDMBased()) throw new UserError(NOT_A_TEXT_CHANNEL);
-      const wanted = count + skipNewest;
       const firstPage = await channel.messages
-        .fetch({ limit: Math.min(MAX_FETCH, wanted) })
+        .fetch({
+          limit: Math.min(MAX_FETCH, count),
+          ...(beforeMessageId ? { before: beforeMessageId } : {}),
+        })
         .catch(explain);
-      const fetched = [...firstPage.values()].sort(newestFirst);
-      const oldest = fetched.at(-1);
-      // Discord returns at most 100 per call, so `!purge 100` with the command message to skip needs one more.
-      if (wanted > MAX_FETCH && firstPage.size === MAX_FETCH && oldest) {
-        const nextPage = await channel.messages
-          .fetch({ limit: Math.min(MAX_FETCH, wanted - MAX_FETCH), before: oldest.id })
-          .catch(explain);
-        fetched.push(...[...nextPage.values()].sort(newestFirst));
-      }
-      const picked = fetched.slice(skipNewest, skipNewest + count);
+      const picked = [...firstPage.values()].sort(newestFirst).slice(0, count);
       // Pinned messages stay; one that is also old counts as pinned.
       const unpinned = picked.filter((message) => !message.pinned);
       const pinned = picked.length - unpinned.length;

@@ -121,6 +121,8 @@ export interface CommandContext<A = Record<string, unknown>> {
    */
   readonly place: CommandPlace;
   readonly channelId: string;
+  /** Id of the message that carried a prefix command; undefined for a slash command. */
+  readonly messageId?: string;
   /** Permission bit field of the calling member; null in direct messages. */
   readonly memberPermissions: bigint | null;
   reply(reply: Reply): Promise<void>;

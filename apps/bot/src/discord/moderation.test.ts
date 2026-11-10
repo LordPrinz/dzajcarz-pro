@@ -135,6 +135,13 @@ describe("actions", () => {
     ]);
   });
 
+  test("a timeout of the full 28 days is sent a minute short, so a fast clock cannot make Discord refuse it", async () => {
+    const { member, calls } = fakeMember("5");
+    const guild = createModerationGuild(guildClient({ members: { "5": member } }).client);
+    await guild.timeout(GUILD, "5", 28 * 24 * 3_600_000, "r");
+    expect(calls).toEqual([["timeout", 28 * 24 * 3_600_000 - 60_000, "r"]]);
+  });
+
   test("Missing Permissions becomes a UserError the moderator can act on", async () => {
     const refused = fakeMember("5", {
       kick: async () => {
@@ -216,30 +223,23 @@ describe("purge", () => {
 
   test("deletes the newest `count` messages", async () => {
     const { guild, fetches, bulk } = channelClient(recent);
-    expect(await guild.purge(CHANNEL, 3, 0)).toEqual({ deleted: 3, tooOld: 0, pinned: 0 });
+    expect(await guild.purge(CHANNEL, 3, null)).toEqual({ deleted: 3, tooOld: 0, pinned: 0 });
     expect(fetches).toEqual([{ limit: 3 }]);
     expect(bulk).toEqual([{ ids: recent.slice(0, 3), filterOld: true }]);
   });
 
-  test("skipNewest leaves the newest messages and still deletes `count`", async () => {
+  test("with a message id it deletes only older messages, even when newer ones arrived meanwhile", async () => {
     const { guild, fetches, bulk } = channelClient(recent);
-    await guild.purge(CHANNEL, 3, 1);
-    expect(fetches).toEqual([{ limit: 4 }]);
-    expect(bulk[0]?.ids).toEqual(recent.slice(1, 4));
+    // recent[1] is the command message; recent[0] was posted after it and must stay.
+    await guild.purge(CHANNEL, 3, recent[1] ?? "");
+    expect(fetches).toEqual([{ limit: 3, before: recent[1] }]);
+    expect(bulk[0]?.ids).toEqual(recent.slice(2, 5));
   });
 
   test("never asks Discord for more than 100 messages at once", async () => {
     const { guild, fetches } = channelClient(recent);
-    await guild.purge(CHANNEL, 100, 1);
+    await guild.purge(CHANNEL, 100, null);
     expect(fetches).toEqual([{ limit: 100 }]);
-  });
-
-  test("purging 100 after the command message fetches a second page and deletes all 100", async () => {
-    const many = Array.from({ length: 150 }, (_, i) => idAged((i + 1) * 1_000));
-    const { guild, fetches, bulk } = channelClient(many);
-    expect(await guild.purge(CHANNEL, 100, 1)).toEqual({ deleted: 100, tooOld: 0, pinned: 0 });
-    expect(fetches).toEqual([{ limit: 100 }, { limit: 1, before: many[99] }]);
-    expect(bulk[0]?.ids).toEqual(many.slice(1, 101));
   });
 
   test("messages at the 14 day limit are left and counted", async () => {
@@ -247,7 +247,7 @@ describe("purge", () => {
     const edge = idAged(14 * DAY - 30_000);
     const old = idAged(20 * DAY);
     const { guild, bulk } = channelClient([fresh, edge, old]);
-    expect(await guild.purge(CHANNEL, 3, 0)).toEqual({ deleted: 1, tooOld: 2, pinned: 0 });
+    expect(await guild.purge(CHANNEL, 3, null)).toEqual({ deleted: 1, tooOld: 2, pinned: 0 });
     expect(bulk[0]?.ids).toEqual([fresh]);
   });
 
@@ -255,19 +255,19 @@ describe("purge", () => {
     const oldPinned = idAged(20 * DAY);
     const ids = [...recent.slice(0, 3), oldPinned];
     const { guild, bulk } = channelClient(ids, {}, [recent[1] ?? "", oldPinned]);
-    expect(await guild.purge(CHANNEL, 4, 0)).toEqual({ deleted: 2, tooOld: 0, pinned: 2 });
+    expect(await guild.purge(CHANNEL, 4, null)).toEqual({ deleted: 2, tooOld: 0, pinned: 2 });
     expect(bulk[0]?.ids).toEqual([recent[0] ?? "", recent[2] ?? ""]);
   });
 
   test("nothing deletable means no bulk delete at all", async () => {
     const { guild, bulk } = channelClient([idAged(30 * DAY)]);
-    expect(await guild.purge(CHANNEL, 5, 0)).toEqual({ deleted: 0, tooOld: 1, pinned: 0 });
+    expect(await guild.purge(CHANNEL, 5, null)).toEqual({ deleted: 0, tooOld: 1, pinned: 0 });
     expect(bulk).toEqual([]);
   });
 
   test("a single message goes through bulk delete too", async () => {
     const { guild, bulk } = channelClient(recent);
-    expect(await guild.purge(CHANNEL, 1, 0)).toEqual({ deleted: 1, tooOld: 0, pinned: 0 });
+    expect(await guild.purge(CHANNEL, 1, null)).toEqual({ deleted: 1, tooOld: 0, pinned: 0 });
     expect(bulk).toEqual([{ ids: [recent[0] ?? ""], filterOld: true }]);
   });
 
@@ -275,7 +275,7 @@ describe("purge", () => {
     const { guild } = channelClient(recent, {
       bulkDelete: async (deleting: string[]) => new Map(deleting.slice(1).map((id) => [id, {}])),
     });
-    expect(await guild.purge(CHANNEL, 3, 0)).toEqual({ deleted: 2, tooOld: 0, pinned: 0 });
+    expect(await guild.purge(CHANNEL, 3, null)).toEqual({ deleted: 2, tooOld: 0, pinned: 0 });
   });
 
   test("Missing Permissions or Missing Access on the purge becomes a UserError", async () => {
@@ -285,14 +285,14 @@ describe("purge", () => {
           throw discordError(code);
         },
       });
-      await expect(guild.purge(CHANNEL, 2, 0)).rejects.toThrow(BOT_MISSING_PERMISSIONS);
+      await expect(guild.purge(CHANNEL, 2, null)).rejects.toThrow(BOT_MISSING_PERMISSIONS);
     }
   });
 
   test("a DM or a channel without text is refused", async () => {
     for (const extra of [{ isDMBased: () => true }, { isTextBased: () => false }]) {
       const { guild } = channelClient(recent, extra);
-      await expect(guild.purge(CHANNEL, 2, 0)).rejects.toThrow(NOT_A_TEXT_CHANNEL);
+      await expect(guild.purge(CHANNEL, 2, null)).rejects.toThrow(NOT_A_TEXT_CHANNEL);
     }
   });
 });
