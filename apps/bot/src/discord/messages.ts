@@ -1,6 +1,7 @@
 import type { MessageChannels, ScheduledMessageSender } from "@dzajcarz/module-messages";
 import { type Client, PermissionFlagsBits, RESTJSONErrorCodes } from "discord.js";
 import { toComponentRows } from "./components.ts";
+import { hasCode } from "./errors.ts";
 import { NO_MENTIONS } from "./reply.ts";
 import { createTextChannels } from "./welcome.ts";
 
@@ -21,15 +22,6 @@ export function createMessageChannels(client: Client): MessageChannels {
       );
     },
   };
-}
-
-function hasCode(error: unknown, ...codes: number[]): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    codes.includes(error.code as number)
-  );
 }
 
 /**

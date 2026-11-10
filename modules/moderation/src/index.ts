@@ -3,6 +3,8 @@ import {
   type CommandContext,
   defineCommand,
   type Logger,
+  plural,
+  requireGuild,
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
@@ -125,15 +127,6 @@ const reasonOption = {
 /** Length in code points, the way Postgres' char_length counts. */
 const length = (text: string) => [...text].length;
 
-/** Polish noun form for a count: 1 → one, 2–4 (not 12–14) → few, otherwise many. */
-export function plural(count: number, one: string, few: string, many: string): string {
-  if (count === 1) return one;
-  const tens = count % 100;
-  const ones = count % 10;
-  if (ones >= 2 && ones <= 4 && (tens < 12 || tens > 14)) return few;
-  return many;
-}
-
 function hasPermission(granted: bigint, permission: bigint): boolean {
   return (granted & ADMINISTRATOR) !== 0n || (granted & permission) === permission;
 }
@@ -187,11 +180,6 @@ export function createModerationModule({
   dmLimit,
   logger,
 }: ModerationModuleDeps): BotModule {
-  function guildOf(ctx: CommandContext): string {
-    if (ctx.guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
-    return ctx.guildId;
-  }
-
   /** The typed reason, or null when none was given. Longer than Discord's audit limit is refused. */
   function reasonOf(raw: string | undefined): string | null {
     const reason = raw?.trim() ?? "";
@@ -227,7 +215,7 @@ export function createModerationModule({
     permission: bigint,
     { memberOnly, botActs }: { memberOnly: boolean; botActs: boolean },
   ): Promise<{ guildId: string; target: MemberInfo | null }> {
-    const guildId = guildOf(ctx);
+    const guildId = requireGuild(ctx.guildId);
     const [actor, bot, target] = await Promise.all([
       guild.member(guildId, ctx.user.id),
       guild.self(guildId),
@@ -522,7 +510,7 @@ export function createModerationModule({
     permissions: MODERATE_MEMBERS,
     options: { user: userOption("Czyje ostrzeżenia pokazać") },
     async run(ctx) {
-      const guildId = guildOf(ctx);
+      const guildId = requireGuild(ctx.guildId);
       requireGuildPermission(await guild.member(guildId, ctx.user.id), MODERATE_MEMBERS);
       await ctx.defer({ ephemeral: true });
       const targetId = ctx.args.user;
@@ -567,7 +555,7 @@ export function createModerationModule({
       },
     },
     async run(ctx) {
-      const guildId = guildOf(ctx);
+      const guildId = requireGuild(ctx.guildId);
       const count = ctx.args.count;
       if (!Number.isInteger(count) || count < 1 || count > MAX_PURGE) {
         throw new UserError(`Podaj liczbę od 1 do ${MAX_PURGE}.`);

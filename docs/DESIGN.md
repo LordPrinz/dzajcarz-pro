@@ -19,13 +19,13 @@ Discord gateway ──▶ apps/bot ──▶ registry ──▶ modules (general
                       └──▶ Lavalink ──▶ YouTube, Bandcamp, …  (music only)
 ```
 
-| Package     | Depends on                  | Notes                                                                           |
-| ----------- | --------------------------- | ------------------------------------------------------------------------------- |
-| `core`      | discord.js (event types)    | Command and module model, registry, prefix parser, dispatcher, logger. No I/O.  |
-| `db`        | `Bun.SQL`                   | Plain SQL migrations, a small migration runner, repositories, row types.        |
-| `kv`        | Bun `RedisClient`           | `KeyValueStore` port, Redis adapter, in-memory fake, shared contract tests.     |
-| `modules/*` | `core` + ports they declare | One feature each. Never import `apps/bot`, `db` clients or another module.      |
-| `apps/bot`  | all of the above            | Composition root and the only place that touches discord.js objects at runtime. |
+| Package     | Depends on                  | Notes                                                                                                                |
+| ----------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `core`      | discord.js (event types)    | Command and module model, registry, prefix parser, dispatcher, logger, helpers modules share (`helpers.ts`). No I/O. |
+| `db`        | `Bun.SQL`                   | Plain SQL migrations, a small migration runner, repositories, row types.                                             |
+| `kv`        | Bun `RedisClient`           | `KeyValueStore` port, Redis adapter, in-memory fake, shared contract tests.                                          |
+| `modules/*` | `core` + ports they declare | One feature each. Never import `apps/bot`, `db` clients or another module.                                           |
+| `apps/bot`  | all of the above            | Composition root and the only place that touches discord.js objects at runtime.                                      |
 
 ## Key decisions
 
@@ -645,7 +645,7 @@ the per-guild chain that serialises additions, and read the state inside it):
 choices have Polish names), `/shuffle` (needs two tracks waiting), `/seek <time>` (`90`, `1:30`, `1:02:03`,
 `1m30s`, `1m30`, `1 m 30 s`, `1h2m3s`, up to 99:59:59; in both forms a part after a larger one stays under 60,
 and minutes go up to 99 without hours; refused for a stream, for a track whose source cannot seek and past
-the track's length, while the end itself is allowed and simply ends the track; when another track plays by
+the track's length, while the end itself is allowed and ends the track; when another track plays by
 the time the seek arrives, nothing moves and the member is asked to try again), `/volume <0-150>` (`vol`; 100
 is the source's own level and the level the bot joins at), `/filter <bassboost|nightcore|vaporwave|8d|off>`
 (the prefix form also takes `bas` and `wyłącz`), `/remove <n>` and `/jump <n>` (n is the place shown by

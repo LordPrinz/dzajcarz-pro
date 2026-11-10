@@ -1,4 +1,12 @@
-import { type BotModule, defineCommand, defineSubcommand, UserError } from "@dzajcarz/core";
+import {
+  type BotModule,
+  defineCommand,
+  defineSubcommand,
+  fitLines,
+  MANAGE_GUILD,
+  requireGuild,
+  UserError,
+} from "@dzajcarz/core";
 
 /** Where a guild's custom prefix lives. `forget`-style cache invalidation is the implementation's job. */
 export interface PrefixSettings {
@@ -44,9 +52,6 @@ export interface SettingsModuleDeps {
 /** Modules that stay on: without them nobody could turn anything back on or ask for help. `status` has no per-server behaviour, so a toggle would do nothing. */
 export const PROTECTED_MODULES: ReadonlySet<string> = new Set(["general", "settings", "status"]);
 
-/** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
-const MANAGE_GUILD = 1n << 5n;
-
 const MAX_PREFIX_LENGTH = 5;
 const MAX_ECHOED_NAME = 32;
 /** Discord rejects messages over 2000 characters; the rest is left for the "and N more" line. */
@@ -67,19 +72,6 @@ function validatePrefix(prefix: string): void {
   if (prefix.includes("`")) throw new UserError("Prefiks nie może zawierać znaku `.");
 }
 
-/** Joins lines while they fit in one message; the lines that do not fit become "...i jeszcze N". */
-function fitToMessage(lines: readonly string[]): string {
-  const kept: string[] = [];
-  let length = 0;
-  for (const line of lines) {
-    if (length + line.length + 1 > MAX_LIST_LENGTH) break;
-    kept.push(line);
-    length += line.length + 1;
-  }
-  const hidden = lines.length - kept.length;
-  return hidden > 0 ? [...kept, `…i jeszcze ${hidden}`].join("\n") : kept.join("\n");
-}
-
 export function createSettingsModule({
   prefixes,
   defaultPrefix,
@@ -88,11 +80,6 @@ export function createSettingsModule({
 }: SettingsModuleDeps): BotModule {
   // These commands keep the default `contexts` (servers only), so guildId is set when they run; the check
   // below narrows the type and guards a future change of contexts.
-  const guildOf = (guildId: string | null): string => {
-    if (guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
-    return guildId;
-  };
-
   const prefix = defineCommand({
     name: "prefix",
     description: "Pokazuje albo zmienia prefiks komend na tym serwerze",
@@ -105,14 +92,14 @@ export function createSettingsModule({
         },
         run: async (ctx) => {
           validatePrefix(ctx.args.prefix);
-          await prefixes.set(guildOf(ctx.guildId), ctx.args.prefix);
+          await prefixes.set(requireGuild(ctx.guildId), ctx.args.prefix);
           await ctx.reply({ content: `Prefiks to teraz \`${ctx.args.prefix}\`.`, ephemeral: true });
         },
       }),
       reset: defineSubcommand({
         description: "Przywraca domyślny prefiks",
         run: async (ctx) => {
-          await prefixes.reset(guildOf(ctx.guildId));
+          await prefixes.reset(requireGuild(ctx.guildId));
           await ctx.reply({
             content: `Przywrócono domyślny prefiks \`${defaultPrefix}\`.`,
             ephemeral: true,
@@ -122,7 +109,7 @@ export function createSettingsModule({
       show: defineSubcommand({
         description: "Pokazuje aktualny prefiks",
         run: async (ctx) => {
-          const current = (await prefixes.get(guildOf(ctx.guildId))) ?? defaultPrefix;
+          const current = (await prefixes.get(requireGuild(ctx.guildId))) ?? defaultPrefix;
           await ctx.reply({
             content: `Prefiks na tym serwerze to \`${current}\`. Możesz też wspomnieć bota.`,
             ephemeral: true,
@@ -177,7 +164,7 @@ export function createSettingsModule({
       list: defineSubcommand({
         description: "Pokazuje moduły i miejsca, w których są wyłączone",
         run: async (ctx) => {
-          const disabled = await modules.list(guildOf(ctx.guildId));
+          const disabled = await modules.list(requireGuild(ctx.guildId));
           const lines = modules.moduleNames().map((name) => {
             const entries = disabled.filter((d) => d.module === name);
             if (entries.length === 0) return `\`${name}\`: włączony`;
@@ -188,7 +175,7 @@ export function createSettingsModule({
             const more = hidden > 0 ? ` i jeszcze ${hidden}` : "";
             return `\`${name}\`: wyłączony na kanałach ${shown.join(", ")}${more}`;
           });
-          await ctx.reply({ content: fitToMessage(lines), ephemeral: true });
+          await ctx.reply({ content: fitLines(lines, MAX_LIST_LENGTH), ephemeral: true });
         },
       }),
       disable: defineSubcommand({
@@ -200,7 +187,7 @@ export function createSettingsModule({
         run: async (ctx) => {
           const module = toggleable(ctx.args.module);
           const channelId = ctx.args.channel ?? null;
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           await requireToggleableChannel(guildId, channelId);
           await modules.disable(guildId, module, channelId);
           await ctx.reply({
@@ -218,7 +205,7 @@ export function createSettingsModule({
         run: async (ctx) => {
           const module = toggleable(ctx.args.module);
           const channelId = ctx.args.channel ?? null;
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           const changed = await modules.enable(guildId, module, channelId);
           await ctx.reply({
             content: changed

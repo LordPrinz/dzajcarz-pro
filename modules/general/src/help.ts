@@ -8,6 +8,7 @@ import {
   defineSelect,
   type Embed,
   type Invocation,
+  plural,
   type Reply,
   type SelectOption,
   type Viewer,
@@ -62,11 +63,7 @@ interface Visibility {
 
 /** "1 komenda", "2 komendy", "5 komend", "12 komend", "22 komendy". */
 export function commandCount(count: number): string {
-  const lastTwo = count % 100;
-  const last = count % 10;
-  if (count === 1) return "1 komenda";
-  if (last >= 2 && last <= 4 && !(lastTwo >= 12 && lastTwo <= 14)) return `${count} komendy`;
-  return `${count} komend`;
+  return `${count} ${plural(count, "komenda", "komendy", "komend")}`;
 }
 
 function allowedHere(command: CommandSummary, viewer: Viewer, userInstall: boolean): boolean {

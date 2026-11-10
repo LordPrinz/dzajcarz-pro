@@ -2,16 +2,21 @@ import {
   type BotModule,
   type ComponentRow,
   type CronScheduler,
+  codeBlocks,
   defineButton,
   defineCommand,
   defineEvent,
   defineModal,
   defineSubcommand,
+  fitLines,
   type Logger,
+  MANAGE_GUILD,
+  requireGuild,
+  type TextChannels,
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
-import { type LocalMinute, parseTimeOfDay, warsawMinute } from "./time.ts";
+import { type LocalMinute, localMinute, parseTimeOfDay } from "./time.ts";
 
 export type MessageTarget = { kind: "channel"; channelId: string } | { kind: "dm"; userId: string };
 
@@ -79,9 +84,7 @@ export interface ScheduledMessageSender {
 }
 
 /** Asks Discord about a channel id typed by a member. */
-export interface MessageChannels {
-  /** Whether the channel is a text or announcement channel of this guild. */
-  isTextChannelOf(guildId: string, channelId: string): Promise<boolean>;
+export interface MessageChannels extends TextChannels {
   /** Whether the bot may see the channel and send messages in it. */
   botCanPostIn(guildId: string, channelId: string): Promise<boolean>;
 }
@@ -105,8 +108,6 @@ export interface MessagesModuleDeps {
 }
 
 const MODULE_NAME = "messages";
-/** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
-const MANAGE_GUILD = 1n << 5n;
 
 export const MAX_MESSAGES_PER_GUILD = 25;
 export const MAX_DMS_PER_RECIPIENT = 3;
@@ -166,20 +167,6 @@ function directMessageOverflow(content: string, userId: string): number {
   return Math.max(0, characters(worstCase) - DISCORD_MESSAGE_LIMIT);
 }
 
-/** Discord caps a message at 2000 characters; the fences and a margin leave room for the text. */
-const CHUNK_SIZE = 1900;
-
-/** The text as ephemeral-sized code blocks; a run of backticks gets a zero-width space so it cannot close one. */
-function codeBlocks(text: string): string[] {
-  const safe = text.replaceAll("`", "`\u200b");
-  const chars = [...safe];
-  const blocks: string[] = [];
-  for (let start = 0; start < chars.length; start += CHUNK_SIZE) {
-    blocks.push(`\`\`\`\n${chars.slice(start, start + CHUNK_SIZE).join("")}\n\`\`\``);
-  }
-  return blocks;
-}
-
 /**
  * One line of the text, cut to `PREVIEW_LENGTH` characters, as inline code so markdown and mentions in it
  * show as typed. Any backtick would end the span, even one followed by a zero-width space, so backticks
@@ -202,23 +189,6 @@ function batches<T>(items: readonly T[], size: number): T[][] {
 
 const targetLabel = (target: MessageTarget) =>
   target.kind === "channel" ? `<#${target.channelId}>` : `DM <@${target.userId}>`;
-
-/** Room kept at the end of a cut list for "… i jeszcze N". */
-const MORE_RESERVE = 20;
-
-/** The lines that fit one message; the rest is counted in a last line. */
-export function fitLines(lines: readonly string[], limit = DISCORD_MESSAGE_LIMIT): string {
-  const kept: string[] = [];
-  let used = 0;
-  for (const line of lines) {
-    const next = used + (kept.length > 0 ? 1 : 0) + characters(line);
-    if (next > limit - MORE_RESERVE) break;
-    kept.push(line);
-    used = next;
-  }
-  const hidden = lines.length - kept.length;
-  return hidden > 0 ? `${kept.join("\n")}\n… i jeszcze ${hidden}` : kept.join("\n");
-}
 
 /** `<#id>` → channel, `<@id>` / `<@!id>` → member; anything else is not a target. */
 function parseTarget(input: string): MessageTarget | null {
@@ -249,11 +219,6 @@ export function createMessagesModule({
   timeZone,
   logger,
 }: MessagesModuleDeps): BotModule {
-  const guildOf = (guildId: string | null): string => {
-    if (guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
-    return guildId;
-  };
-
   /** Shared by the form and the prefix form, so both refuse the same input with the same words. */
   async function addMessage(guildId: string, createdBy: string, draft: Draft): Promise<string> {
     const time = parseTimeOfDay(draft.time ?? "");
@@ -343,7 +308,7 @@ export function createMessagesModule({
     run: async (ctx) => {
       const text = ctx.values.text ?? "";
       try {
-        const content = await addMessage(guildOf(ctx.guildId), ctx.user.id, {
+        const content = await addMessage(requireGuild(ctx.guildId), ctx.user.id, {
           time: ctx.values.time,
           channelId: ctx.values.channel,
           userId: ctx.values.user,
@@ -428,7 +393,7 @@ export function createMessagesModule({
     try {
       // A job that fires a few milliseconds early still belongs to the minute it was meant for.
       const rounded = new Date(Math.round(now().getTime() / 60_000) * 60_000);
-      const minute = warsawMinute(rounded, timeZone);
+      const minute = localMinute(rounded, timeZone);
       const due = await store.due(minute.time, MAX_DUE_PER_TICK);
       if (due.length >= MAX_DUE_PER_TICK) {
         logger.warn("Too many scheduled messages in one minute; the rest are skipped", {
@@ -484,7 +449,7 @@ export function createMessagesModule({
           },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           if (ctx.canShowModal) {
             await ctx.showModal(addForm.build(ctx.user.id));
             return;
@@ -503,7 +468,7 @@ export function createMessagesModule({
       list: defineSubcommand({
         description: "Pokazuje zaplanowane wiadomości serwera",
         run: async (ctx) => {
-          const rows = await store.list(guildOf(ctx.guildId));
+          const rows = await store.list(requireGuild(ctx.guildId));
           const content =
             rows.length === 0
               ? EMPTY_LIST
@@ -528,7 +493,7 @@ export function createMessagesModule({
         },
         run: async (ctx) => {
           const { id } = ctx.args;
-          if (!(await store.remove(guildOf(ctx.guildId), id))) {
+          if (!(await store.remove(requireGuild(ctx.guildId), id))) {
             throw new UserError(`Nie ma wiadomości #${id} na tym serwerze.`);
           }
           await ctx.reply({ content: `Usunięto wiadomość #${id}.`, ephemeral: true });

@@ -1,5 +1,6 @@
 import type { DirectMessages, PanelMessages, VoiceChannels } from "@dzajcarz/module-music";
 import { type Client, RESTJSONErrorCodes } from "discord.js";
+import { hasCode } from "./errors.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 /** Voice states come from the gateway cache (GuildVoiceStates intent), so no REST call is made. */
@@ -16,14 +17,10 @@ export function createVoiceChannels(client: Client): VoiceChannels {
   };
 }
 
-function isCode(error: unknown, code: number): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code;
-}
-
 function isUnknown(error: unknown): boolean {
   return (
-    isCode(error, RESTJSONErrorCodes.UnknownMessage) ||
-    isCode(error, RESTJSONErrorCodes.UnknownChannel)
+    hasCode(error, RESTJSONErrorCodes.UnknownMessage) ||
+    hasCode(error, RESTJSONErrorCodes.UnknownChannel)
   );
 }
 
@@ -84,7 +81,7 @@ export function createDirectMessages(client: Client): DirectMessages {
         await user.send({ content, embeds, components, allowedMentions: NO_MENTIONS });
         return true;
       } catch (error) {
-        if (isCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
+        if (hasCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
         throw error;
       }
     },

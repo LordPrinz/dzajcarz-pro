@@ -19,7 +19,7 @@ This is v5, a rewrite on Bun. The history of the earlier versions (v3 and v4) si
 | Runtime / tooling | [Bun](https://bun.com) 1.4: package manager, test runner, `Bun.SQL`, `RedisClient` |
 | Discord           | discord.js 14                                                                      |
 | Music             | Lavalink 4 with the YouTube source plugin                                          |
-| Database          | PostgreSQL 17 via `Bun.SQL`, plain SQL migrations                                  |
+| Database          | PostgreSQL 18 via `Bun.SQL`, plain SQL migrations                                  |
 | Cache / cooldowns | Redis 8 via Bun `RedisClient`                                                      |
 | Validation        | zod (environment, later command input from the dashboard)                          |
 | Quality           | Biome, TypeScript strict, Husky git hooks, GitHub Actions                          |
@@ -46,7 +46,6 @@ modules/
   status/           rotates the bot's activity (the old bot's song)
   music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), loop, shuffle, seek, volume, filter, remove, jump, back, clear, save (sv), a now playing panel with buttons
   riot/             valorant, lol (player stats from the Riot API, needs RIOT_VALORANT_API_KEY / RIOT_LOL_API_KEY)
-  …                 moderation, fun (see the board)
 infra/              docker-compose files: development (Postgres, Redis, Lavalink and yt-cipher in profile "music") and production (docker-compose.prod.yml)
 Dockerfile          the bot compiled into one binary (docs/DEPLOYMENT.md)
 scripts/            git hooks and GitHub automation (Bun scripts)

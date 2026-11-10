@@ -30,7 +30,6 @@ import {
   NOT_RECORDED,
   NOT_TIMED_OUT,
   type PurgeResult,
-  plural,
   REASON_TOO_LONG,
   WARN_DM_WINDOW_MS,
   WARNINGS_DM_CLOSED,
@@ -193,13 +192,6 @@ function setup(
 
 const text = (replies: Reply[]) => replyText(replies.at(-1));
 const isEphemeral = (reply: Reply | undefined) => typeof reply === "object" && reply.ephemeral;
-
-describe("plural", () => {
-  test("follows the Polish rules for 1, 2–4, 5+, the teens and 22", () => {
-    const forms = [1, 2, 5, 12, 22].map((n) => plural(n, "one", "few", "many"));
-    expect(forms).toEqual(["one", "few", "many", "many", "few"]);
-  });
-});
 
 describe("ban", () => {
   test("bans with the audit reason, DMs the member first and records the action", async () => {

@@ -13,6 +13,7 @@ import {
   PUBLIC_OWNER,
   type Reply,
   type ReplyFile,
+  requireGuild,
   type Scheduler,
   UserError,
 } from "@dzajcarz/core";
@@ -351,11 +352,6 @@ export function createPartyModule({
   lock,
   logger,
 }: PartyModuleDeps): BotModule {
-  const guildOf = (guildId: string | null): string => {
-    if (guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
-    return guildId;
-  };
-
   /** Removes a Discord channel and swallows the failure: the caller has the state it wants anyway. */
   async function deleteQuietly(channelId: string): Promise<void> {
     try {
@@ -519,7 +515,7 @@ export function createPartyModule({
       },
     },
     run: async (ctx) => {
-      const guildId = guildOf(ctx.guildId);
+      const guildId = requireGuild(ctx.guildId);
       const settings = {
         categoryName: validateName("nazwę kategorii", ctx.values.categoryName),
         joinChannelName: validateName("nazwę kanału wejściowego", ctx.values.joinChannelName),
@@ -578,7 +574,7 @@ export function createPartyModule({
           },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           if (ctx.canShowModal) {
             // The slash command is a form; a name typed into the option only prefills it.
             const categoryName = ctx.args.name?.trim().slice(0, MAX_NAME_LENGTH) || undefined;
@@ -606,7 +602,7 @@ export function createPartyModule({
           },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           if (!ctx.canShowModal) {
             throw new UserError("Edycja strefy wymaga komendy ukośnikowej: użyj /party edit.");
           }
@@ -636,7 +632,7 @@ export function createPartyModule({
           },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           await ctx.defer({ ephemeral: true });
           const area = await pickArea(guildId, ctx.args.channel, "do usunięcia");
           await dismantleArea(area);
@@ -1212,7 +1208,7 @@ export function createPartyModule({
   /** Refuses before the form opens, so nobody fills it in for nothing: not the owner, or over the owner limits. */
   async function checkSpecialAllowed(ctx: ControlContext, channel: PartyChannel): Promise<void> {
     requireOwner(ctx, channel);
-    const guildId = guildOf(ctx.guildId);
+    const guildId = requireGuild(ctx.guildId);
     const minute = await specialCount(`party-special:min:${guildId}:${ctx.user.id}`);
     const hour = await specialCount(`party-special:hour:${guildId}:${ctx.user.id}`);
     if (minute >= SPECIAL_OWNER_PER_MINUTE) throw new UserError(SPECIAL_MINUTE_MESSAGE);
@@ -1242,7 +1238,7 @@ export function createPartyModule({
     ctx: ControlContext & { defer(options?: { ephemeral?: boolean }): Promise<void> },
     form: SpecialInviteForm,
   ): Promise<void> {
-    const guildId = guildOf(ctx.guildId);
+    const guildId = requireGuild(ctx.guildId);
     const channel = await ownChannel(ctx);
     requireOwner(ctx, channel);
     await takeSpecialAllowance(guildId, ctx.user.id);
@@ -1305,7 +1301,7 @@ export function createPartyModule({
   ): Promise<string | null> {
     if (userId === ctx.user.id) return "to ty";
     try {
-      const member = await permissions.lookupMember(guildOf(ctx.guildId), userId);
+      const member = await permissions.lookupMember(requireGuild(ctx.guildId), userId);
       if (!member) return "nie ma na serwerze";
       if (member.self || member.bot) return "to bot";
       if (await permissions.isBlocked(channel.channelId, userId)) {
@@ -1488,14 +1484,14 @@ export function createPartyModule({
     if (member.moderator) throw new UserError("Nie możesz zablokować moderatora.");
     await permissions.denyMember(channel.channelId, userId, reason);
     if ((await channels.members(channel.channelId))?.includes(userId)) {
-      await permissions.disconnect(guildOf(ctx.guildId), userId, channel.channelId, reason);
+      await permissions.disconnect(requireGuild(ctx.guildId), userId, channel.channelId, reason);
     }
     await ownerReply(ctx, channel, "block", `<@${userId}> jest zablokowany na kanale.`);
   }
 
   /** controlledChannel's checks (the cooldown aside), also used to refuse early before a form opens. */
   async function ownChannel(ctx: ControlContext): Promise<PartyChannel> {
-    const guildId = guildOf(ctx.guildId);
+    const guildId = requireGuild(ctx.guildId);
     const here = await channels.voiceChannelOf(guildId, ctx.user.id);
     const channel = here ? await repository.findChannel(here) : null;
     if (!channel || channel.guildId !== guildId) {
@@ -1518,7 +1514,7 @@ export function createPartyModule({
     ctx: ControlContext,
     action: string,
   ): Promise<{ channel: PartyChannel; reason: string }> {
-    await enforceControlCooldown(guildOf(ctx.guildId), ctx.user.id);
+    await enforceControlCooldown(requireGuild(ctx.guildId), ctx.user.id);
     const channel = await ownChannel(ctx);
     return { channel, reason: `Party: ${action} by ${ctx.user.id}` };
   }
@@ -1551,7 +1547,7 @@ export function createPartyModule({
   /** Refuses the caller, the bot and people who are not on the server. */
   async function pickMember(ctx: ControlContext, userId: string): Promise<GuildMemberInfo> {
     if (userId === ctx.user.id) throw new UserError("Nie możesz zrobić tego sam sobie.");
-    const member = await permissions.lookupMember(guildOf(ctx.guildId), userId);
+    const member = await permissions.lookupMember(requireGuild(ctx.guildId), userId);
     if (!member) throw new UserError("Nie ma takiej osoby na tym serwerze.");
     if (member.self) throw new UserError("Tego nie zrobię botowi.");
     return member;

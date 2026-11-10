@@ -77,13 +77,18 @@ export function createRedisStore(
   };
 }
 
+/** Where `keepConnected` reports a dropped connection; the bot's JSON logger fits. */
+export interface ConnectionLog {
+  warn(message: string, fields?: Record<string, unknown>): void;
+}
+
 /**
  * Connects and reconnects forever. Pair it with `enableOfflineQueue: false`, so commands fail fast
  * while Redis is down instead of hanging requests. Bun calls `onclose` after a failed connect too.
  */
-export function keepConnected(client: RedisClient, retryMs = 5_000): void {
+export function keepConnected(client: RedisClient, log: ConnectionLog, retryMs = 5_000): void {
   client.onclose = (error) => {
-    console.error(`Redis connection closed (${error.message}); retrying in ${retryMs} ms`);
+    log.warn("Redis connection closed; retrying", { error: error.message, retryMs });
     setTimeout(() => client.connect().catch(() => {}), retryMs);
   };
   client.connect().catch(() => {});
