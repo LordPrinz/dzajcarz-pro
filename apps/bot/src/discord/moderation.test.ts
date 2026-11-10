@@ -193,9 +193,12 @@ describe("purge", () => {
       isTextBased: () => true,
       isDMBased: () => false,
       messages: {
-        fetch: async (options: unknown) => {
+        // Like Discord: the newest `limit` messages, older than `before` when given.
+        fetch: async (options: { limit: number; before?: string }) => {
           fetches.push(options);
-          return messages;
+          const start = options.before === undefined ? 0 : ids.indexOf(options.before) + 1;
+          const page = new Set(ids.slice(start, start + options.limit));
+          return new Map([...messages].filter(([id]) => page.has(id)));
         },
       },
       bulkDelete: async (deleting: string[], filterOld: boolean) => {
@@ -225,10 +228,18 @@ describe("purge", () => {
     expect(bulk[0]?.ids).toEqual(recent.slice(1, 4));
   });
 
-  test("never asks Discord for more than 100 messages", async () => {
+  test("never asks Discord for more than 100 messages at once", async () => {
     const { guild, fetches } = channelClient(recent);
     await guild.purge(CHANNEL, 100, 1);
     expect(fetches).toEqual([{ limit: 100 }]);
+  });
+
+  test("purging 100 after the command message fetches a second page and deletes all 100", async () => {
+    const many = Array.from({ length: 150 }, (_, i) => idAged((i + 1) * 1_000));
+    const { guild, fetches, bulk } = channelClient(many);
+    expect(await guild.purge(CHANNEL, 100, 1)).toEqual({ deleted: 100, tooOld: 0, pinned: 0 });
+    expect(fetches).toEqual([{ limit: 100 }, { limit: 1, before: many[99] }]);
+    expect(bulk[0]?.ids).toEqual(many.slice(1, 101));
   });
 
   test("messages at the 14 day limit are left and counted", async () => {

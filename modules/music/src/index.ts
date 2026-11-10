@@ -594,6 +594,8 @@ export function createMusicModule({
       const { tracks } = await searches.load<PendingSearch>(ctx.state);
       const track = tracks[Number(ctx.values[0])];
       if (!track) throw new UserError("Nie ma takiego wyniku.");
+      // Joining the voice channel can take longer than the 3 s Discord gives a click to be answered.
+      await ctx.defer();
       const added = await addTracks(guildId, ctx.user.id, ctx.channelId, [track]);
       await ctx.update({
         content: addedText(track, added.startsNow, added.position),

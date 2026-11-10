@@ -28,10 +28,12 @@ function setup({
   randoms = [],
   respondFails = false,
   store: customStore,
+  prefix = "!",
 }: {
   randoms?: number[];
   respondFails?: boolean;
   store?: KeyValueStore;
+  prefix?: string;
 } = {}) {
   let time = 1_000_000;
   const store = customStore ?? createMemoryStore(() => time);
@@ -77,7 +79,7 @@ function setup({
     kv: store,
     channels,
     random,
-    prefixFor: async () => "!",
+    prefixFor: async () => prefix,
     logger,
   });
   const registry = createRegistry([module]);
@@ -205,6 +207,13 @@ describe("what is ignored", () => {
     expect(t.randomCalls).toEqual([]);
   });
 
+  test("a command with a word prefix in other case, like Co? with the prefix co", async () => {
+    const t = setup({ prefix: "co" });
+    await t.say("Co?");
+    expect(t.responses).toEqual([]);
+    expect(t.randomCalls).toEqual([]);
+  });
+
   test("a mention of somebody else in front does not hide the word", async () => {
     const t = setup({ randoms: [0] });
     await t.say("<@123456789012345678> what");
@@ -290,6 +299,7 @@ describe("per-channel settings", () => {
     await t.say("what");
     expect(t.responses).toHaveLength(1);
     expect(t.settingsReads).toEqual([channelId]);
+    expect(await t.store.get(`dzajco:settings:${channelId}`)).toBe("null");
   });
 });
 

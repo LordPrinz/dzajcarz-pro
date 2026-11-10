@@ -190,7 +190,7 @@ function acceptChannel(
   field: SelectMenuModalData,
   id: string,
   interaction: ModalSubmitInteraction,
-): string {
+): string | typeof REJECTED_MODAL_VALUE {
   const channel = field.channels?.get(id);
   if (!channel) return REJECTED_MODAL_VALUE;
   const allowed: ChannelType[] | undefined = def.channelTypes?.map((kind) => CHANNEL_TYPES[kind]);

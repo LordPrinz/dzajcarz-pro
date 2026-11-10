@@ -255,7 +255,7 @@ class StubManager extends EventEmitter {
   }
 }
 
-function setup() {
+function setup({ localFileGraceMs }: { localFileGraceMs?: number } = {}) {
   const manager = new StubManager();
   const gateway: unknown[] = [];
   const shard = { send: (payload: unknown) => void gateway.push(payload) };
@@ -271,6 +271,7 @@ function setup() {
     password: "pw",
     logger: silentLogger,
     createManager: () => manager as unknown as LavalinkManager,
+    localFileGraceMs,
   });
   const events: string[] = [];
   const failed: MusicTrack[] = [];
@@ -441,6 +442,15 @@ describe("lavalink music player", () => {
       await settle();
       await music.leave(GUILD);
       expect(await done).toEqual({ status: "played", queued: false });
+    });
+
+    test("settles once the file's length and the margin pass without any end event", async () => {
+      const { manager, music } = setup({ localFileGraceMs: 5 });
+      manager.response = { loadType: "track", data: song("Lato z Radiem", 10) };
+      const done = music.playLocalFile(GUILD, VOICE, FILE);
+      await settle();
+      manager.players.get(GUILD)?.queue.tracks.push(song("B"));
+      expect(await done).toEqual({ status: "played", queued: true });
     });
 
     test("moves an idle player of the guild instead of recreating it", async () => {

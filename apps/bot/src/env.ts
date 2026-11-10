@@ -1,3 +1,4 @@
+import { prefixProblem } from "@dzajcarz/core";
 import { z } from "zod";
 
 const snowflake = z.string().regex(/^\d{17,20}$/, "expected a Discord id (17–20 digits)");
@@ -59,7 +60,13 @@ const EnvFields = z.object({
   DISCORD_DEV_TOKEN: optional(z.string().min(50)),
   DISCORD_DEV_CLIENT_ID: optional(snowflake),
   DISCORD_DEV_GUILD_ID: optional(snowflake),
-  BOT_PREFIX: z.string().min(1).max(5).default("!"),
+  BOT_PREFIX: z
+    .string()
+    .default("!")
+    .refine(
+      (value) => prefixProblem(value) === null,
+      "expected 1-5 characters without spaces, invisible characters or a backtick (the /prefix rule)",
+    ),
   DATABASE_URL: connectionUrl(/^postgres(ql)?$/),
   REDIS_URL: connectionUrl(/^rediss?$/),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),

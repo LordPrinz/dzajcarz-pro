@@ -113,10 +113,20 @@ export function createModerationGuild(
     async purge(channelId, count, skipNewest) {
       const channel = await client.channels.fetch(channelId);
       if (!channel?.isTextBased() || channel.isDMBased()) throw new UserError(NOT_A_TEXT_CHANNEL);
-      const fetched = await channel.messages
-        .fetch({ limit: Math.min(MAX_FETCH, count + skipNewest) })
+      const wanted = count + skipNewest;
+      const firstPage = await channel.messages
+        .fetch({ limit: Math.min(MAX_FETCH, wanted) })
         .catch(explain);
-      const picked = [...fetched.values()].sort(newestFirst).slice(skipNewest, skipNewest + count);
+      const fetched = [...firstPage.values()].sort(newestFirst);
+      const oldest = fetched.at(-1);
+      // Discord returns at most 100 per call, so `!purge 100` with the command message to skip needs one more.
+      if (wanted > MAX_FETCH && firstPage.size === MAX_FETCH && oldest) {
+        const nextPage = await channel.messages
+          .fetch({ limit: Math.min(MAX_FETCH, wanted - MAX_FETCH), before: oldest.id })
+          .catch(explain);
+        fetched.push(...[...nextPage.values()].sort(newestFirst));
+      }
+      const picked = fetched.slice(skipNewest, skipNewest + count);
       // Pinned messages stay; one that is also old counts as pinned.
       const unpinned = picked.filter((message) => !message.pinned);
       const pinned = picked.length - unpinned.length;

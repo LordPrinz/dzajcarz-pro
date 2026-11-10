@@ -63,6 +63,8 @@ export interface LavalinkPlayerOptions {
   logger: Logger;
   /** Builds the client library's manager; the tests pass a stub. */
   createManager?: (options: ManagerOptions) => LavalinkManager;
+  /** How long past its length a local file may play before it counts as over without an end event. */
+  localFileGraceMs?: number;
 }
 
 /** Searched tracks kept to enqueue without asking the node again; older ones are decoded on demand. */
@@ -106,6 +108,7 @@ export function createLavalinkMusicPlayer({
   password,
   logger,
   createManager = (options) => new LavalinkManager(options),
+  localFileGraceMs = 60_000,
 }: LavalinkPlayerOptions): LavalinkMusicPlayer {
   const manager = createManager({
     nodes: [nodeOptions(url, password)],
@@ -516,7 +519,15 @@ export function createLavalinkMusicPlayer({
         if (player) await destroyPlayer(player, "scheduled song failed");
         throw error;
       }
-      const { queued } = await finished;
+      // A lost end event (node restart, dropped socket) would keep the guild's scheduled song running until
+      // the bot restarts; past the file's length plus a margin it counts as over.
+      const lengthMs = Number.isFinite(track.info.duration) ? track.info.duration : 0;
+      const watchdog = setTimeout(() => {
+        if (localPlays.get(guildId)?.encoded !== raw.encoded) return;
+        logger.warn("Scheduled song got no end event; treating it as over", { guildId, file });
+        finishLocal(guildId, (manager.getPlayer(guildId)?.queue.tracks.length ?? 0) > 0);
+      }, lengthMs + localFileGraceMs);
+      const { queued } = await finished.finally(() => clearTimeout(watchdog));
       return { status: "played", queued };
     },
 

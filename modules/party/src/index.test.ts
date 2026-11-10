@@ -509,6 +509,14 @@ describe("party area form", () => {
     );
   });
 
+  test("a long name with an emoji at the cut is shortened without splitting the emoji", async () => {
+    const t = setup();
+    const answer = await t.run("create", { name: `${"a".repeat(99)}🎉 reszta` });
+    expect(answer.modals[0]?.fields.find((f) => f.customId === "categoryName")?.value).toBe(
+      "a".repeat(99),
+    );
+  });
+
   test("submitting the form creates the area with its template and flag", async () => {
     const t = setup();
     const [spec] = (await t.run("create")).modals;

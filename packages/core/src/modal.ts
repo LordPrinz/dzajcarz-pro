@@ -322,27 +322,39 @@ function validateTextField(field: ModalFieldSpec, at: string): void {
   }
 }
 
-/** One raw answer: text, a list of ids (selects), or the files Discord resolved (file upload). */
-export type ModalRawValue = string | readonly string[] | readonly ModalFile[] | undefined;
+/**
+ * What an adapter puts in a field it refuses (wrong component type, channel or user it did not resolve,
+ * wrong channel type, foreign guild), alone or as one id of a select. A symbol, so no text a member can type
+ * passes for it; `parseModalValues` answers it with the "invalid value" message.
+ */
+export const REJECTED_MODAL_VALUE: unique symbol = Symbol("rejected modal value");
+type Rejected = typeof REJECTED_MODAL_VALUE;
+
+/**
+ * One raw answer: text, a list of ids (selects), or the files Discord resolved (file upload); or
+ * `REJECTED_MODAL_VALUE` from the adapter.
+ */
+export type ModalRawValue =
+  | string
+  | readonly (string | Rejected)[]
+  | readonly ModalFile[]
+  | Rejected
+  | undefined;
+
+/** A raw answer the adapter did not refuse. */
+type AcceptedRawValue = string | readonly string[] | readonly ModalFile[] | undefined;
 
 /** Raw answers of a submit: text for text inputs, a list of ids for selects, a list of files for uploads. */
 export type ModalRawValues = Readonly<Record<string, ModalRawValue>>;
 
-/**
- * What an adapter puts in a field it refuses (wrong component type, channel or user it did not resolve,
- * wrong channel type, foreign guild). It is not a snowflake, so `parseModalValues` answers it with the
- * "invalid value" message.
- */
-export const REJECTED_MODAL_VALUE = "rejected";
-
-function first(raw: ModalRawValue): string | undefined {
+function first(raw: AcceptedRawValue): string | undefined {
   if (typeof raw === "string") return raw;
   const head = raw?.[0];
   return typeof head === "string" ? head : undefined;
 }
 
 /** The ids of a select answer; anything that is not a list of strings counts as a forged answer. */
-function ids(raw: ModalRawValue): readonly string[] | null {
+function ids(raw: AcceptedRawValue): readonly string[] | null {
   if (raw === undefined) return [];
   if (typeof raw === "string") return [raw];
   return raw.every((item) => typeof item === "string") ? (raw as readonly string[]) : null;
@@ -359,7 +371,7 @@ export function parseModalValues<F extends ModalFieldsDef>(
   const values: Record<string, unknown> = {};
   for (const [key, def] of Object.entries(fields)) {
     const required = def.required ?? true;
-    const given = raw[key];
+    const given = accepted(def, raw[key]);
     if (def.type === "file") {
       values[key] = parseFile(def, given, required);
     } else if (def.type === "user" && (def.maxValues ?? 1) > 1) {
@@ -373,7 +385,7 @@ export function parseModalValues<F extends ModalFieldsDef>(
 
 function parseSingle(
   def: Exclude<ModalFieldDef, FileFieldDef>,
-  given: ModalRawValue,
+  given: AcceptedRawValue,
   required: boolean,
 ): string | undefined {
   const isText = def.type === "short" || def.type === "paragraph";
@@ -397,7 +409,7 @@ function parseSingle(
 /** A user select that takes several people: a list of distinct ids within `minValues`..`maxValues`. */
 function parseUsers(
   def: UserFieldDef,
-  given: ModalRawValue,
+  given: AcceptedRawValue,
   required: boolean,
 ): string[] | undefined {
   const list = ids(given);
@@ -418,7 +430,7 @@ function parseUsers(
 /** A single upload: the adapter resolved it from the submit; type and size are checked here. */
 function parseFile(
   def: FileFieldDef,
-  given: ModalRawValue,
+  given: AcceptedRawValue,
   required: boolean,
 ): ModalFile | undefined {
   if (given === undefined || (Array.isArray(given) && given.length === 0)) {
@@ -469,8 +481,15 @@ function formatBytes(bytes: number): string {
 }
 
 /** More than one value submitted to a single-choice select. */
-function oneOf(given: ModalRawValue): boolean {
+function oneOf(given: AcceptedRawValue): boolean {
   return Array.isArray(given) && given.length > 1;
+}
+
+/** Turns a field the adapter refused into the "invalid value" answer. */
+function accepted(def: ModalFieldDef, raw: ModalRawValue): AcceptedRawValue {
+  if (raw === REJECTED_MODAL_VALUE) invalid(def);
+  if (Array.isArray(raw) && raw.includes(REJECTED_MODAL_VALUE)) invalid(def);
+  return raw as AcceptedRawValue;
 }
 
 function invalid(def: ModalFieldDef): never {

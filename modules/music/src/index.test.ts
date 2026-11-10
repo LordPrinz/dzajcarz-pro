@@ -314,6 +314,7 @@ describe("music module", () => {
       expect(replyText(stranger.replies[0])).toBe("To nie Twoje menu.");
 
       const picked = await click(select.customId, CALLER, ["3"]);
+      expect(picked.deferred).toBe(true);
       expect(replyText(picked.updates[0])).toBe("Gram: **Wynik 3** (3:20).");
       expect(player.state(GUILD)?.current?.title).toBe("Wynik 3");
     });

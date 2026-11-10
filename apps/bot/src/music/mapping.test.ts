@@ -87,6 +87,8 @@ describe("toIdentifier", () => {
     expect(toIdentifier({ kind: "search", text: "local:/etc/passwd" })).toBe(
       "ytsearch:local:/etc/passwd",
     );
+    // A bare path would reach Lavalink's local source (on for the scheduled songs) without the prefix.
+    expect(toIdentifier({ kind: "search", text: "/etc/passwd" })).toBe("ytsearch:/etc/passwd");
     expect(toIdentifier({ kind: "search", text: "https://x.example a b" })).toBe(
       "ytsearch:https://x.example a b",
     );

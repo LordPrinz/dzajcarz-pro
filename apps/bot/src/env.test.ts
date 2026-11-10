@@ -145,3 +145,14 @@ describe("credentialsIntact", () => {
     expect(credentialsIntact("postgres://u:12/x@db/db")).toBe(false);
   });
 });
+
+describe("BOT_PREFIX", () => {
+  test("defaults to ! and keeps a valid prefix", () => {
+    expect(loadEnv(REQUIRED).BOT_PREFIX).toBe("!");
+    expect(loadEnv({ ...REQUIRED, BOT_PREFIX: "dz" }).BOT_PREFIX).toBe("dz");
+  });
+
+  test.each(["a b", "`", "", "abcdef", "\u200b"])("refuses %p like /prefix does", (prefix) => {
+    expect(Env.safeParse({ ...REQUIRED, BOT_PREFIX: prefix }).success).toBe(false);
+  });
+});

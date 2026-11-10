@@ -151,7 +151,10 @@ describe("module toggles in routing", () => {
     await handleMessage(message, undefined, deps);
     expect(ran).toEqual([]);
     expect(replies).toEqual([
-      expect.objectContaining({ content: "Ta komenda działa tylko na serwerze." }),
+      expect.objectContaining({
+        content: "Ta komenda działa tylko na serwerze.",
+        failIfNotExists: false,
+      }),
     ]);
   });
 

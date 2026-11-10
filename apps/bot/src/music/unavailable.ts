@@ -25,7 +25,8 @@ export function createUnavailableMusicPlayer(): LavalinkMusicPlayer {
     jump: unavailable,
     previous: unavailable,
     clear: unavailable,
-    leave: unavailable,
+    // The port promises leave works without a node; with no player there is nothing to leave.
+    leave: async () => {},
     subscribe: () => () => {},
     destroy: async () => {},
   };
