@@ -35,6 +35,7 @@ services:
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID in .env}
+      # No DISCORD_DEV_TOKEN / DISCORD_DEV_CLIENT_ID either: production must never run as the test bot.
       # No DISCORD_DEV_GUILD_ID on purpose: the startup deploy then registers the commands globally,
       # and only when they differ from what Discord has.
       COMMANDS_AUTO_DEPLOY: "true"

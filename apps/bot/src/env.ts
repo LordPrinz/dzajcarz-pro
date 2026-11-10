@@ -52,8 +52,12 @@ const connectionUrl = (protocol: RegExp) =>
     .pipe(z.url({ protocol }));
 
 const EnvFields = z.object({
-  DISCORD_TOKEN: z.string().min(50),
-  DISCORD_CLIENT_ID: snowflake,
+  // Production application. Optional only because a machine that runs nothing but the test bot has no use for it.
+  DISCORD_TOKEN: optional(z.string().min(50)),
+  DISCORD_CLIENT_ID: optional(snowflake),
+  // Test application: both or neither. Set, they win over the production pair (see `chooseDiscordApp`).
+  DISCORD_DEV_TOKEN: optional(z.string().min(50)),
+  DISCORD_DEV_CLIENT_ID: optional(snowflake),
   DISCORD_DEV_GUILD_ID: optional(snowflake),
   BOT_PREFIX: z.string().min(1).max(5).default("!"),
   DATABASE_URL: connectionUrl(/^postgres(ql)?$/),
@@ -88,22 +92,66 @@ const EnvFields = z.object({
   // startup deploy and `commands:deploy` alike.
   DEPLOY_GLOBAL: flag,
 });
+
+interface DiscordFields {
+  DISCORD_TOKEN?: string | undefined;
+  DISCORD_CLIENT_ID?: string | undefined;
+  DISCORD_DEV_TOKEN?: string | undefined;
+  DISCORD_DEV_CLIENT_ID?: string | undefined;
+}
+
+/**
+ * Picks the Discord application the process runs as. A complete test pair wins, so a local `bun run dev`
+ * never logs in as the production bot; production never has the test pair because the compose file does
+ * not pass it. `DISCORD_APP` says which one was picked, for the startup log.
+ */
+export function chooseDiscordApp(env: DiscordFields, ctx: z.RefinementCtx) {
+  const devToken = env.DISCORD_DEV_TOKEN;
+  const devClientId = env.DISCORD_DEV_CLIENT_ID;
+  if ((devToken === undefined) !== (devClientId === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "set both DISCORD_DEV_TOKEN and DISCORD_DEV_CLIENT_ID, or neither",
+      path: [devToken === undefined ? "DISCORD_DEV_TOKEN" : "DISCORD_DEV_CLIENT_ID"],
+    });
+    return z.NEVER;
+  }
+  if (devToken !== undefined && devClientId !== undefined) {
+    return { DISCORD_TOKEN: devToken, DISCORD_CLIENT_ID: devClientId, DISCORD_APP: "dev" as const };
+  }
+  const { DISCORD_TOKEN: token, DISCORD_CLIENT_ID: clientId } = env;
+  if (token === undefined || clientId === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "set DISCORD_TOKEN and DISCORD_CLIENT_ID (production) or DISCORD_DEV_TOKEN and DISCORD_DEV_CLIENT_ID (test bot)",
+      path: ["DISCORD_TOKEN"],
+    });
+    return z.NEVER;
+  }
+  return { DISCORD_TOKEN: token, DISCORD_CLIENT_ID: clientId, DISCORD_APP: "prod" as const };
+}
+
 export const Env = EnvFields.refine(
   (env) => (env.LAVALINK_URL === undefined) === (env.LAVALINK_PASSWORD === undefined),
   {
     message: "set both LAVALINK_URL and LAVALINK_PASSWORD, or neither",
     path: ["LAVALINK_PASSWORD"],
   },
-);
+).transform((env, ctx) => ({ ...env, ...chooseDiscordApp(env, ctx) }));
 export type Env = z.infer<typeof Env>;
 
 /** Just what deploying slash commands needs; no database or Redis. */
 const DeployEnv = EnvFields.pick({
   DISCORD_TOKEN: true,
   DISCORD_CLIENT_ID: true,
+  DISCORD_DEV_TOKEN: true,
+  DISCORD_DEV_CLIENT_ID: true,
   DISCORD_DEV_GUILD_ID: true,
   DEPLOY_GLOBAL: true,
-}).extend({ DEPLOY_CLEAR: flag });
+})
+  .extend({ DEPLOY_CLEAR: flag })
+  .transform((env, ctx) => ({ ...env, ...chooseDiscordApp(env, ctx) }));
 export type DeployEnv = z.infer<typeof DeployEnv>;
 
 function parse<T extends z.ZodType>(

@@ -60,7 +60,7 @@ bun run prod:up
 Production reads the same `.env` as local development, but only the values the bot needs on a server: the
 token, the client id, the three passwords, `BOT_PREFIX`, `RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`, `LOG_LEVEL`, the scheduled song
 settings and `HEALTH_PUBLISH_PORT`. Compose passes each one to the bot by name, so `DATABASE_URL`,
-`REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID` and the `TEST_*` URLs in the file never reach the
+`REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID`, the test bot's `DISCORD_DEV_TOKEN` and `DISCORD_DEV_CLIENT_ID`, and the `TEST_*` URLs in the file never reach the
 production container. Without a dev guild the bot deploys its slash commands globally. The production stack
 is a separate compose project with its own volumes, so it does not share data with `bun run infra:up`.
 

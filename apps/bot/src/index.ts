@@ -196,6 +196,7 @@ attachHandlers(client, {
 
 client.once(Events.ClientReady, (ready) => {
   logger.info("Logged in", {
+    app: env.DISCORD_APP,
     user: ready.user.tag,
     guilds: ready.guilds.cache.size,
     commands: registry.commands().length,
