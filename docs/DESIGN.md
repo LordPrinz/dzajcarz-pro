@@ -37,6 +37,8 @@ Modules only see `CommandContext`: typed `args`, the caller, `reply`, `defer`. R
 before optional ones, and only the last string option may take "the rest of the line" (`rest: true`),
 which keeps both forms unambiguous. An option with `prefixOnly: true` is left out of the slash command, for
 when slash collects that input another way (a modal); `run` then branches on `ctx.canShowModal`. See ADR 5.
+In the prefix form a quoted argument may be wrapped in `"…"`, `„…”`, `„…“` or `“…”` (Polish typography and
+phone keyboards), so a space can sit inside it; an unmatched opening quote is just part of the word.
 
 ### Subcommands
 
