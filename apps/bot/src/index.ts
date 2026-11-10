@@ -77,6 +77,13 @@ const redis = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
 keepConnected(redis, logger);
 
 const guildSettings = createGuildSettingsRepository(sql);
+// Scheduled messages convert times in Postgres, whose tzdata can lack a name the runtime accepts.
+if (!(await guildSettings.isKnownTimeZone(env.DEFAULT_TIME_ZONE))) {
+  logger.error("DEFAULT_TIME_ZONE is unknown to Postgres; pick a current IANA name", {
+    zone: env.DEFAULT_TIME_ZONE,
+  });
+  process.exit(1);
+}
 const prefixes = createPrefixResolver({
   settings: guildSettings,
   cache: createRedisStore(redis),

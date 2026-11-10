@@ -19,7 +19,7 @@ export function createTimeZones({
   defaultTimeZone,
   logger,
 }: {
-  settings: Pick<GuildSettingsRepository, "find" | "setTimeZone">;
+  settings: Pick<GuildSettingsRepository, "find" | "setTimeZone" | "isKnownTimeZone">;
   cache: KeyValueStore;
   defaultTimeZone: string;
   logger: Logger;
@@ -41,6 +41,7 @@ export function createTimeZones({
         await settings.setTimeZone(guildId, timeZone);
         await zones.forget(guildId);
       },
+      isKnown: (timeZone) => settings.isKnownTimeZone(timeZone),
       async reset(guildId) {
         await settings.setTimeZone(guildId, null);
         await zones.forget(guildId);

@@ -89,6 +89,12 @@ describe.skipIf(!sql)("scheduled message repository", () => {
       ["Warszawa", "2026-07-01"],
       ["Londyn", "2026-07-01"],
     ]);
+    // A zone Postgres does not know counts as the default instead of failing every server's messages.
+    await createGuildSettingsRepository(sql as SQL).setTimeZone(otherGuild, "US/Pacific-New");
+    expect((await repo().due(SEVEN_PM_WARSAW, 500)).map((m) => m.content)).toEqual([
+      "Warszawa",
+      "Nie teraz",
+    ]);
     // 23:30 UTC is already the next day in Warsaw.
     await add(guild, "01:30", "Po północy");
     const late = await repo().due(new Date("2026-07-01T23:30:00Z"), 500);

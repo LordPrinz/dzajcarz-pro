@@ -25,6 +25,8 @@ export interface TimeZoneSettings {
   /** The guild's own zone, or null when it uses the default. */
   get(guildId: string): Promise<string | null>;
   set(guildId: string, timeZone: string): Promise<void>;
+  /** Whether the database can use the zone too; the runtime alone may know names it does not. */
+  isKnown(timeZone: string): Promise<boolean>;
   /** Back to the default zone. */
   reset(guildId: string): Promise<void>;
 }
@@ -162,7 +164,9 @@ export function createSettingsModule({
           },
         },
         run: async (ctx) => {
-          const zone = canonicalTimeZone(ctx.args.zone);
+          const canonical = canonicalTimeZone(ctx.args.zone);
+          const zone =
+            canonical !== null && (await timeZones.isKnown(canonical)) ? canonical : null;
           if (zone === null) {
             const shown = ctx.args.zone.replaceAll("`", "").slice(0, 64);
             throw new UserError(

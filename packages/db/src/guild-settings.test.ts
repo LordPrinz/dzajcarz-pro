@@ -50,6 +50,11 @@ describe.skipIf(!sql)("guild settings repository", () => {
     expect((await repo().find(guildId))?.prefix).toBe("?");
   });
 
+  test("isKnownTimeZone asks Postgres, which does not know every name ICU does", async () => {
+    expect(await repo().isKnownTimeZone("Europe/Warsaw")).toBe(true);
+    expect(await repo().isKnownTimeZone("US/Pacific-New")).toBe(false);
+  });
+
   test("the database rejects a prefix longer than 5 characters", async () => {
     await expect(repo().setPrefix(guildId, "toolong")).rejects.toThrow();
   });

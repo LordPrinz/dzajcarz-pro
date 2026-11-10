@@ -440,6 +440,9 @@ describe("threads, voice chats and DMs", () => {
     ]);
     await t.say("what", { guildId: null, channelId: dmChannelId });
     expect(t.responses).toHaveLength(1);
+    expect(await t.run("set", { cooldown: 0 }, 0n, null)).toEqual([
+      "Dżajco w tej rozmowie: szansa 100%, przerwa 10 s.",
+    ]);
     expect(await t.run("set", { channel: channelId, chance: 1 }, 0n, null)).toEqual([
       "W prywatnej wiadomości ustawiasz tylko tę rozmowę.",
     ]);
