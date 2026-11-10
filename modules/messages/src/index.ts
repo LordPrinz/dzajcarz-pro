@@ -112,6 +112,8 @@ export const MAX_MESSAGES_PER_GUILD = 25;
 export const MAX_DMS_PER_RECIPIENT = 3;
 /** A tick reads no more rows than this; hitting it is logged. */
 export const MAX_DUE_PER_TICK = 500;
+/** How early a cron tick may fire and still count as the coming minute. */
+const EARLY_TICK_MS = 5_000;
 /** Messages sent at once in a tick, so a busy minute does not hit Discord with hundreds of requests together. */
 const SEND_BATCH = 5;
 export const MAX_CONTENT_LENGTH = 1900;
@@ -426,8 +428,9 @@ export function createMessagesModule({
    */
   async function tick(): Promise<void> {
     try {
-      // A job that fires a few milliseconds early still belongs to the minute it was meant for.
-      const rounded = new Date(Math.round(now().getTime() / 60_000) * 60_000);
+      // A job that fires up to 5 s early still belongs to the minute it was meant for; a late one keeps its
+      // own minute, so a tick delayed past :30 does not skip to the next one.
+      const rounded = new Date(Math.floor((now().getTime() + EARLY_TICK_MS) / 60_000) * 60_000);
       const minute = warsawMinute(rounded, timeZone);
       const due = await store.due(minute.time, MAX_DUE_PER_TICK);
       if (due.length >= MAX_DUE_PER_TICK) {

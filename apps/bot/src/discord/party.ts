@@ -74,6 +74,8 @@ export function createPartyChannels(client: Client): PartyChannels {
     async members(channelId) {
       const channel = await fetchVoice(channelId);
       if (!channel) return null;
+      // REST still returns channels of an unavailable guild, but its voice states are empty until it comes back.
+      if (!channel.guild.available) return undefined;
       return channel.members.filter((member) => !member.user.bot).map((member) => member.id);
     },
 

@@ -28,13 +28,16 @@ import {
 import {
   createMusicModule,
   EMPTY_QUEUE,
+  FAILED_NOTE_WINDOW_MS,
   IDLE_MS,
   MAX_PLAYLIST_TRACKS,
   MAX_QUEUE_LENGTH,
+  moreTracksFailedText,
   NOT_IN_VOICE,
   NOTHING_PLAYING,
   otherChannel,
   queueChanged,
+  SEARCH_COOLDOWN_MS,
   trackFailedText,
   UNAVAILABLE,
   UNSUPPORTED_LINK,
@@ -660,6 +663,13 @@ describe("music module", () => {
     });
   });
 
+  test("/play and /search have a per-user cooldown, the other commands do not", () => {
+    const { registry } = setup();
+    expect(registry.find("play")?.cooldownMs).toBe(SEARCH_COOLDOWN_MS);
+    expect(registry.find("search")?.cooldownMs).toBe(SEARCH_COOLDOWN_MS);
+    expect(registry.find("skip")?.cooldownMs).toBeUndefined();
+  });
+
   describe("player failures", () => {
     test("/play when joining the channel fails answers with the generic error and the next /play works", async () => {
       const { run, player } = setup();
@@ -720,6 +730,61 @@ describe("music module", () => {
         "Nie udało się odtworzyć **Zły \\*tytuł\\***, gram dalej.",
       );
       expect(player.state(GUILD)?.current?.title).toBe("B");
+    });
+
+    test("a burst of failed tracks gets one note and one count, not a message per track", async () => {
+      const { run, player, panels, scheduler } = setup();
+      player.nextResult = {
+        kind: "playlist",
+        name: "Usunięte",
+        tracks: ["A", "B", "C", "D", "E"].map((title) => track(title)),
+      };
+      await run("play", { query: "a" });
+      for (let i = 0; i < 4; i++) player.failTrack(GUILD);
+      await settle();
+      const notes = () =>
+        [...panels.messages.values()].map((m) => m.message.content).filter(Boolean);
+      expect(notes()).toEqual([trackFailedText("A")]);
+      scheduler.advance(FAILED_NOTE_WINDOW_MS);
+      await settle();
+      expect(notes()).toEqual([trackFailedText("A"), moreTracksFailedText(3)]);
+      expect(player.state(GUILD)?.current?.title).toBe("E");
+    });
+
+    test("leaving ends the window: no late note, and the next session gets its own first note", async () => {
+      const { run, player, panels, scheduler } = setup();
+      player.nextResult = {
+        kind: "playlist",
+        name: "Usunięte",
+        tracks: ["A", "B", "C"].map((title) => track(title)),
+      };
+      await run("play", { query: "a" });
+      player.failTrack(GUILD);
+      player.failTrack(GUILD);
+      player.destroy(GUILD);
+      scheduler.advance(FAILED_NOTE_WINDOW_MS);
+      await settle();
+      const notes = () =>
+        [...panels.messages.values()].map((m) => m.message.content).filter(Boolean);
+      expect(notes()).toEqual([trackFailedText("A")]);
+
+      player.nextResult = { kind: "playlist", name: "Nowa", tracks: [track("D"), track("E")] };
+      await run("play", { query: "d" });
+      player.failTrack(GUILD);
+      await settle();
+      expect(notes()).toEqual([trackFailedText("A"), trackFailedText("D")]);
+    });
+
+    test("a single failed track adds nothing when its window closes", async () => {
+      const { run, player, panels, scheduler } = setup();
+      player.nextResult = { kind: "playlist", name: "Dwa", tracks: [track("A"), track("B")] };
+      await run("play", { query: "a" });
+      player.failTrack(GUILD);
+      scheduler.advance(FAILED_NOTE_WINDOW_MS);
+      await settle();
+      expect([...panels.messages.values()].map((m) => m.message.content).filter(Boolean)).toEqual([
+        trackFailedText("A"),
+      ]);
     });
 
     test("a failed track the bot played on its own gets no note", async () => {

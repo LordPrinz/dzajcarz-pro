@@ -17,6 +17,15 @@ const flag = z.preprocess(
   z.boolean(),
 );
 
+/** Bun.cron.parse throws on text it cannot read and returns null for an expression that never fires. */
+function isCron(value: string): boolean {
+  try {
+    return Bun.cron.parse(value) !== null;
+  } catch {
+    return false;
+  }
+}
+
 function isTimeZone(value: string): boolean {
   try {
     new Intl.DateTimeFormat("en", { timeZone: value });
@@ -73,7 +82,7 @@ const EnvFields = z.object({
   SCHEDULED_SONG_CRON: z
     .string()
     .default("0 9,21 * * *")
-    .refine((value) => Bun.cron.parse(value) !== null, "expected a cron expression that fires"),
+    .refine(isCron, "expected a cron expression that fires"),
   SCHEDULED_SONG_TIMEZONE: z
     .string()
     .default("Europe/Warsaw")

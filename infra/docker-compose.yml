@@ -20,20 +20,22 @@ services:
   # Caches, cooldowns and other state that may be lost (ADR 0003).
   redis:
     image: redis:8-alpine
+    # The password goes into a config file on a tmpfs, not onto the command line, where `ps` would show
+    # it (it is still in the container's environment for redis-cli) (same as production).
     command:
-      [
-        "redis-server",
-        "--requirepass",
-        "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}",
-        "--appendonly",
-        "yes",
-        "--maxmemory",
-        "256mb",
-        "--maxmemory-policy",
-        "allkeys-lru",
-      ]
+      - sh
+      - -c
+      - >-
+        umask 077 &&
+        printf 'requirepass %s\n' "$$REDISCLI_AUTH" > /tmp/redis.conf &&
+        chown redis:redis /tmp/redis.conf &&
+        exec docker-entrypoint.sh redis-server /tmp/redis.conf
+        --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     environment:
+      # Read by the command above and by redis-cli in the health check.
       REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    tmpfs:
+      - /tmp:mode=0755,size=1m
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -45,15 +47,18 @@ services:
       retries: 10
 
   # Audio node for the music module (ADR 0004). Only started with --profile music.
-  # The image has no plugins directory, so Docker creates the volume owned by root and Lavalink
-  # (uid 322) cannot download the YouTube plugin into it. This one-shot step fixes the ownership.
+  # One-shot step: downloads the YouTube plugin, checks it against lavalink/youtube-plugin.sha256 and stops
+  # the start on a mismatch, so Lavalink never fetches the jar itself. Lavalink mounts the volume
+  # read-only.
   lavalink-plugins-init:
     image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
     profiles: ["music"]
     user: "0"
-    entrypoint: ["chown", "322", "/opt/Lavalink/plugins"]
+    entrypoint: ["sh", "/fetch-plugin.sh"]
     volumes:
       - lavalink-plugins:/opt/Lavalink/plugins
+      - ./lavalink/fetch-plugin.sh:/fetch-plugin.sh:ro
+      - ./lavalink/youtube-plugin.sha256:/youtube-plugin.sha256:ro
 
   # Deciphers YouTube stream signatures for the youtube-plugin (ADR 0004). The plugin no longer keeps up
   # with YouTube's player script on its own. The project only publishes a moving `master` tag, so the
@@ -91,7 +96,8 @@ services:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
       # The scheduled songs (ADR 0004). Read-only; the bot plays them by a fixed name, never by member input.
       - ./lavalink/music:/opt/Lavalink/music:ro
-      - lavalink-plugins:/opt/Lavalink/plugins
+      # Read-only: the init step owns what is in here.
+      - lavalink-plugins:/opt/Lavalink/plugins:ro
 
 volumes:
   postgres-data:

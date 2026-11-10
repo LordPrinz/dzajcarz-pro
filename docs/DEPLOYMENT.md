@@ -65,12 +65,13 @@ production container. Without a dev guild the bot deploys its slash commands glo
 is a separate compose project with its own volumes, so it does not share data with `bun run infra:up`.
 
 The passwords end up inside `DATABASE_URL` and `REDIS_URL`. The bot refuses to start when one of them breaks
-the URL (an unencoded `@`, `/`, `?` or `#`), so stick to hex passwords. The first start of Lavalink downloads
-the YouTube plugin, so music can take a minute to come up. Check that the downloaded jar is the one
-recorded in [ADR 4](adr/0004-lavalink-for-audio.md#youtube-setup-dzaj-50):
+the URL (an unencoded `@`, `/`, `?` or `#`), so stick to hex passwords. On the first start
+`lavalink-plugins-init` downloads the YouTube plugin, so music can take a minute to come up. It checks the jar
+against `infra/lavalink/youtube-plugin.sha256` and stops the stack before Lavalink starts if the hash differs
+([ADR 4](adr/0004-lavalink-for-audio.md#youtube-setup-dzaj-50)). Its log says why:
 
 ```bash
-prod exec lavalink sha256sum /opt/Lavalink/plugins/*.jar
+prod logs lavalink-plugins-init
 ```
 
 `POSTGRES_PASSWORD` only takes effect when the `postgres-data` volume is first created. To change it later,
