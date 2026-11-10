@@ -90,8 +90,22 @@ export function contextFromInteraction(
       let sent: Message | undefined;
       if (interaction.replied) {
         sent = await interaction.followUp({ ...payload, flags });
+      } else if (interaction.deferred && ephemeral && !interaction.ephemeral) {
+        // A deferred reply keeps the visibility defer() gave it, so a private message after a public defer
+        // (an error) replaces the public placeholder with a follow-up that only the caller sees.
+        // The follow-up goes first so a failed delete only leaves the placeholder, never loses the message.
+        try {
+          sent = await interaction.followUp({ ...payload, flags });
+        } catch (error) {
+          logger.warn("Could not send a private reply after a public defer", { error });
+          return;
+        }
+        try {
+          await interaction.deleteReply();
+        } catch (error) {
+          logger.warn("Could not delete the public placeholder after a public defer", { error });
+        }
       } else if (interaction.deferred) {
-        // A deferred reply's visibility was fixed by defer(), so `ephemeral` cannot change it here.
         sent = await interaction.editReply(payload);
       } else if (reactions.length > 0) {
         // Only ask Discord for the message when there is something to react to.
