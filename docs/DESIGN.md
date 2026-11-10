@@ -246,7 +246,8 @@ a logged warning, so an outage never turns into gif spam. The default is a 3% ch
 `dzajco_channel_config` holds per-channel overrides (keyed by channel; `guild_id` is NULL for a DM), edited
 with `/dzajco set`, `show` and `reset`. On a server they need Manage Server and take any chat of it: text and
 announcement channels, threads and the chat of voice and stage channels. The command also runs in DMs with
-the bot and for user installs, where it sets only that conversation and needs no permission; because of
+the bot and for user installs, where it sets only that conversation and needs no permission, with a cooldown
+of at least 10 s (every answer costs two requests against the bot's shared rate limit); because of
 that it carries no `permissions` (core allows those only on guild-only commands) and checks Manage Server
 itself, so Discord shows it to every member. A channel without a row uses the defaults. The handler reads
 settings through a Redis cache (`dzajco:settings:<channelId>`, 10 minutes, an unreadable entry is reloaded);

@@ -18,6 +18,11 @@ export const DZAJCO_GIF = "https://tenor.com/view/jajco-gif-23924347";
 export const DEFAULT_CHANCE_PERCENT = 3;
 export const DEFAULT_COOLDOWN_SECONDS = 60;
 export const MAX_COOLDOWN_SECONDS = 86400;
+/**
+ * Anyone can set Dżajco in their DM with the bot, and each answer costs two requests against the bot's
+ * shared rate limit, so a DM never goes below this.
+ */
+export const MIN_DM_COOLDOWN_SECONDS = 10;
 
 export interface DzajcoSettings {
   chancePercent: number;
@@ -235,7 +240,8 @@ export function createDzajcoModule({
           },
           cooldown: {
             type: "integer",
-            description: "Przerwa między odpowiedziami w sekundach",
+            description:
+              "Przerwa między odpowiedziami w sekundach (w prywatnej rozmowie co najmniej 10)",
             minValue: 0,
             maxValue: MAX_COOLDOWN_SECONDS,
           },
@@ -247,9 +253,10 @@ export function createDzajcoModule({
             throw new UserError("Podaj szansę albo przerwę.");
           }
           const current = (await settings.get(guildId, channelId)) ?? defaults;
+          const floor = guildId === null ? MIN_DM_COOLDOWN_SECONDS : 0;
           const next: DzajcoSettings = {
             chancePercent: chance ?? current.chancePercent,
-            cooldownSeconds: cooldown ?? current.cooldownSeconds,
+            cooldownSeconds: Math.max(floor, cooldown ?? current.cooldownSeconds),
           };
           await settings.set(guildId, channelId, next);
           await refresh(guildId, channelId);
