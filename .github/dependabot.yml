@@ -1,0 +1,43 @@
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    # PR titles become "[DZAJ-3] build(deps): Bump …", which passes the title convention.
+    commit-message:
+      prefix: "[DZAJ-3] build"
+      include: scope
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "[DZAJ-3] build"
+      include: scope
+  # The base images of the bot's Dockerfile. oven/bun only gets digest refreshes: the Bun version is pinned
+  # in package.json (packageManager, engines, @types/bun) and the CI workflows, and moves everywhere at once,
+  # by hand.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      - dependency-name: oven/bun
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+    commit-message:
+      prefix: "[DZAJ-3] build"
+      include: scope
+  - package-ecosystem: docker-compose
+    directory: /infra
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "[DZAJ-3] build"
+      include: scope

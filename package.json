@@ -1,59 +1,40 @@
 {
   "name": "dzajcarz",
-  "module": "src/main.ts",
+  "private": true,
   "type": "module",
-  "description": "Not popular but powerful discord bot.",
-  "author": "LordPrinz",
-  "license": "ISC",
-  "keywords": [
-    "bot",
-    "discord",
-    "dzajcarz"
+  "packageManager": "bun@1.4.4",
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "modules/*"
   ],
-  "version": "4.0.0",
   "scripts": {
-    "start": "bun run src/main.ts",
-    "start:prod": "NODE_ENV=production bun run src/main.ts",
+    "prepare": "husky",
+    "dev": "bun run --filter '@dzajcarz/bot' dev",
+    "start": "bun run --filter '@dzajcarz/bot' start",
+    "commands:deploy": "bun run --filter '@dzajcarz/bot' commands:deploy",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "typecheck": "tsc -p . && bun run --filter '*' typecheck",
     "test": "bun test",
-    "checkdeps": "bun outdated | awk '!/eslint/'",
-    "reset:commands": "bun run scripts/reset-commands.ts",
-    "reset:commands:prod": "NODE_ENV=production bun run scripts/reset-commands.ts",
-    "prepare": "bun run scripts/runner.ts --prepare",
-    "build": "bun run scripts/runner.ts --build",
-    "format": "bun run scripts/runner.ts --format",
-    "lint": "bun run scripts/runner.ts --lint",
-    "clean": "bun run scripts/runner.ts --clean",
-    "dev": "bun run scripts/runner.ts --start:dev",
-    "start:dev": "bun run scripts/runner.ts --start:dev",
-    "test:cov": "bun run scripts/runner.ts --test:cov",
-    "test:watch": "bun run scripts/runner.ts --test:watch",
-    "compile": "bun run scripts/runner.ts --compile"
+    "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml down",
+    "prod:up": "BOT_REVISION=$(git rev-parse --short HEAD) docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build",
+    "prod:down": "BOT_REVISION=$(git rev-parse --short HEAD) docker compose --env-file .env -f infra/docker-compose.prod.yml down",
+    "prod:logs": "BOT_REVISION=$(git rev-parse --short HEAD) docker compose --env-file .env -f infra/docker-compose.prod.yml logs -f bot",
+    "db:new": "bun run --filter '@dzajcarz/db' new",
+    "db:migrate": "bun run --filter '@dzajcarz/db' migrate",
+    "gh:setup": "bun run gh:setup-repo && bun run gh:setup-project",
+    "gh:setup-repo": "bun scripts/gh/setup-repo.ts",
+    "gh:setup-project": "bun scripts/gh/setup-project.ts"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0",
-    "@types/eslint-plugin-security": "^3.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.21.0",
-    "eslint": "8.47.0",
-    "eslint-config-prettier": "^10.0.1",
-    "eslint-import-resolver-typescript": "^3.7.0",
-    "eslint-plugin-import": "^2.31.0",
-    "eslint-plugin-security": "^3.0.1",
-    "eslint-plugin-unused-imports": "^4.1.4",
-    "husky": "^9.1.7",
-    "lint-staged": "^15.4.3",
-    "prettier": "^3.4.2"
-  },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
-  },
-  "dependencies": {
-    "discord.js": "^14.17.3",
-    "redis": "^4.7.0"
-  },
-  "lint-staged": {
-    "src/**/*.{ts,tsx}": [
-      "prettier --write",
-      "eslint --fix"
-    ]
+    "@biomejs/biome": "2.6.6",
+    "@types/bun": "1.4.4",
+    "husky": "9.1.7",
+    "typescript": "7.0.2"
   }
 }

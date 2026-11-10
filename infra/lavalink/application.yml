@@ -1,0 +1,72 @@
+# Local Lavalink node. The password comes from LAVALINK_SERVER_PASSWORD (docker-compose, .env).
+server:
+  port: 2333
+  address: 0.0.0.0
+
+lavalink:
+  plugins:
+    # YouTube moved out of Lavaplayer into this plugin; the built-in source is disabled below.
+    # Snapshot of youtube-source main: 1.18.2 has no client that still plays (ADR 0004 says how to go
+    # back to a release).
+    - dependency: "dev.lavalink.youtube:youtube-plugin:2be8e542d3f6f178e048dca565892684c2e40177"
+      snapshot: true
+  server:
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: false
+      twitch: true
+      vimeo: true
+      # Off: any user could make the node fetch internal URLs (cloud metadata, Redis).
+      http: false
+      # On for the scheduled songs in infra/lavalink/music. Safe only because the bot sends the file paths
+      # itself, from a fixed list; /play turns everything a member types into a YouTube search (ADR 0004).
+      local: true
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    youtubePlaylistLoadLimit: 6
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: false
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    # Tried in order. MUSIC serves ytmsearch, WEB loads searches and videos, ANDROID_VR loads the
+    # playlists WEB can no longer parse, IOS plays. WEB stays before IOS: with IOS first, ytsearch comes
+    # back empty (youtube-source #250). ADR 0004 has the per-client test results behind this list.
+    clients: ["MUSIC", "WEB", "ANDROID_VR", "IOS"]
+    clientOptions:
+      # WEB only gets formats without URLs and ANDROID_VR is told to log in, so without this every track
+      # would fail on both before reaching IOS.
+      WEB:
+        playback: false
+      ANDROID_VR:
+        playback: false
+    # Signature deciphering runs in the yt-cipher compose service (docker-compose.yml).
+    remoteCipher:
+      url: "http://yt-cipher:8001"
+      userAgent: "dzajcarz"
+
+metrics:
+  prometheus:
+    enabled: false
+
+logging:
+  level:
+    root: INFO
+    lavalink: INFO

@@ -1,2 +1,2 @@
-gitleaks protect --staged --verbose
-bunx lint-staged
+bunx biome check --staged --write --no-errors-on-unmatched
+git update-index --again

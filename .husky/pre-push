@@ -1,2 +1,3 @@
-./scripts/husky/bump-version-verifier.sh "$1"
-./scripts/husky/protect-branch.sh
+bun scripts/git/check-branch.ts
+bun run typecheck
+bun test --bail

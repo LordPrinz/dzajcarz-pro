@@ -1,0 +1,16 @@
+{
+  "name": "@dzajcarz/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/context.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "discord.js": "14.28.1"
+  }
+}

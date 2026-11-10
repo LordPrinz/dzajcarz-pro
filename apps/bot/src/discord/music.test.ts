@@ -1,0 +1,131 @@
+import { describe, expect, test } from "bun:test";
+import { type Client, RESTJSONErrorCodes } from "discord.js";
+import { createDirectMessages, createPanelMessages, createVoiceChannels } from "./music.ts";
+import { NO_MENTIONS } from "./reply.ts";
+
+const GUILD = "100000000000000001";
+const VOICE = "400000000000000004";
+const TEXT = "300000000000000003";
+
+function voiceClient() {
+  const members = new Map([
+    ["1", { user: { bot: false } }],
+    ["2", { user: { bot: true } }],
+    ["3", { user: { bot: false } }],
+  ]);
+  const channel = {
+    isVoiceBased: () => true,
+    members: {
+      filter: (keep: (m: { user: { bot: boolean } }) => boolean) => ({
+        size: [...members.values()].filter(keep).length,
+      }),
+    },
+  };
+  const guild = {
+    voiceStates: { cache: new Map([["1", { channelId: VOICE }]]) },
+    channels: { cache: new Map([[VOICE, channel]]) },
+  };
+  return { guilds: { cache: new Map([[GUILD, guild]]) } } as unknown as Client;
+}
+
+describe("createVoiceChannels", () => {
+  test("reads the member's channel and counts people without bots", async () => {
+    const voice = createVoiceChannels(voiceClient());
+    expect(await voice.channelOf(GUILD, "1")).toBe(VOICE);
+    expect(await voice.channelOf(GUILD, "9")).toBeNull();
+    expect(await voice.channelOf("unknown", "1")).toBeNull();
+    expect(await voice.humanCount(GUILD, VOICE)).toBe(2);
+    expect(await voice.humanCount(GUILD, "missing")).toBe(0);
+  });
+});
+
+function textClient(deleteError?: unknown, editError?: unknown) {
+  const sent: unknown[] = [];
+  const edited: unknown[] = [];
+  const channel = {
+    isSendable: () => true,
+    send: async (payload: unknown) => {
+      sent.push(payload);
+      return { id: "500000000000000005" };
+    },
+    messages: {
+      edit: async (id: string, payload: unknown) => {
+        if (editError) throw editError;
+        edited.push({ id, payload });
+      },
+      delete: async () => {
+        if (deleteError) throw deleteError;
+      },
+    },
+  };
+  const client = { channels: { fetch: async () => channel } } as unknown as Client;
+  return { client, sent, edited };
+}
+
+describe("createPanelMessages", () => {
+  test("posts and edits without mentions", async () => {
+    const { client, sent, edited } = textClient();
+    const panels = createPanelMessages(client);
+    expect(await panels.post(TEXT, { embeds: [{ title: "Song" }] })).toBe("500000000000000005");
+    expect(sent[0]).toMatchObject({ embeds: [{ title: "Song" }], allowedMentions: { parse: [] } });
+    expect(await panels.edit(TEXT, "5", { embeds: [{ title: "Next" }] })).toBe("edited");
+    expect(edited[0]).toMatchObject({
+      id: "5",
+      payload: { content: null, embeds: [{ title: "Next" }] },
+    });
+  });
+
+  test("a panel that is already gone counts as deleted", async () => {
+    const gone = createPanelMessages(
+      textClient({ code: RESTJSONErrorCodes.UnknownMessage }).client,
+    );
+    await gone.delete(TEXT, "5");
+    const refused = createPanelMessages(
+      textClient({ code: RESTJSONErrorCodes.MissingPermissions }).client,
+    );
+    await expect(refused.delete(TEXT, "5")).rejects.toMatchObject({ code: 50013 });
+  });
+
+  test("an edit reports a gone panel or channel and rejects on anything else", async () => {
+    const panel = { embeds: [{ title: "Next" }] };
+    for (const code of [RESTJSONErrorCodes.UnknownMessage, RESTJSONErrorCodes.UnknownChannel]) {
+      const panels = createPanelMessages(textClient(undefined, { code }).client);
+      expect(await panels.edit(TEXT, "5", panel)).toBe("gone");
+    }
+    const limited = createPanelMessages(textClient(undefined, { code: 0, status: 503 }).client);
+    await expect(limited.edit(TEXT, "5", panel)).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+describe("createDirectMessages", () => {
+  function dmClient(sendError?: unknown) {
+    const sent: unknown[] = [];
+    const user = {
+      send: async (payload: unknown) => {
+        if (sendError) throw sendError;
+        sent.push(payload);
+      },
+    };
+    const client = { users: { fetch: async () => user } } as unknown as Client;
+    return { client, sent };
+  }
+
+  test("sends without mentions and answers true", async () => {
+    const { client, sent } = dmClient();
+    expect(await createDirectMessages(client).send("200000000000000002", { content: "hej" })).toBe(
+      true,
+    );
+    expect(sent).toEqual([
+      expect.objectContaining({ content: "hej", allowedMentions: NO_MENTIONS }),
+    ]);
+  });
+
+  test("closed DMs answer false, any other failure rejects", async () => {
+    const closed = dmClient({ code: RESTJSONErrorCodes.CannotSendMessagesToThisUser });
+    expect(await createDirectMessages(closed.client).send("2", { content: "x" })).toBe(false);
+    const down = dmClient({ code: 0, status: 503 });
+    await expect(
+      createDirectMessages(down.client).send("2", { content: "x" }),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+});

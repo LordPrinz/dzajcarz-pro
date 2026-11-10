@@ -1,0 +1,99 @@
+name: dzajcarz
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: dzajcarz
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: dzajcarz
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dzajcarz -d dzajcarz -h 127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Caches, cooldowns and other state that may be lost (ADR 0003).
+  redis:
+    image: redis:8-alpine
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}",
+        "--appendonly",
+        "yes",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Audio node for the music module (ADR 0004). Only started with --profile music.
+  # The image has no plugins directory, so Docker creates the volume owned by root and Lavalink
+  # (uid 322) cannot download the YouTube plugin into it. This one-shot step fixes the ownership.
+  lavalink-plugins-init:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    profiles: ["music"]
+    user: "0"
+    entrypoint: ["chown", "322", "/opt/Lavalink/plugins"]
+    volumes:
+      - lavalink-plugins:/opt/Lavalink/plugins
+
+  # Deciphers YouTube stream signatures for the youtube-plugin (ADR 0004). The plugin no longer keeps up
+  # with YouTube's player script on its own. The project only publishes a moving `master` tag, so the
+  # image is pinned by digest. No published port: only Lavalink talks to it, over the compose network.
+  yt-cipher:
+    image: ghcr.io/kikkia/yt-cipher@sha256:4c5ec381ff57336cfc24822d2b526a5ad7cd0171f61065a1bbc87bb736842449
+    profiles: ["music"]
+    # The image is distroless and already runs as `nonroot`; the explicit uid keeps it that way if
+    # upstream changes the Dockerfile. Only the player script cache (~/.cache/yt-cipher) needs to be writable.
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /home/nonroot/.cache:uid=65532,gid=65532,mode=0700,size=64m
+      - /tmp:uid=65532,gid=65532,mode=0700,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      # Upstream recommends IAS: it is the only player script variant that deciphers reliably.
+      OVERRIDE_PLAYER_VARIANT: IAS
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    profiles: ["music"]
+    depends_on:
+      lavalink-plugins-init:
+        condition: service_completed_successfully
+      yt-cipher:
+        condition: service_started
+    environment:
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?set LAVALINK_PASSWORD in .env}
+      _JAVA_OPTIONS: -Xmx512M
+    ports:
+      - "127.0.0.1:2333:2333"
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      # The scheduled songs (ADR 0004). Read-only; the bot plays them by a fixed name, never by member input.
+      - ./lavalink/music:/opt/Lavalink/music:ro
+      - lavalink-plugins:/opt/Lavalink/plugins
+
+volumes:
+  postgres-data:
+  redis-data:
+  lavalink-plugins:

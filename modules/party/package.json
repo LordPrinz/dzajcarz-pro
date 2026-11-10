@@ -1,0 +1,19 @@
+{
+  "name": "@dzajcarz/module-party",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@dzajcarz/core": "workspace:*",
+    "@dzajcarz/kv": "workspace:*"
+  },
+  "devDependencies": {
+    "discord.js": "14.28.1"
+  }
+}

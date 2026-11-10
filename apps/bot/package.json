@@ -1,0 +1,34 @@
+{
+  "name": "@dzajcarz/bot",
+  "version": "5.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env --watch src/index.ts",
+    "start": "bun --env-file=../../.env src/index.ts",
+    "commands:deploy": "bun --env-file=../../.env src/deploy-commands.ts",
+    "build": "bun build src/index.ts --compile --minify --sourcemap --outfile dist/bot",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@dzajcarz/core": "workspace:*",
+    "@dzajcarz/db": "workspace:*",
+    "@dzajcarz/kv": "workspace:*",
+    "@dzajcarz/module-dzajco": "workspace:*",
+    "@dzajcarz/module-fun": "workspace:*",
+    "@dzajcarz/module-general": "workspace:*",
+    "@dzajcarz/module-messages": "workspace:*",
+    "@dzajcarz/module-moderation": "workspace:*",
+    "@dzajcarz/module-music": "workspace:*",
+    "@dzajcarz/module-party": "workspace:*",
+    "@dzajcarz/module-riot": "workspace:*",
+    "@dzajcarz/module-schedule": "workspace:*",
+    "@dzajcarz/module-settings": "workspace:*",
+    "@dzajcarz/module-status": "workspace:*",
+    "@dzajcarz/module-welcome": "workspace:*",
+    "discord.js": "14.28.1",
+    "lavalink-client": "2.11.0",
+    "wrapper-valorant-api": "3.0.1",
+    "zod": "4.6.7"
+  }
+}
