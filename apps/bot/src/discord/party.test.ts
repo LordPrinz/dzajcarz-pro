@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { ChannelType, type Client, PermissionFlagsBits } from "discord.js";
-import { createPartyChat, createPartyInvites, createPartyPermissions } from "./party.ts";
+import {
+  createPartyChannels,
+  createPartyChat,
+  createPartyInvites,
+  createPartyPermissions,
+} from "./party.ts";
 
 const GUILD = "100000000000000001";
 const CHANNEL = "400000000000000004";
@@ -384,5 +389,28 @@ describe("party chat adapter", () => {
       { id: "2", pinned: true, system: false },
       { id: "1", pinned: false, system: true },
     ]);
+  });
+});
+
+describe("party channels adapter", () => {
+  function clientWithVoice(available: boolean) {
+    const members = new Map([
+      ["7", { id: "7", user: { bot: false } }],
+      ["8", { id: "8", user: { bot: true } }],
+    ]);
+    const channel = {
+      type: ChannelType.GuildVoice,
+      guild: { available },
+      members: { filter: (keep: (m: unknown) => boolean) => [...members.values()].filter(keep) },
+    };
+    return { channels: { fetch: async () => channel } } as unknown as Client;
+  }
+
+  test("members lists people without bots", async () => {
+    expect(await createPartyChannels(clientWithVoice(true)).members("1")).toEqual(["7"]);
+  });
+
+  test("members is unknown while the guild is unavailable, so nobody reads it as empty", async () => {
+    expect(await createPartyChannels(clientWithVoice(false)).members("1")).toBeUndefined();
   });
 });
