@@ -316,6 +316,8 @@ function memoryZones() {
     zones,
     get: async (guildId: string) => zones.get(guildId) ?? null,
     set: async (guildId: string, zone: string) => void zones.set(guildId, zone),
+    // Stands in for Postgres, which has dropped this deprecated alias.
+    isKnown: async (zone: string) => zone !== "US/Pacific-New",
     reset: async (guildId: string) => void zones.delete(guildId),
   };
 }
@@ -381,7 +383,7 @@ describe("settings module: /timezone", () => {
 
   test("set refuses offsets and unknown names and stores nothing", async () => {
     const { run, zones } = setupZones();
-    for (const zone of ["+02:00", "CEST", "Mars/Olympus"]) {
+    for (const zone of ["+02:00", "CEST", "Mars/Olympus", "US/Pacific-New"]) {
       expect((await run("set", { zone }))[0]).toStartWith(`Nie znam strefy \`${zone}\`.`);
     }
     expect(zones.size).toBe(0);

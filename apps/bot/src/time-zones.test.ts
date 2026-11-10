@@ -22,6 +22,7 @@ function setup() {
         lookups++;
         return stored.has(guildId) ? row(guildId) : null;
       },
+      isKnownTimeZone: async () => true,
       setTimeZone: async (guildId, zone) => {
         stored.set(guildId, zone);
         return row(guildId);

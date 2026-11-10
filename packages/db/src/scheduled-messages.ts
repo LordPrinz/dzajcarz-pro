@@ -134,13 +134,17 @@ export function createScheduledMessageRepository(
     },
 
     async due(at, limit) {
-      // Postgres turns the instant into each guild's wall clock, so one query serves every zone.
+      // Postgres turns the instant into each guild's wall clock, so one query serves every zone. A stored
+      // zone Postgres does not know (its tzdata can lag the runtime's) counts as the default, so one bad row
+      // cannot fail the query for every server.
       const rows = await sql<(ScheduledMessageRow & { local_date: string })[]>`
+        WITH known AS MATERIALIZED (SELECT name FROM pg_timezone_names)
         SELECT m.*, to_char(local.at, 'YYYY-MM-DD') AS local_date
         FROM scheduled_message m
         LEFT JOIN guild_settings g ON g.guild_id = m.guild_id
+        LEFT JOIN known k ON k.name = g.time_zone
         CROSS JOIN LATERAL (
-          SELECT ${at}::timestamptz AT TIME ZONE coalesce(g.time_zone, ${defaultTimeZone}) AS at
+          SELECT ${at}::timestamptz AT TIME ZONE coalesce(k.name, ${defaultTimeZone}) AS at
         ) local
         WHERE m.time_of_day = to_char(local.at, 'HH24:MI')
         ORDER BY m.guild_id, m.id
