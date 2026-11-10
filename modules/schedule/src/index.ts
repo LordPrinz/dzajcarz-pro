@@ -180,17 +180,26 @@ export function createScheduleModule({
   async function tick(): Promise<void> {
     // A tick up to 5 s early belongs to the coming minute; a late one keeps its own.
     const minute = new Date(Math.floor((now().getTime() + EARLY_TICK_MS) / 60_000) * 60_000);
+    // Most minutes nobody sits in voice anywhere, so the voice cache (no I/O) filters first and only those
+    // servers have their zone looked up; a minute the cron does not fire on then costs nothing further.
+    const occupied: string[] = [];
+    await Promise.all(
+      voice.guildIds().map(async (guildId) => {
+        const crowds = await voice.crowds(guildId);
+        if (crowds.some((crowd) => crowd.humans > 0)) occupied.push(guildId);
+      }),
+    );
     const firesIn = new Map<string, boolean>();
-    const due: string[] = [];
-    for (const guildId of voice.guildIds()) {
-      const zone = await timeZones.of(guildId);
+    const zones = await Promise.all(occupied.map((guildId) => timeZones.of(guildId)));
+    const due = occupied.filter((_guildId, index) => {
+      const zone = zones[index] as string;
       let fires = firesIn.get(zone);
       if (fires === undefined) {
         fires = firesAt(expression, minute, zone);
         firesIn.set(zone, fires);
       }
-      if (fires) due.push(guildId);
-    }
+      return fires;
+    });
     if (due.length === 0) return;
     if (!player.available()) {
       logger.warn("Skipping the scheduled song: the audio node is unavailable");

@@ -53,6 +53,8 @@ function setup(
     zones?: Record<string, string>;
     /** When the tick fires; 9:00 in Warsaw unless set. */
     now?: Date;
+    /** Called with each server whose zone the tick looks up. */
+    onZoneLookup?: (guildId: string) => void;
   } = {},
 ) {
   let current = options.now ?? NINE_WARSAW;
@@ -136,7 +138,12 @@ function setup(
     logger,
     songs: SONGS,
     expression: "0 9,21 * * *",
-    timeZones: { of: async (guildId) => (guildId && options.zones?.[guildId]) || "Europe/Warsaw" },
+    timeZones: {
+      of: async (guildId) => {
+        if (guildId) options.onZoneLookup?.(guildId);
+        return (guildId && options.zones?.[guildId]) || "Europe/Warsaw";
+      },
+    },
     now: () => current,
   });
   const registry = createRegistry([module]);
@@ -203,6 +210,20 @@ describe("the schedule", () => {
     void s.fire();
     await s.settle();
     expect(s.playCalls.map((call) => call.guildId)).toEqual([GUILD, OTHER_GUILD]);
+  });
+
+  test("servers with nobody in voice are not asked for their zone", async () => {
+    const asked: string[] = [];
+    const s = setup({
+      crowds: {
+        [GUILD]: [{ channelId: "500000000000000001", humans: 2 }],
+        [OTHER_GUILD]: [{ channelId: "500000000000000002", humans: 0 }],
+      },
+      onZoneLookup: (guildId) => asked.push(guildId),
+    });
+    void s.fire();
+    await s.settle();
+    expect(asked).toEqual([GUILD]);
   });
 
   test("nothing plays at a minute the expression does not fire on", async () => {
