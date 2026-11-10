@@ -5,8 +5,8 @@ import { DZAJCO_WORDS, normalizeWords, SOURCE_WORDS } from "./words.ts";
 const matches = createWhatMatcher(DZAJCO_WORDS);
 
 describe("word list", () => {
-  test("keeps all 111 source entries and removes duplicates after folding", () => {
-    expect(SOURCE_WORDS).toHaveLength(111);
+  test("keeps all 100 source entries and removes duplicates after folding", () => {
+    expect(SOURCE_WORDS).toHaveLength(100);
     const folded = SOURCE_WORDS.map((word) =>
       word.replaceAll("\u200b", "").normalize("NFC").trim().toLowerCase(),
     );
@@ -23,8 +23,11 @@ describe("word list", () => {
     expect(normalizeWords(["ແມ່ນ\u200bຫຍັງ", "ແມ່ນຫຍັງ"])).toEqual(["ແມ່ນຫຍັງ"]);
   });
 
-  test("short common words stay on the list", () => {
-    for (const word of ["me", "co", "que"]) expect(DZAJCO_WORDS).toContain(word);
+  test("the Polish form stays and everyday foreign words are gone", () => {
+    expect(DZAJCO_WORDS).toContain("co");
+    for (const word of ["me", "was", "ne", "que", "mit", "ce", "quel", "quelle", "eng", "aha"]) {
+      expect(DZAJCO_WORDS).not.toContain(word);
+    }
   });
 });
 
@@ -48,6 +51,12 @@ describe("Latin script", () => {
     "komeda",
     "scope",
     "hello there",
+    "was it you who told me",
+    "give me the keys, please",
+    "Ich komme mit dem Zug, was ist los",
+    "das ist eng hier, aha",
+    "je ne sais pas ce que tu veux",
+    "quelle est la source",
     "",
     "<:co:123>",
     "<a:what:456>",
