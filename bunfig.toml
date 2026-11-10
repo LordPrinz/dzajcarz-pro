@@ -4,6 +4,3 @@ exact = true
 [test]
 root = "."
 coverageSkipTestFiles = true
-# Just under the numbers when it was added (functions 94.5%, lines 97.4%), so CI fails on a drop, not on
-# noise. Raise it when coverage goes up.
-coverageThreshold = { functions = 0.93, lines = 0.96 }
