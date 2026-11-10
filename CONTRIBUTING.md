@@ -38,6 +38,11 @@ git push -u origin HEAD                           # pre-push: branch name, typec
 gh pr create --base main --fill                     # PR title must follow the same format
 ```
 
+Develop against a separate test bot: create a second application in the Discord developer portal and put its
+token and application id in `DISCORD_DEV_TOKEN` and `DISCORD_DEV_CLIENT_ID`. While that pair is set, `bun run dev`
+and `commands:deploy` use it instead of the production `DISCORD_TOKEN` and `DISCORD_CLIENT_ID`, and the startup
+log shows `app: "dev"`. Production never receives the test pair.
+
 Test new commands on a private test server: set `DISCORD_DEV_GUILD_ID`, so slash commands show up there at
 once instead of after the global rollout. The bot registers them itself on start: it reads the set Discord
 has and sends the new one only when it differs (the log says "Deployed slash commands" or "Slash commands

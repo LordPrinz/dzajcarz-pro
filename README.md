@@ -62,7 +62,7 @@ Requirements: Bun ≥ 1.4.4, Docker, a Discord application with a bot user
 
 ```bash
 bun install                       # also installs the git hooks
-cp .env.example .env              # fill in DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_DEV_GUILD_ID
+cp .env.example .env              # fill in DISCORD_DEV_TOKEN + DISCORD_DEV_CLIENT_ID (test bot) or DISCORD_TOKEN + DISCORD_CLIENT_ID, and DISCORD_DEV_GUILD_ID
 bun run infra:up                  # Postgres :5432, Redis :6379
 bun run dev                       # the bot, restarted on file changes; migrates and registers its slash commands
 ```

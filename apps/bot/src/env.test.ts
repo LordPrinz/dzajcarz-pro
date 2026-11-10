@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { credentialsIntact, Env, loadEnv } from "./env.ts";
+import { credentialsIntact, Env, loadDeployEnv, loadEnv } from "./env.ts";
 
 const REQUIRED = {
   DISCORD_TOKEN: "t".repeat(60),
@@ -24,6 +24,60 @@ describe.each([
     const env = loadEnv({ ...REQUIRED, [name]: "RGAPI-test" });
     expect(env[name]).toBe("RGAPI-test");
     expect(env[other]).toBeUndefined();
+  });
+});
+
+describe("Discord application", () => {
+  const { DISCORD_TOKEN: _token, DISCORD_CLIENT_ID: _clientId, ...DATA } = REQUIRED;
+  const PROD = { DISCORD_TOKEN: "p".repeat(60), DISCORD_CLIENT_ID: "111111111111111111" };
+  const DEV = { DISCORD_DEV_TOKEN: "d".repeat(60), DISCORD_DEV_CLIENT_ID: "222222222222222222" };
+  const credentials = (env: { DISCORD_TOKEN: string; DISCORD_CLIENT_ID: string }) => [
+    env.DISCORD_TOKEN,
+    env.DISCORD_CLIENT_ID,
+  ];
+
+  test("runs as the production bot when only that pair is set", () => {
+    const env = loadEnv({ ...DATA, ...PROD });
+    expect(env.DISCORD_APP).toBe("prod");
+    expect(credentials(env)).toEqual([PROD.DISCORD_TOKEN, PROD.DISCORD_CLIENT_ID]);
+  });
+
+  test("runs as the test bot when only that pair is set", () => {
+    const env = loadEnv({ ...DATA, ...DEV });
+    expect(env.DISCORD_APP).toBe("dev");
+    expect(credentials(env)).toEqual([DEV.DISCORD_DEV_TOKEN, DEV.DISCORD_DEV_CLIENT_ID]);
+  });
+
+  test("prefers the test bot when both pairs are set", () => {
+    const env = loadEnv({ ...DATA, ...PROD, ...DEV });
+    expect(env.DISCORD_APP).toBe("dev");
+    expect(credentials(env)).toEqual([DEV.DISCORD_DEV_TOKEN, DEV.DISCORD_DEV_CLIENT_ID]);
+  });
+
+  test("treats empty test values as unset, as in a fresh copy of .env.example", () => {
+    const env = loadEnv({ ...DATA, ...PROD, DISCORD_DEV_TOKEN: "", DISCORD_DEV_CLIENT_ID: "" });
+    expect(env.DISCORD_APP).toBe("prod");
+  });
+
+  test("needs one complete pair", () => {
+    expect(Env.safeParse({ ...DATA }).success).toBe(false);
+    expect(Env.safeParse({ ...DATA, DISCORD_TOKEN: PROD.DISCORD_TOKEN }).success).toBe(false);
+  });
+
+  test("refuses half of the test pair, so a stray token cannot fall back to production", () => {
+    for (const half of [
+      { DISCORD_DEV_TOKEN: DEV.DISCORD_DEV_TOKEN },
+      { DISCORD_DEV_CLIENT_ID: DEV.DISCORD_DEV_CLIENT_ID },
+    ]) {
+      const parsed = Env.safeParse({ ...DATA, ...PROD, ...half });
+      expect(parsed.success).toBe(false);
+    }
+  });
+
+  test("the slash command deploy makes the same choice", () => {
+    const deploy = loadDeployEnv({ ...PROD, ...DEV });
+    expect(credentials(deploy)).toEqual([DEV.DISCORD_DEV_TOKEN, DEV.DISCORD_DEV_CLIENT_ID]);
+    expect(loadDeployEnv({ ...PROD }).DISCORD_APP).toBe("prod");
   });
 });
 
