@@ -64,6 +64,10 @@ export interface MusicModuleDeps {
 
 const MODULE = "music";
 export const IDLE_MS = 3 * 60_000;
+/** Failed tracks after the first note within this window are counted and reported once at its end. */
+export const FAILED_NOTE_WINDOW_MS = 10_000;
+/** Per user, for `/play` and `/search`. */
+export const SEARCH_COOLDOWN_MS = 3_000;
 /** A playlist adds at most this many tracks. */
 export const MAX_PLAYLIST_TRACKS = 100;
 /** Current track plus everything queued. */
@@ -105,6 +109,8 @@ export const NOTHING_PLAYING = "Nic teraz nie gra.";
 export const UNSUPPORTED_LINK = "Obsługuję tylko linki z YouTube, Bandcamp, Twitch i Vimeo.";
 export const trackFailedText = (title: string) =>
   `Nie udało się odtworzyć **${escapeMarkdown(title)}**, gram dalej.`;
+export const moreTracksFailedText = (count: number) =>
+  `Kolejne utwory też nie działają, pominięte: ${count}.`;
 export const EMPTY_QUEUE = "Kolejka jest pusta.";
 export const queueChanged = "Kolejka zmieniła się w międzyczasie, spróbuj jeszcze raz.";
 export const otherChannel = (channelId: string) =>
@@ -456,6 +462,9 @@ export function createMusicModule({
     }
   }
 
+  /** Guilds inside a failed-track window: how many failures came after its first note. */
+  const failedBursts = new Map<string, { skipped: number; cancel: () => void }>();
+
   const unsubscribe = player.subscribe({
     trackStart(guildId) {
       void inOrder(guildId, () => showPanel(guildId));
@@ -467,17 +476,38 @@ export function createMusicModule({
     },
     playerDestroyed(guildId) {
       cancelIdle(guildId);
+      // A note after the bot left would be noise, and the next session starts its own window.
+      failedBursts.get(guildId)?.cancel();
+      failedBursts.delete(guildId);
       void inOrder(guildId, () => removePanel(guildId));
     },
     trackFailed(guildId, track) {
       if (track.byBot) return;
+      const burst = failedBursts.get(guildId);
+      if (burst) {
+        burst.skipped++;
+        return;
+      }
       const channelId = player.state(guildId)?.textChannelId;
       if (!channelId) return;
-      panels.post(channelId, { content: trackFailedText(track.title) }).catch((error: unknown) => {
-        logger.warn("Posting a failed track note failed", { guildId, error });
+      postFailedNote(guildId, channelId, trackFailedText(track.title));
+      // A playlist full of removed videos fails track after track; one note per window keeps the chat usable.
+      const cancel = scheduler.after(FAILED_NOTE_WINDOW_MS, () => {
+        const ended = failedBursts.get(guildId);
+        failedBursts.delete(guildId);
+        if (ended && ended.skipped > 0) {
+          postFailedNote(guildId, channelId, moreTracksFailedText(ended.skipped));
+        }
       });
+      failedBursts.set(guildId, { skipped: 0, cancel });
     },
   });
+
+  function postFailedNote(guildId: string, channelId: string, content: string): void {
+    panels.post(channelId, { content }).catch((error: unknown) => {
+      logger.warn("Posting a failed track note failed", { guildId, error });
+    });
+  }
 
   const voiceChange = defineEvent({
     name: "music-idle",
@@ -548,6 +578,8 @@ export function createMusicModule({
     description: "Odtwarza utwór albo playlistę z linku lub wyszukiwania",
     aliases: ["p"],
     options: queryOption,
+    // Each call is a YouTube lookup through Lavalink; spamming it risks a block for everyone.
+    cooldownMs: SEARCH_COOLDOWN_MS,
     async run(ctx) {
       const guildId = guildOf(ctx);
       const query = queryOf(ctx.args.query, "Podaj link albo czego szukać.");
@@ -606,6 +638,7 @@ export function createMusicModule({
     name: "search",
     description: "Szuka na YouTube i pozwala wybrać jeden z wyników",
     options: queryOption,
+    cooldownMs: SEARCH_COOLDOWN_MS,
     async run(ctx) {
       const guildId = guildOf(ctx);
       const query = queryOf(ctx.args.query, "Podaj, czego szukać.");
@@ -1019,6 +1052,8 @@ export function createMusicModule({
       unsubscribe();
       for (const cancel of idleTimers.values()) cancel();
       idleTimers.clear();
+      for (const { cancel } of failedBursts.values()) cancel();
+      failedBursts.clear();
       // A panel left behind after shutdown would only offer buttons that answer "nothing is playing".
       await Promise.all(
         [...posted.keys()].map((guildId) => inOrder(guildId, () => removePanel(guildId))),
