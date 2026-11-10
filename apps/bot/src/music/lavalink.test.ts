@@ -453,6 +453,43 @@ describe("lavalink music player", () => {
       expect(await done).toEqual({ status: "played", queued: true });
     });
 
+    test("a paused scheduled song is not cut off by the watchdog", async () => {
+      const { manager, music } = setup({ localFileGraceMs: 5 });
+      manager.response = { loadType: "track", data: song("Lato z Radiem", 10) };
+      let finished = false;
+      void music.playLocalFile(GUILD, VOICE, FILE).then(() => {
+        finished = true;
+      });
+      await settle();
+      const player = manager.players.get(GUILD);
+      if (!player) throw new Error("no player");
+      player.paused = true;
+      await Bun.sleep(40);
+      expect(finished).toBe(false);
+      player.paused = false;
+      player.position = 10;
+      await Bun.sleep(40);
+      expect(finished).toBe(true);
+    });
+
+    test("an absurd length does not make the watchdog fire at once", async () => {
+      const { manager, music } = setup({ localFileGraceMs: 5 });
+      manager.response = {
+        loadType: "track",
+        data: song("Lato z Radiem", Number.MAX_SAFE_INTEGER),
+      };
+      let finished = false;
+      void music.playLocalFile(GUILD, VOICE, FILE).then(() => {
+        finished = true;
+      });
+      await settle();
+      await Bun.sleep(30);
+      expect(finished).toBe(false);
+      manager.emit("queueEnd", manager.players.get(GUILD));
+      await settle();
+      expect(finished).toBe(true);
+    });
+
     test("moves an idle player of the guild instead of recreating it", async () => {
       const { manager, music, events } = setup();
       const idle = manager.playing(GUILD, null);

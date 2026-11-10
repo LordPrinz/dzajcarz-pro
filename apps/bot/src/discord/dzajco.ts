@@ -21,7 +21,12 @@ export function createDzajcoResponder(
       } catch (error) {
         logger.warn("Dżajco could not react", { channelId, messageId, error });
       }
-      await message.reply({ content: gifUrl, allowedMentions: NO_MENTIONS });
+      // The message may be deleted by now; the gif then goes out as a plain message.
+      await message.reply({
+        content: gifUrl,
+        allowedMentions: NO_MENTIONS,
+        failIfNotExists: false,
+      });
     },
   };
 }

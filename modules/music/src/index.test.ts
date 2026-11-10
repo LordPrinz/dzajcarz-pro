@@ -325,6 +325,8 @@ describe("music module", () => {
       const select = (ctx.replies[0] as Exclude<Reply, string>).components?.[0]?.[0] as SelectSpec;
       voice.members.delete(CALLER);
       const picked = await click(select.customId, CALLER, ["0"]);
+      // The refusal comes after the defer, as a follow-up reply.
+      expect(picked.deferred).toBe(true);
       expect(replyText(picked.replies[0])).toBe(NOT_IN_VOICE);
       expect(player.state(GUILD)).toBeNull();
     });

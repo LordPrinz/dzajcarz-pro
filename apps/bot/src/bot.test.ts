@@ -158,6 +158,25 @@ describe("module toggles in routing", () => {
     ]);
   });
 
+  test("a parse error answers with failIfNotExists off, like the access refusal", async () => {
+    const { replies, message, deps } = setup([]);
+    const strict = createRegistry([
+      {
+        name: "fun",
+        commands: [
+          defineCommand({
+            name: "ping",
+            description: "x",
+            options: { times: { type: "integer", description: "x", required: true } },
+            run: async () => {},
+          }),
+        ],
+      },
+    ]);
+    await handleMessage(message, undefined, { ...deps, registry: strict });
+    expect(replies).toEqual([expect.objectContaining({ failIfNotExists: false })]);
+  });
+
   test("a command with a DM context runs in a DM and uses the default prefix", async () => {
     const { ran, message, deps } = setup([], { places: ["guild", "bot-dm"], installs: ["guild"] });
     Object.assign(message, { guildId: null });

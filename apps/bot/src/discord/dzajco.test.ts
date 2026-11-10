@@ -41,7 +41,9 @@ describe("Dzajco responder", () => {
     const t = setup();
     await t.responder.respond("1", "2");
     expect(t.calls).toEqual(["react 🥚", "reply"]);
-    expect(t.replies).toEqual([{ content: GIF, allowedMentions: NO_MENTIONS }]);
+    expect(t.replies).toEqual([
+      { content: GIF, allowedMentions: NO_MENTIONS, failIfNotExists: false },
+    ]);
   });
 
   test("a failed reaction is logged and the gif still goes out", async () => {

@@ -47,7 +47,8 @@ export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
     run: async (ctx) => {
       // Backticks would close the code span around the echoed name and let it inject markdown. No command
       // name is longer than Discord's 32, and a longer one echoed back could push the reply past 2000.
-      const wanted = ctx.args.command?.toLowerCase().replaceAll("`", "").slice(0, MAX_COMMAND_NAME);
+      const typed = ctx.args.command?.toLowerCase().replaceAll("`", "");
+      const wanted = typed && [...typed].slice(0, MAX_COMMAND_NAME).join("");
       if (!wanted) {
         await ctx.reply({ ...(await helpMenu.startPage(ctx, ctx.invocation)), ephemeral: true });
         return;
