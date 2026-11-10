@@ -12,6 +12,7 @@ import m0008 from "../migrations/0008_moderation.sql" with { type: "text" };
 import m0009 from "../migrations/0009_dzajco.sql" with { type: "text" };
 import m0010 from "../migrations/0010_scheduled_messages.sql" with { type: "text" };
 import m0011 from "../migrations/0011_guild_time_zone.sql" with { type: "text" };
+import m0012 from "../migrations/0012_dzajco_dm.sql" with { type: "text" };
 
 export interface Migration {
   /** File name, e.g. `0001_init.sql`: the key in `schema_migrations`. */
@@ -33,4 +34,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { name: "0009_dzajco.sql", content: m0009 },
   { name: "0010_scheduled_messages.sql", content: m0010 },
   { name: "0011_guild_time_zone.sql", content: m0011 },
+  { name: "0012_dzajco_dm.sql", content: m0012 },
 ];

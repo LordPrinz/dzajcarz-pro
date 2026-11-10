@@ -1,7 +1,18 @@
 import type { Logger } from "@dzajcarz/core";
-import type { DzajcoResponder } from "@dzajcarz/module-dzajco";
+import type { DzajcoChannels, DzajcoResponder } from "@dzajcarz/module-dzajco";
 import type { Client } from "discord.js";
 import { NO_MENTIONS } from "./reply.ts";
+
+/** Any channel of the guild members write in: text, announcement, threads and voice or stage chats. */
+export function createDzajcoChannels(client: Client): DzajcoChannels {
+  return {
+    async isChatOf(guildId, channelId) {
+      const channel = await client.channels.fetch(channelId).catch(() => null);
+      if (!channel?.isTextBased() || channel.isDMBased()) return false;
+      return channel.guildId === guildId;
+    },
+  };
+}
 
 /** Reacts with an egg and replies with the gif. A missing Add Reactions permission only costs the egg. */
 export function createDzajcoResponder(

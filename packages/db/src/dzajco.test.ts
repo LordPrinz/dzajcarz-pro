@@ -51,6 +51,14 @@ describe.skipIf(!sql)("dzajco repository", () => {
     expect(await repo().clear(guildId, channelId)).toBe(false);
   });
 
+  test("a DM (no guild) has its own override, and a guild's row is not read as a DM's", async () => {
+    await repo().set(null, channelId, { chancePercent: 100, cooldownSeconds: 0 });
+    expect(await repo().get(null, channelId)).toEqual({ chancePercent: 100, cooldownSeconds: 0 });
+    expect(await repo().get(guildId, channelId)).toBeNull();
+    expect(await repo().clear(guildId, channelId)).toBe(false);
+    expect(await repo().clear(null, channelId)).toBe(true);
+  });
+
   test("the CHECK constraints accept the bounds and refuse values outside them", async () => {
     await repo().set(guildId, channelId, { chancePercent: 100, cooldownSeconds: 86400 });
     await expect(
