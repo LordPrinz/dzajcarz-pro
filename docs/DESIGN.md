@@ -188,7 +188,9 @@ songs, `/time` and the dates in `/warnings`. `/timezone set <zone>` (Manage Serv
 any case and stores its canonical spelling in `guild_settings.time_zone`; offsets (`+01:00`) and
 abbreviations (`CET`) are refused, since Postgres reads a bare offset with the opposite sign. `show` prints
 the zone and what its clock reads now, `reset` goes back to `DEFAULT_TIME_ZONE` (`Europe/Warsaw`), which is
-also the zone outside servers. Modules get the zone through the `GuildTimeZones` port from core; apps/bot
+also the zone outside servers. The zone must also be known to Postgres (`pg_timezone_names`), whose tzdata
+can lack names the runtime accepts; scheduled messages are converted there. There is no autocomplete for the
+zone (core has none yet); the option description and the refusal give examples. Modules get the zone through the `GuildTimeZones` port from core; apps/bot
 caches it in Redis like the prefix (`createGuildSettingCache`).
 
 ### Leaving a server
@@ -257,7 +259,8 @@ a logged warning, so an outage never turns into gif spam. The default is a 3% ch
 `dzajco_channel_config` holds per-channel overrides (keyed by channel; `guild_id` is NULL for a DM), edited
 with `/dzajco set`, `show` and `reset`. On a server they need Manage Server and take any chat of it: text and
 announcement channels, threads and the chat of voice and stage channels. The command also runs in DMs with
-the bot and for user installs, where it sets only that conversation and needs no permission, with a cooldown
+the bot (guild install only: a user install would offer it in servers without the bot), where it sets only
+that conversation and needs no permission, with a cooldown
 of at least 10 s (every answer costs two requests against the bot's shared rate limit); because of
 that it carries no `permissions` (core allows those only on guild-only commands) and checks Manage Server
 itself, so Discord shows it to every member. A channel without a row uses the defaults. The handler reads
@@ -471,7 +474,10 @@ deleted channel) and `song [name]` (the fixed list; `song reset` goes back to th
 the song off per server or channel. The schedule defaults to `0 9,21 * * *`; `SCHEDULED_SONG_CRON` changes
 it and is checked at startup. One job ticks every minute in UTC; each tick rounds down to its minute (up to
 5 s early still counts as the coming one) and plays in every server whose own zone (`/timezone`) makes the
-expression fire then (`firesAt` in core).
+expression fire then (`firesAt` in core). Only servers with someone in voice (read from the gateway cache)
+have their zone looked up. On the spring clock change a time that does not exist that day (02:00–02:59 in
+Warsaw) does not play; on the autumn change a repeated time plays once, at its first occurrence. Scheduled
+messages behave the same.
 
 The old bot's other scheduled entries (messages at fixed times, birthdays) are not part of this module.
 

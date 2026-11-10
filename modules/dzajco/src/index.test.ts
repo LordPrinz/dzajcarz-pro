@@ -451,11 +451,11 @@ describe("threads, voice chats and DMs", () => {
     ]);
   });
 
-  test("the command is offered in bot DMs and to user installs", () => {
+  test("the command is offered in servers and in DMs with the bot, not to user installs", () => {
     const t = setup();
     expect(t.registry.find("dzajco")?.contexts).toEqual({
       places: ["guild", "bot-dm"],
-      installs: ["guild", "user"],
+      installs: ["guild"],
     });
     expect(t.registry.find("dzajco")?.permissions).toBeUndefined();
   });

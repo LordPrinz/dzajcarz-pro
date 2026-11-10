@@ -23,7 +23,7 @@ import {
   type ScheduledMessageSender,
   type ScheduledMessageStore,
 } from "./index.ts";
-import { localMinute } from "./time.ts";
+import { localMinute } from "./local-minute.test-support.ts";
 
 const MANAGE_GUILD = 1n << 5n;
 const GUILD = "100000000000000001";
