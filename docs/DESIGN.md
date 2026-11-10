@@ -697,8 +697,9 @@ destroys the players and the node connection before the Discord client.
 
 `modules/riot` has `/valorant <riot_id>` and `/lol <riot_id> [region]`, both usable everywhere like `/help`.
 The module talks to a `RiotStats` port (`valorant(id)`, `lol(id, platform)`) and a small
-`KeyValueStore` slice; `apps/bot/src/riot/` implements the port (clients: ADR 8). Without `RIOT_API_KEY` the
-port is `null` and both commands answer that stats are off.
+`KeyValueStore` slice; `apps/bot/src/riot/` implements the port (clients: ADR 8). Each game has its own key
+(`RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`); the port omits a game without its key and that command answers that
+stats are off.
 
 - **Input.** `Name#TAG` is split on the last `#`: name 3 to 16 characters, tag 3 to 5 letters or digits.
   `/valorant` takes the rest of the line, so the name may hold spaces; `/lol` quotes such a name in the

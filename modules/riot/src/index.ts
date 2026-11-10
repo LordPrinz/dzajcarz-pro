@@ -24,8 +24,8 @@ export * from "./ports.ts";
 export { parseRiotId } from "./riot-id.ts";
 
 export interface RiotModuleDeps {
-  /** null while the bot has no API key: the commands then say that stats are off. */
-  stats: RiotStats | null;
+  /** A game without its API key is left out: its command then says that stats are off. */
+  stats: Partial<RiotStats>;
   store: Pick<KeyValueStore, "get" | "set" | "setIfAbsent" | "increment">;
   now: () => number;
   logger: Logger;
@@ -65,8 +65,11 @@ const secondsUntil = (deadline: number, now: number) =>
   Math.max(1, Math.ceil((deadline - now) / 1000));
 
 type Game = "valorant" | "lol";
+const GAME_NAMES: Record<Game, string> = { valorant: "Valorant", lol: "League of Legends" };
 
 export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps): BotModule {
+  const { valorant: valorantStats, lol: lolStats } = stats;
+
   /** The shared state is a convenience: when Redis fails the lookup goes ahead and the failure is logged. */
   async function guarded<T>(what: string, fallback: T, action: () => Promise<T>): Promise<T> {
     try {
@@ -82,9 +85,11 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     ctx: CommandContext,
     game: Game,
     input: string,
-    fetchEmbed: (stats: RiotStats, id: RiotId) => Promise<Embed>,
+    fetchEmbed: ((id: RiotId) => Promise<Embed>) | undefined,
   ): Promise<void> {
-    if (stats === null) throw new UserError("Statystyki Riot są wyłączone: bot nie ma klucza API.");
+    if (!fetchEmbed) {
+      throw new UserError(`Statystyki ${GAME_NAMES[game]} są wyłączone: bot nie ma klucza API.`);
+    }
     const id = parseRiotId(input);
 
     const deadline = Number(await guarded("pause read", null, () => store.get(RETRY_AFTER_KEY)));
@@ -102,7 +107,7 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
 
     await ctx.defer();
     try {
-      await ctx.reply({ embeds: [await fetchEmbed(stats, id)] });
+      await ctx.reply({ embeds: [await fetchEmbed(id)] });
     } catch (error) {
       if (error instanceof RiotLookupError) throw await toUserError(error, game, id);
       throw error;
@@ -156,8 +161,11 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
       },
     },
     run: (ctx) =>
-      lookup(ctx, "valorant", ctx.args.riot_id, async (riot, id) =>
-        valorantEmbed(await riot.valorant(id)),
+      lookup(
+        ctx,
+        "valorant",
+        ctx.args.riot_id,
+        valorantStats && (async (id) => valorantEmbed(await valorantStats(id))),
       ),
   });
 
@@ -181,8 +189,11 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     run: async (ctx) => {
       const platform = ctx.args.region ?? "eun1";
       if (!isLolPlatform(platform)) throw new UserError("Nieznany serwer gry.");
-      await lookup(ctx, "lol", ctx.args.riot_id, async (riot, id) =>
-        lolEmbed(await riot.lol(id, platform)),
+      await lookup(
+        ctx,
+        "lol",
+        ctx.args.riot_id,
+        lolStats && (async (id) => lolEmbed(await lolStats(id, platform))),
       );
     },
   });

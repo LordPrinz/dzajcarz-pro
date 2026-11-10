@@ -5,14 +5,26 @@ import { createLolStats } from "./lol.ts";
 import { createValorantStats } from "./valorant.ts";
 
 export interface RiotStatsDeps {
-  apiKey: string;
+  /** Riot issues a separate key per game; a game without its key is left out. */
+  valorantApiKey?: string | undefined;
+  lolApiKey?: string | undefined;
   cache: Pick<KeyValueStore, "get" | "set">;
   logger: Logger;
 }
 
 /** Valorant goes through wrapper-valorant-api, League through plain fetch (ADR 8). */
-export function createRiotStats({ apiKey, cache, logger }: RiotStatsDeps): RiotStats {
-  const valorant = createValorantStats({ apiKey, store: cache, logger });
-  const lol = createLolStats({ apiKey, store: cache, logger });
-  return { valorant: valorant.valorant, lol: lol.lol };
+export function createRiotStats({
+  valorantApiKey,
+  lolApiKey,
+  cache,
+  logger,
+}: RiotStatsDeps): Partial<RiotStats> {
+  return {
+    ...(valorantApiKey && {
+      valorant: createValorantStats({ apiKey: valorantApiKey, store: cache, logger }).valorant,
+    }),
+    ...(lolApiKey && {
+      lol: createLolStats({ apiKey: lolApiKey, store: cache, logger }).lol,
+    }),
+  };
 }
