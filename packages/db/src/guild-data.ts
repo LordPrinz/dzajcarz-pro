@@ -1,14 +1,14 @@
 import type { SQL } from "bun";
 
 /**
- * Every table with a `guild_id`, children before parents. guild-data.test.ts compares it with the schema, so
- * a new table that keeps per-server data fails the test until it is listed here.
+ * Every table with a `guild_id`, children before parents, except `KEPT_GUILD_TABLES`. guild-data.test.ts
+ * compares both lists with the schema, so a new table that keeps per-server data fails the test until it is
+ * listed in one of them.
  */
 export const GUILD_TABLES = [
   "party_channel",
   "party_area",
   "scheduled_message",
-  "scheduled_message_opt_out",
   "scheduled_song_exclusion",
   "scheduled_song_config",
   "dzajco_channel_config",
@@ -17,6 +17,13 @@ export const GUILD_TABLES = [
   "welcome_config",
   "guild_settings",
 ] as const;
+
+/**
+ * Tables with a `guild_id` that survive the bot leaving. An opt-out from a server's scheduled DMs is the
+ * member's own choice, not the server's data; deleting it would let that server DM them again after
+ * re-adding the bot.
+ */
+export const KEPT_GUILD_TABLES = ["scheduled_message_opt_out"] as const;
 
 export type GuildTable = (typeof GUILD_TABLES)[number];
 
@@ -37,8 +44,6 @@ const DELETES: Record<GuildTable, Delete> = {
   party_area: (tx, guildId) => tx`DELETE FROM party_area WHERE guild_id = ${guildId} RETURNING 1`,
   scheduled_message: (tx, guildId) =>
     tx`DELETE FROM scheduled_message WHERE guild_id = ${guildId} RETURNING 1`,
-  scheduled_message_opt_out: (tx, guildId) =>
-    tx`DELETE FROM scheduled_message_opt_out WHERE guild_id = ${guildId} RETURNING 1`,
   scheduled_song_exclusion: (tx, guildId) =>
     tx`DELETE FROM scheduled_song_exclusion WHERE guild_id = ${guildId} RETURNING 1`,
   scheduled_song_config: (tx, guildId) =>

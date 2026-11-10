@@ -195,11 +195,12 @@ caches it in Redis like the prefix (`createGuildSettingCache`).
 
 When the bot is removed from a server (`guildDelete`: kicked, or the server deleted), apps/bot deletes
 everything stored for it in one transaction (`createGuildDataRepository().forget`): settings, module
-toggles, welcome, party areas and channels, scheduled songs and messages with their opt-outs for that server,
-Dżajco overrides and the moderation history. A server that adds the bot again starts fresh. An outage is
+toggles, welcome, party areas and channels, scheduled songs and messages, Dżajco overrides and the
+moderation history. Members' opt-outs from the server's scheduled DMs stay (`KEPT_GUILD_TABLES`): they are the
+member's choice, and dropping them would let the server DM them again after re-adding the bot. A server that adds the bot again starts fresh. An outage is
 `guildUnavailable` in discord.js and deletes nothing; DM rows (`guild_id` NULL) are not touched.
-`GUILD_TABLES` lists the tables, and a database test compares it with every table that has a `guild_id`, so
-a new one cannot be forgotten. Redis entries of the server expire on their own (at most 10 minutes).
+A database test compares `GUILD_TABLES` and `KEPT_GUILD_TABLES` with every table that has a `guild_id`, so a
+new one cannot be forgotten. Redis entries of the server expire on their own (at most 10 minutes).
 
 ### Module toggles
 

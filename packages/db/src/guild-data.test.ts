@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { createDzajcoRepository } from "./dzajco.ts";
-import { createGuildDataRepository, GUILD_TABLES } from "./guild-data.ts";
+import { createGuildDataRepository, GUILD_TABLES, KEPT_GUILD_TABLES } from "./guild-data.ts";
 import { createGuildSettingsRepository } from "./guild-settings.ts";
 import { createModerationRepository } from "./moderation.ts";
 import { createModuleToggleRepository } from "./module-toggles.ts";
@@ -24,7 +24,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   // Test-only SQL built from the constant table list.
-  if (sql) await sql.unsafe(`TRUNCATE ${GUILD_TABLES.join(", ")}`);
+  if (sql) await sql.unsafe(`TRUNCATE ${[...GUILD_TABLES, ...KEPT_GUILD_TABLES].join(", ")}`);
 });
 
 const GONE = "1000000000000000001";
@@ -88,13 +88,15 @@ async function countsOf(db: SQL, guildId: string) {
 describe.skipIf(!sql)("guild data", () => {
   const db = () => sql as SQL;
 
-  test("GUILD_TABLES lists every table that has a guild_id", async () => {
+  test("every table with a guild_id is either deleted or kept on purpose", async () => {
     const rows = await db()<{ table_name: string }[]>`
       SELECT table_name FROM information_schema.columns
       WHERE table_schema = current_schema() AND column_name = 'guild_id'
       ORDER BY table_name
     `;
-    expect(rows.map((row) => row.table_name)).toEqual([...GUILD_TABLES].sort());
+    expect(rows.map((row) => row.table_name)).toEqual(
+      [...GUILD_TABLES, ...KEPT_GUILD_TABLES].sort(),
+    );
   });
 
   test("forget deletes everything of one guild, in every table, and nothing of another", async () => {
@@ -114,6 +116,9 @@ describe.skipIf(!sql)("guild data", () => {
     expect(await countsOf(db(), STAYS)).toEqual(before);
     const [dm] = await db()`SELECT 1 FROM dzajco_channel_config WHERE guild_id IS NULL`;
     expect(dm).toBeDefined();
+    // A member's opt-out from this server's DMs outlives the bot's stay.
+    const [optOut] = await db()`SELECT 1 FROM scheduled_message_opt_out WHERE guild_id = ${GONE}`;
+    expect(optOut).toBeDefined();
   });
 
   test("forgetting a guild with no data removes nothing", async () => {
