@@ -2,3 +2,5 @@
 -- (scheduled_message.time_of_day) and scheduled songs follow it from now on.
 ALTER TABLE guild_settings
   ADD COLUMN time_zone text CHECK (time_zone IS NULL OR char_length(time_zone) BETWEEN 1 AND 64);
+-- due() now compares time_of_day with each guild's local time, computed per row, so this index is unused.
+DROP INDEX scheduled_message_time_idx;

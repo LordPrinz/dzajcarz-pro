@@ -101,6 +101,25 @@ describe.skipIf(!sql)("scheduled message repository", () => {
     expect(late.map((m) => [m.content, m.date])).toEqual([["Po północy", "2026-07-02"]]);
   });
 
+  test("on the spring clock change a time that does not exist that day is skipped", async () => {
+    await add(guild, "02:30", "Nie ma takiej godziny");
+    await add(guild, "03:00", "Trzecia");
+    // 29 March 2026: Warsaw jumps from 02:00 to 03:00 at 01:00 UTC.
+    expect(await repo().due(new Date("2026-03-29T00:30:00Z"), 500)).toEqual([]);
+    const three = await repo().due(new Date("2026-03-29T01:00:00Z"), 500);
+    expect(three.map((m) => [m.content, m.date])).toEqual([["Trzecia", "2026-03-29"]]);
+  });
+
+  test("on the autumn clock change a repeated time is due twice with the same date", async () => {
+    await add(guild, "02:30", "Dwa razy");
+    // 25 October 2026: Warsaw goes from 03:00 back to 02:00 at 01:00 UTC, so 02:30 happens twice. The same
+    // date makes the module's once-a-day key send it only the first time.
+    const first = await repo().due(new Date("2026-10-25T00:30:00Z"), 500);
+    const second = await repo().due(new Date("2026-10-25T01:30:00Z"), 500);
+    expect(first.map((m) => m.date)).toEqual(["2026-10-25"]);
+    expect(second.map((m) => m.date)).toEqual(["2026-10-25"]);
+  });
+
   test("remove only takes a message of the given guild", async () => {
     const message = await add(guild, "19:00", "A");
     expect(await repo().remove(otherGuild, message.id)).toBe(false);

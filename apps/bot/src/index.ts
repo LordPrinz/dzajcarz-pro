@@ -75,6 +75,12 @@ const redis = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
 keepConnected(redis, logger);
 
 const guildSettings = createGuildSettingsRepository(sql);
+// Replaced by DEFAULT_TIME_ZONE and /timezone; a leftover value would otherwise be dropped without a word.
+if (Bun.env.SCHEDULED_SONG_TIMEZONE) {
+  logger.warn("SCHEDULED_SONG_TIMEZONE is no longer read; set DEFAULT_TIME_ZONE or use /timezone", {
+    value: Bun.env.SCHEDULED_SONG_TIMEZONE,
+  });
+}
 // Scheduled messages convert times in Postgres, whose tzdata can lack a name the runtime accepts.
 if (!(await guildSettings.isKnownTimeZone(env.DEFAULT_TIME_ZONE))) {
   logger.error("DEFAULT_TIME_ZONE is unknown to Postgres; pick a current IANA name", {
