@@ -707,6 +707,30 @@ describe("music module", () => {
       expect(player.state(GUILD)?.current?.title).toBe("E");
     });
 
+    test("leaving ends the window: no late note, and the next session gets its own first note", async () => {
+      const { run, player, panels, scheduler } = setup();
+      player.nextResult = {
+        kind: "playlist",
+        name: "Usunięte",
+        tracks: ["A", "B", "C"].map((title) => track(title)),
+      };
+      await run("play", { query: "a" });
+      player.failTrack(GUILD);
+      player.failTrack(GUILD);
+      player.destroy(GUILD);
+      scheduler.advance(FAILED_NOTE_WINDOW_MS);
+      await settle();
+      const notes = () =>
+        [...panels.messages.values()].map((m) => m.message.content).filter(Boolean);
+      expect(notes()).toEqual([trackFailedText("A")]);
+
+      player.nextResult = { kind: "playlist", name: "Nowa", tracks: [track("D"), track("E")] };
+      await run("play", { query: "d" });
+      player.failTrack(GUILD);
+      await settle();
+      expect(notes()).toEqual([trackFailedText("A"), trackFailedText("D")]);
+    });
+
     test("a single failed track adds nothing when its window closes", async () => {
       const { run, player, panels, scheduler } = setup();
       player.nextResult = { kind: "playlist", name: "Dwa", tracks: [track("A"), track("B")] };

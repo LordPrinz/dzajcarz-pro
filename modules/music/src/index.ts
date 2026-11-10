@@ -476,6 +476,9 @@ export function createMusicModule({
     },
     playerDestroyed(guildId) {
       cancelIdle(guildId);
+      // A note after the bot left would be noise, and the next session starts its own window.
+      failedBursts.get(guildId)?.cancel();
+      failedBursts.delete(guildId);
       void inOrder(guildId, () => removePanel(guildId));
     },
     trackFailed(guildId, track) {
