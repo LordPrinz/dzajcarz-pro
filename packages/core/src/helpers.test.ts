@@ -28,7 +28,7 @@ describe("plural", () => {
 
 describe("codeBlocks", () => {
   test("wraps the text and breaks backtick runs", () => {
-    expect(codeBlocks("a```b")).toEqual(["```\na`​`​`​b\n```"]);
+    expect(codeBlocks("a```b")).toEqual(["```\na`\u200b`\u200b`\u200bb\n```"]);
   });
 
   test("splits long text into blocks that fit a message", () => {

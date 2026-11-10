@@ -46,7 +46,7 @@ const characters = (text: string): number => [...text].length;
  * zero-width space after it, so a run of them cannot close the block.
  */
 export function codeBlocks(text: string): string[] {
-  const chars = [...text.replaceAll("`", "`​")];
+  const chars = [...text.replaceAll("`", "`\u200b")];
   const blocks: string[] = [];
   for (let start = 0; start < chars.length; start += CODE_BLOCK_SIZE) {
     blocks.push(`\`\`\`\n${chars.slice(start, start + CODE_BLOCK_SIZE).join("")}\n\`\`\``);

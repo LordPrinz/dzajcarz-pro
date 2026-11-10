@@ -54,7 +54,7 @@ export const PROTECTED_MODULES: ReadonlySet<string> = new Set(["general", "setti
 
 const MAX_PREFIX_LENGTH = 5;
 const MAX_ECHOED_NAME = 32;
-/** Discord rejects messages over 2000 characters; the rest is left for the "and N more" line. */
+/** The /modules list stays well under Discord's 2000; fitLines keeps room for its "… i jeszcze N" line. */
 const MAX_LIST_LENGTH = 1900;
 const MAX_CHANNELS_PER_LINE = 10;
 
