@@ -37,6 +37,11 @@ describe("matchInvocation", () => {
     expect(matchInvocation("!ping", "?", BOT)).toBeNull();
   });
 
+  test("a mention of the bot wins over a prefix that is the start of the mention", () => {
+    expect(matchInvocation(`<@${BOT}> ping`, "<", BOT)).toEqual({ name: "ping", rest: "" });
+    expect(matchInvocation(`<@${BOT}> ping`, "<@", BOT)).toEqual({ name: "ping", rest: "" });
+  });
+
   test("accepts a mention of the bot instead of the prefix", () => {
     expect(matchInvocation(`<@${BOT}> play abc`, "!", BOT)).toEqual({ name: "play", rest: "abc" });
     expect(matchInvocation(`<@!${BOT}>help`, "!", BOT)).toEqual({ name: "help", rest: "" });

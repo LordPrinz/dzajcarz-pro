@@ -69,18 +69,26 @@ export function startHealthServer({
   logger,
   probeTimeoutMs,
 }: HealthServerOptions): Bun.Server<undefined> {
-  // A probe still pending from an earlier run is reused, so a hung database gets one `select 1`, not one per
-  // request.
+  // A probe still pending from an earlier run is reused, so a hung database gets one `select 1` per timeout
+  // window, not one per request.
   const shared = Object.fromEntries(
     Object.entries(probes).map(([name, probe]) => {
       let pending: Promise<boolean> | undefined;
       return [
         name,
         () => {
-          pending ??= probe().finally(() => {
-            pending = undefined;
+          if (pending) return pending;
+          const run: Promise<boolean> = probe().finally(() => {
+            clearTimeout(forget);
+            if (pending === run) pending = undefined;
           });
-          return pending;
+          // A probe that never settles must not block every later check: drop it once its timeout has
+          // passed. The identity check keeps a newer probe from being dropped by an older timer.
+          const forget = setTimeout(() => {
+            if (pending === run) pending = undefined;
+          }, probeTimeoutMs ?? PROBE_TIMEOUT_MS);
+          pending = run;
+          return run;
         },
       ];
     }),

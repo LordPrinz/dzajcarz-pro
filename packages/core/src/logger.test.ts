@@ -78,3 +78,35 @@ test("non-primitive values under the allowed names are left out", () => {
   const error = Object.assign(new Error("odd"), { code: { nested: "secret" } });
   expect(lastLine((logger) => logger.warn("x", { error })).error.code).toBeUndefined();
 });
+
+test("a field that cannot be serialized still produces a line instead of throwing", () => {
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const lines: string[] = [];
+  const logger = createJsonLogger({
+    write: (line) => lines.push(line),
+    now: () => new Date("2026-11-06T12:00:00Z"),
+  });
+  expect(() => logger.error("boom", { cyclic })).not.toThrow();
+  const line = JSON.parse(lines[0] ?? "");
+  expect(line).toMatchObject({ time: "2026-11-06T12:00:00.000Z", level: "error", msg: "boom" });
+  expect(typeof line.logError).toBe("string");
+});
+
+test("a write that throws does not make the logger throw", () => {
+  const logger = createJsonLogger({
+    write: () => {
+      throw new Error("EPIPE");
+    },
+  });
+  expect(() => logger.error("boom")).not.toThrow();
+});
+
+test("the fallback line keeps the child fields", () => {
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const lines: string[] = [];
+  const logger = createJsonLogger({ write: (line) => lines.push(line) }).child({ module: "music" });
+  logger.warn("boom", { cyclic });
+  expect(JSON.parse(lines[0] ?? "")).toMatchObject({ module: "music", msg: "boom" });
+});
