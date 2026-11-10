@@ -172,13 +172,14 @@ user can run it, across servers. The dispatcher counts calls with `KeyValueStore
 `cooldown:<command>[:<subcommand>]:<userId>` after the access checks, so a refused call does not start the
 wait, while a run that fails still uses it up. A subcommand that inherits the command's value still gets
 its own window. A second call inside the window gets a `UserError` with the seconds left. If the store is
-down the command runs anyway and a warning is logged: Redis only holds losable state (ADR 3).
+down or silent for 500 ms the command runs anyway and a warning is logged: Redis only holds losable state
+(ADR 3).
 
 ### Prefix per guild
 
 The prefix is stored in `guild_settings.prefix` (null means the default from `BOT_PREFIX`) and cached in
-Redis for 10 minutes, because every message in every guild needs it. If Redis is down the bot reads
-Postgres; if Postgres is down too it uses the default. Mentioning the bot always works as a prefix.
+Redis for 10 minutes, because every message in every guild needs it. If Redis is down or does not answer
+within 500 ms the bot reads Postgres; if Postgres is down too it uses the default. Mentioning the bot always works as a prefix.
 
 ### Time zone per guild
 
@@ -748,8 +749,9 @@ stats are off.
   from `active-shards`; the League platform is the `region` option (`eun1` by default).
 - **Cache.** Only the projection the bot uses (validated fields, the newest five matches, Polish names) lives
   in Redis for the TTLs below, never a raw response. A cache that fails or holds an entry that no longer
-  parses only costs a request. Redis runs with `--maxmemory 256mb --maxmemory-policy allkeys-lru`: it holds
-  only state that can be lost (ADR 3), so evicting a cache entry is always safe.
+  parses only costs a request. Redis runs with `--maxmemory 256mb --maxmemory-policy volatile-lru` (see
+  "Redis eviction" below): it holds only state that can be lost (ADR 3), so evicting a cache entry is always
+  safe.
 
   | Data                                           | TTL   |
   | ---------------------------------------------- | ----- |
@@ -777,3 +779,15 @@ stats are off.
 - `db`: integration tests against a real Postgres (`TEST_DATABASE_URL`), each run in a fresh schema.
 - `kv`: one contract suite for every adapter; the Redis run needs `TEST_REDIS_URL`.
 - CI provides both services, so nothing is skipped there.
+
+## Redis eviction
+
+Redis runs with `--maxmemory 256mb --maxmemory-policy volatile-lru`: under memory pressure it evicts only
+keys that have a TTL, least recently used first. Every key the bot writes carries one (caches, cooldown
+and rate-limit windows, locks, component state), so nothing is kept forever; a key without a TTL would
+never be evicted and could fill the memory. Locks and counters have short TTLs, so they can still be
+evicted in a real shortage, which only means a duplicate or a missed limit once (ADR 3). A call that waits on
+Redis in the interaction path (guild setting caches, the cooldown counter) is abandoned after 500 ms and
+treated like a failed Redis; the guild setting cache also fills and refreshes with that limit, and its backfill
+does not delay the answer. The other Redis callers (party, music, messages, moderation, dzajco, riot, the module
+gate's cache writes, component state) are not time-limited yet.

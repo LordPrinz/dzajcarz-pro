@@ -95,7 +95,7 @@ services:
         printf 'requirepass %s\n' "$$REDISCLI_AUTH" > /tmp/redis.conf &&
         chown redis:redis /tmp/redis.conf &&
         exec docker-entrypoint.sh redis-server /tmp/redis.conf
-        --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+        --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
     environment:
       # Read by the command above and by redis-cli in the health check.
       REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}

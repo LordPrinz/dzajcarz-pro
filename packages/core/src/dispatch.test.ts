@@ -509,6 +509,13 @@ describe("executeCommand cooldowns", () => {
     expect(runs()).toBe(2);
   });
 
+  test("runs the command when the store never answers", async () => {
+    const { command, runs } = make(10_000);
+    const cooldowns: CooldownStore = { increment: () => new Promise(() => {}) };
+    await executeCommand(command, createFakeContext(), silentLogger, cooldowns);
+    expect(runs()).toBe(1);
+  });
+
   test("a subcommand's cooldown wins over the command's and has its own window", async () => {
     const cooldowns = fakeCooldowns({ now: 0 });
     let fast = 0;
