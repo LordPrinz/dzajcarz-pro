@@ -1,6 +1,7 @@
 import {
   type BotModule,
   type CommandContext,
+  characterCount,
   defineButton,
   defineCommand,
   defineEvent,
@@ -270,8 +271,6 @@ const NEW_AREA = "new";
 /** What the owner controls need from whoever triggers them: a command, a button, a select or a form. */
 type ControlContext = Pick<CommandContext, "guildId" | "user" | "reply">;
 
-const characters = (text: string): number => [...text].length;
-
 /**
  * The name of a member's new channel: `{user}` replaced by their display name (whitespace collapsed),
  * cut to Discord's 100 characters, never empty.
@@ -290,7 +289,7 @@ export function renderChannelName(template: string, displayName: string): string
 /** Throws a UserError with a Polish message when the template cannot be used. */
 export function validateTemplate(template: string): void {
   if (template.trim() === "") throw new UserError("Szablon nazwy nie może być pusty.");
-  if (characters(template) > MAX_TEMPLATE_LENGTH) {
+  if (characterCount(template) > MAX_TEMPLATE_LENGTH) {
     throw new UserError(`Szablon nazwy może mieć najwyżej ${MAX_TEMPLATE_LENGTH} znaków.`);
   }
   if (!template.includes(USER_PLACEHOLDER)) {
@@ -303,7 +302,7 @@ export function validateTemplate(template: string): void {
 function validateName(label: string, name: string): string {
   const trimmed = name.trim();
   if (trimmed === "") throw new UserError(`Podaj ${label}.`);
-  if (characters(trimmed) > MAX_NAME_LENGTH) {
+  if (characterCount(trimmed) > MAX_NAME_LENGTH) {
     throw new UserError(`Nazwa może mieć najwyżej ${MAX_NAME_LENGTH} znaków.`);
   }
   return trimmed;

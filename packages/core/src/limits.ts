@@ -15,8 +15,13 @@ export const DISCORD_LIMITS = {
   embedTotal: 6000,
 } as const;
 
-/** Discord counts characters, so an emoji is one even though it takes two UTF-16 units. */
-const length = (text: string | undefined) => (text === undefined ? 0 : [...text].length);
+/**
+ * Length in code points, the way Discord and Postgres' char_length count: an emoji is one character even
+ * though it takes two UTF-16 units.
+ */
+export const characterCount = (text: string): number => [...text].length;
+
+const length = (text: string | undefined) => (text === undefined ? 0 : characterCount(text));
 
 function check(problems: string[], what: string, text: string | undefined, limit: number): void {
   const size = length(text);

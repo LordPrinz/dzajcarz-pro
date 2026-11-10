@@ -2,7 +2,9 @@ import {
   type BotModule,
   type ComponentRow,
   type CronScheduler,
+  characterCount,
   codeBlocks,
+  DISCORD_LIMITS,
   defineButton,
   defineCommand,
   defineEvent,
@@ -118,7 +120,7 @@ const EARLY_TICK_MS = 5_000;
 /** Messages sent at once in a tick, so a busy minute does not hit Discord with hundreds of requests together. */
 const SEND_BATCH = 5;
 export const MAX_CONTENT_LENGTH = 1900;
-const DISCORD_MESSAGE_LIMIT = 2000;
+const DISCORD_MESSAGE_LIMIT = DISCORD_LIMITS.content;
 /** Discord's limit on a server name; the DM footer must fit even after a rename. */
 const MAX_GUILD_NAME = 100;
 const PREVIEW_LENGTH = 40;
@@ -143,8 +145,6 @@ const USER_IN_CHANNEL =
   " `{user}` działa tylko w wiadomościach prywatnych, na kanale zostanie wpisane dosłownie.";
 const EMPTY_LIST = "Brak zaplanowanych wiadomości. Dodaj przez `messages add`.";
 
-const characters = (text: string): number => [...text].length;
-
 /**
  * The server name as plain text: the server's owner picks it, so markdown and mention characters are dropped
  * before it goes into the bot's own footer or reply.
@@ -166,7 +166,7 @@ function renderDirectMessage(content: string, userId: string, guildName: string)
 /** How far over Discord's limit a DM could end up, with the longest server name; 0 when it fits. */
 function directMessageOverflow(content: string, userId: string): number {
   const worstCase = renderDirectMessage(content, userId, "x".repeat(MAX_GUILD_NAME));
-  return Math.max(0, characters(worstCase) - DISCORD_MESSAGE_LIMIT);
+  return Math.max(0, characterCount(worstCase) - DISCORD_MESSAGE_LIMIT);
 }
 
 /**
@@ -229,7 +229,7 @@ export function createMessagesModule({
       throw new UserError(ONE_TARGET);
     }
     const content = draft.text.trim();
-    const length = characters(content);
+    const length = characterCount(content);
     if (length < 1 || length > MAX_CONTENT_LENGTH) throw new UserError(BAD_LENGTH);
     if (draft.userId !== undefined) {
       const overflow = directMessageOverflow(content, draft.userId);

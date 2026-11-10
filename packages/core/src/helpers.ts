@@ -1,4 +1,5 @@
 import { UserError } from "./errors.ts";
+import { characterCount, DISCORD_LIMITS } from "./limits.ts";
 
 /**
  * Small pieces several modules need. They live here because ADR 5 forbids imports between modules; only
@@ -34,12 +35,8 @@ export function plural(count: number, one: string, few: string, many: string): s
   return many;
 }
 
-const DISCORD_MESSAGE_LIMIT = 2000;
 /** Discord caps a message at 2000 characters; the fences and a margin leave room for the text. */
 const CODE_BLOCK_SIZE = 1900;
-
-/** Length in code points, the way Discord and Postgres' char_length count. */
-const characters = (text: string): number => [...text].length;
 
 /**
  * The text as message-sized code blocks, so markdown and mentions in it show as typed. A backtick gets a
@@ -58,11 +55,11 @@ export function codeBlocks(text: string): string[] {
 const MORE_RESERVE = 20;
 
 /** The lines that fit one message (`limit` characters); the rest is counted in a last "… i jeszcze N" line. */
-export function fitLines(lines: readonly string[], limit = DISCORD_MESSAGE_LIMIT): string {
+export function fitLines(lines: readonly string[], limit: number = DISCORD_LIMITS.content): string {
   const kept: string[] = [];
   let used = 0;
   for (const line of lines) {
-    const next = used + (kept.length > 0 ? 1 : 0) + characters(line);
+    const next = used + (kept.length > 0 ? 1 : 0) + characterCount(line);
     if (next > limit - MORE_RESERVE) break;
     kept.push(line);
     used = next;

@@ -1,6 +1,7 @@
 import {
   type BotModule,
   type CommandContext,
+  characterCount,
   defineCommand,
   type Logger,
   plural,
@@ -124,9 +125,6 @@ const reasonOption = {
   rest: true,
 } as const;
 
-/** Length in code points, the way Postgres' char_length counts. */
-const length = (text: string) => [...text].length;
-
 function hasPermission(granted: bigint, permission: bigint): boolean {
   return (granted & ADMINISTRATOR) !== 0n || (granted & permission) === permission;
 }
@@ -169,7 +167,7 @@ function warningsList(targetId: string, total: number, lines: string[]): string 
         ? `<@${targetId}> ma ${total} ${word}, ${shown} najnowszych:`
         : `<@${targetId}> ma ${total} ${word}:`;
     const text = [header, ...lines.slice(0, shown)].join("\n");
-    if (length(text) <= MAX_MESSAGE_LENGTH) return text;
+    if (characterCount(text) <= MAX_MESSAGE_LENGTH) return text;
   }
   return `<@${targetId}> ma ${total} ${word}.`;
 }
@@ -184,7 +182,7 @@ export function createModerationModule({
   function reasonOf(raw: string | undefined): string | null {
     const reason = raw?.trim() ?? "";
     if (reason === "") return null;
-    if (length(reason) > MAX_REASON_LENGTH) throw new UserError(REASON_TOO_LONG);
+    if (characterCount(reason) > MAX_REASON_LENGTH) throw new UserError(REASON_TOO_LONG);
     return reason;
   }
 
