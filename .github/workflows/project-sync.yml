@@ -2,7 +2,7 @@ name: Project sync
 
 # Moves the linked issue across the project board:
 #   branch DZAJ-<n>-… created → In Progress, PR opened → QA, PR converted to draft → In Progress.
-# "Done" is handled by the board's built-in workflows when the PR merges into v5.
+# "Done" is handled by the board's built-in workflows when the PR merges into main.
 on:
   create:
   pull_request:

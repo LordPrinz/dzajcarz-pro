@@ -1,7 +1,7 @@
 /** Shared naming rules for branches, commits and PR titles. */
 
-/** Branch that PRs target. v5 is an orphan branch; the older branches (main, dzajcarzv4) are history. */
-export const TRUNK_BRANCH = "v5";
+/** Branch that PRs target. */
+export const TRUNK_BRANCH = "main";
 
 export const COMMIT_TYPES = [
   "feat",

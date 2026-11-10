@@ -1,4 +1,4 @@
-<!-- Title: [DZAJ-<number>] <type>(<scope>): <Description> — it becomes the squash commit on v5. -->
+<!-- Title: [DZAJ-<number>] <type>(<scope>): <Description> — it becomes the squash commit on main. -->
 
 ## What
 

@@ -75,7 +75,6 @@ if (trunk.exitCode !== 0) {
 await api("PATCH", "", {
   description:
     "Dzajcarz — Discord bot on Bun: music (Lavalink), party voice channels, moderation, welcome messages and fun commands. Slash and prefix commands.",
-  // v5 is an orphan branch that replaces the old code; main and dzajcarzv4 stay as history.
   default_branch: TRUNK_BRANCH,
   has_wiki: true,
   has_projects: true,
