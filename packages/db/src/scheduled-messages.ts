@@ -46,9 +46,6 @@ export interface ScheduledMessageRepository {
   list(guildId: string): Promise<ScheduledMessageRecord[]>;
   /** False when the guild has no message with that id. */
   remove(guildId: string, id: number): Promise<boolean>;
-  /** Deletes every message of the guild; resolves how many there were. */
-  removeGuild(guildId: string): Promise<number>;
-  /** At most `limit` messages of every guild due at `time`, by guild and id. */
   /**
    * At most `limit` messages, of every guild, whose time of day is the minute `at` falls on in that guild's
    * time zone (`guild_settings.time_zone`, else the repository's default zone).
@@ -125,13 +122,6 @@ export function createScheduledMessageRepository(
         DELETE FROM scheduled_message WHERE guild_id = ${guildId} AND id = ${id} RETURNING *
       `;
       return deleted.length > 0;
-    },
-
-    async removeGuild(guildId) {
-      const deleted = await sql<{ id: string }[]>`
-        DELETE FROM scheduled_message WHERE guild_id = ${guildId} RETURNING id
-      `;
-      return deleted.length;
     },
 
     async due(at, limit) {

@@ -191,6 +191,16 @@ the zone and what its clock reads now, `reset` goes back to `DEFAULT_TIME_ZONE` 
 also the zone outside servers. Modules get the zone through the `GuildTimeZones` port from core; apps/bot
 caches it in Redis like the prefix (`createGuildSettingCache`).
 
+### Leaving a server
+
+When the bot is removed from a server (`guildDelete`: kicked, or the server deleted), apps/bot deletes
+everything stored for it in one transaction (`createGuildDataRepository().forget`): settings, module
+toggles, welcome, party areas and channels, scheduled songs and messages with their opt-outs for that server,
+Dżajco overrides and the moderation history. A server that adds the bot again starts fresh. An outage is
+`guildUnavailable` in discord.js and deletes nothing; DM rows (`guild_id` NULL) are not touched.
+`GUILD_TABLES` lists the tables, and a database test compares it with every table that has a `guild_id`, so
+a new one cannot be forgotten. Redis entries of the server expire on their own (at most 10 minutes).
+
 ### Module toggles
 
 A server can switch a module off entirely or in chosen channels (`/modules disable <module> [channel]`).
@@ -481,8 +491,8 @@ nothing about opt-outs.
 
 `list` shows one line per message, the text as a 40-character inline-code preview (markdown and mentions show
 as typed; backticks become `ˋ` so they cannot end the span), cut to fit 2000 characters ("… i jeszcze N").
-`remove <id>` only finds messages of the server it runs in. When the bot leaves a server (`guildDelete`, which
-runs whatever the toggles say), that server's messages are deleted.
+`remove <id>` only finds messages of the server it runs in. When the bot leaves a server, its messages go
+with the rest of its data (see Leaving a server).
 
 Sending is a `CronScheduler` job at `* * * * *` in UTC. Each tick rounds down to its minute (up to 5 s
 early still counts as the coming one) and reads at most 500 rows due then across all servers (a warning
