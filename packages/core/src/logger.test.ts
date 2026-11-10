@@ -61,6 +61,19 @@ test("a system error keeps its string code, and a cause is described one level d
   expect(direct.code).toBe("ECONNREFUSED");
 });
 
+test("a Postgres error keeps its SQLSTATE, and a plain string cause is kept as it is", () => {
+  const error = Object.assign(new Error("duplicate key"), {
+    code: "ERR_POSTGRES_SERVER_ERROR",
+    errno: "23505",
+    cause: "unique_violation",
+  });
+  expect(lastLine((logger) => logger.warn("x", { error })).error).toMatchObject({
+    code: "ERR_POSTGRES_SERVER_ERROR",
+    errno: "23505",
+    cause: "unique_violation",
+  });
+});
+
 test("non-primitive values under the allowed names are left out", () => {
   const error = Object.assign(new Error("odd"), { code: { nested: "secret" } });
   expect(lastLine((logger) => logger.warn("x", { error })).error.code).toBeUndefined();
