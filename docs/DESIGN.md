@@ -290,8 +290,10 @@ into it. The bot
 needs Manage Channels (create and delete channels), Move Members (put the member into their channel) and
 Manage Roles (permission overwrites on the channels it makes); `/party create` says so when Discord refuses. A member owns **one party channel per server**, across all
 areas (`UNIQUE (guild_id, owner_id)`): joining again moves them back to it. A composite foreign key keeps
-a channel's `guild_id` equal to its area's. `create`, `edit` and `delete` need Manage Channels for the caller. That check is on the subcommands, not on `/party`
-itself, because a command-level permission would hide the owner controls from regular members.
+a channel's `guild_id` equal to its area's. `create`, `edit`, `delete` and the area form need Manage Channels
+for the caller, from their guild-level roles (`PartyGuild.memberPermissions`; a grant on one channel does
+not count, Administrator does). That check is on the subcommands, not on `/party` itself, because a
+command-level permission would hide the owner controls from regular members.
 
 Owner controls are further subcommands: `lock`, `unlock`, `limit <0-99>`, `rename <name>`, `invite <user>`,
 `block <user>`, `hide`, `show`. The caller must be in a party channel (their current voice channel, from

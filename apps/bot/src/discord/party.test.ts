@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { ChannelType, type Client, PermissionFlagsBits } from "discord.js";
+import { ChannelType, type Client, PermissionFlagsBits, PermissionsBitField } from "discord.js";
 import {
   createPartyChannels,
   createPartyChat,
+  createPartyGuild,
   createPartyInvites,
   createPartyPermissions,
 } from "./party.ts";
@@ -412,5 +413,37 @@ describe("party channels adapter", () => {
 
   test("members is unknown while the guild is unavailable, so nobody reads it as empty", async () => {
     expect(await createPartyChannels(clientWithVoice(false)).members("1")).toBeUndefined();
+  });
+});
+
+describe("party guild adapter", () => {
+  const clientWithMember = (fetch: () => Promise<unknown>) =>
+    ({ guilds: { fetch: async () => ({ members: { fetch } }) } }) as unknown as Client;
+
+  test("the guild owner holds every bit although their roles lack Manage Channels", async () => {
+    // discord.js answers `member.permissions` for the owner with all bits, whatever the roles grant.
+    const roleBits = 1n << 10n;
+    const owner = {
+      id: "9",
+      get permissions() {
+        return { bitfield: this.id === "9" ? PermissionsBitField.All : roleBits };
+      },
+    };
+    const guild = createPartyGuild(clientWithMember(async () => owner));
+    const bits = await guild.memberPermissions(GUILD, "9");
+    expect(bits & PermissionFlagsBits.ManageChannels).toBe(PermissionFlagsBits.ManageChannels);
+  });
+
+  test("memberPermissions returns the role bits, and 0 for someone who left", async () => {
+    const present = createPartyGuild(
+      clientWithMember(async () => ({ permissions: { bitfield: 16n } })),
+    );
+    expect(await present.memberPermissions(GUILD, "5")).toBe(16n);
+    const gone = createPartyGuild(
+      clientWithMember(async () => {
+        throw Object.assign(new Error("Unknown Member"), { code: 10007 });
+      }),
+    );
+    expect(await gone.memberPermissions(GUILD, "5")).toBe(0n);
   });
 });

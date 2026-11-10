@@ -172,6 +172,8 @@ export interface PartyPermissions {
   /** 0 means no limit. */
   setLimit(channelId: string, limit: number, reason: string): Promise<void>;
   rename(channelId: string, name: string, reason: string): Promise<void>;
+  /** The channel's current name. */
+  channelName(channelId: string): Promise<string>;
   /** Kicks the member out of voice, but only while they are in `channelId`. */
   disconnect(guildId: string, userId: string, channelId: string, reason: string): Promise<void>;
   /** Null when the user is not a member of the guild. */
@@ -202,10 +204,17 @@ export interface PartyInvites {
   sendDirect(userId: string, message: Reply): Promise<boolean>;
 }
 
+/** Guild-wide facts about a member, which a channel overwrite cannot change. */
+export interface PartyGuild {
+  /** The permission bits the member holds in the guild itself; 0n when they are not a member. */
+  memberPermissions(guildId: string, userId: string): Promise<bigint>;
+}
+
 export interface PartyModuleDeps {
   repository: PartyRepository;
   channels: PartyChannels;
   permissions: PartyPermissions;
+  guild: PartyGuild;
   chat: PartyChat;
   invites: PartyInvites;
   /** Delays the cleanup of command channel messages. */
@@ -217,6 +226,9 @@ export interface PartyModuleDeps {
 
 /** PermissionFlagsBits.ManageChannels; modules do not import discord.js at runtime. */
 const MANAGE_CHANNELS = 1n << 4n;
+const ADMINISTRATOR = 1n << 3n;
+const NO_GUILD_PERMISSION =
+  "Do tego potrzebujesz uprawnienia Zarządzanie kanałami na całym serwerze, nie tylko na jednym kanale.";
 /** Discord allows two renames per channel per ten minutes; counting here avoids a rate-limit stall. */
 const MAX_RENAMES = 2;
 const RENAME_WINDOW_MS = 600_000;
@@ -262,6 +274,11 @@ const DEFAULT_TEMPLATE = `Kanał ${USER_PLACEHOLDER}`;
 const DEFAULT_JOIN_CHANNEL_NAME = "➕ Dołącz, by stworzyć kanał";
 /** Zero-width and other invisible format characters (\\p{Cf}); they would make a name look empty. */
 const INVISIBLE = /\p{Cf}/gu;
+/**
+ * Letters that render blank but are not format characters: Hangul fillers and the braille blank. Only the
+ * rename check strips them; `renderChannelName` keeps its behaviour and its fallback name.
+ */
+const BLANK_FILLERS = /[\u115F\u1160\u3164\uFFA0\u2800]/gu;
 /** Used when a template and display name leave nothing to name the channel with. */
 const FALLBACK_CHANNEL_NAME = "Kanał imprezowy";
 
@@ -348,12 +365,24 @@ export function createPartyModule({
   repository,
   channels,
   permissions,
+  guild,
   chat,
   invites,
   scheduler,
   lock,
   logger,
 }: PartyModuleDeps): BotModule {
+  /**
+   * Areas are guild-wide, so Manage Channels must come from the member's guild-level roles: the command gate
+   * also accepts a grant on a single channel, which would let that member dismantle any area.
+   */
+  async function requireGuildManageChannels(guildId: string, userId: string): Promise<void> {
+    const granted = await guild.memberPermissions(guildId, userId);
+    if ((granted & (ADMINISTRATOR | MANAGE_CHANNELS)) === 0n) {
+      throw new UserError(NO_GUILD_PERMISSION);
+    }
+  }
+
   /** Removes a Discord channel and swallows the failure: the caller has the state it wants anyway. */
   async function deleteQuietly(channelId: string): Promise<void> {
     try {
@@ -518,6 +547,7 @@ export function createPartyModule({
     },
     run: async (ctx) => {
       const guildId = requireGuild(ctx.guildId);
+      await requireGuildManageChannels(guildId, ctx.user.id);
       const settings = {
         categoryName: validateName("nazwę kategorii", ctx.values.categoryName),
         joinChannelName: validateName("nazwę kanału wejściowego", ctx.values.joinChannelName),
@@ -577,6 +607,7 @@ export function createPartyModule({
         },
         run: async (ctx) => {
           const guildId = requireGuild(ctx.guildId);
+          await requireGuildManageChannels(guildId, ctx.user.id);
           if (ctx.canShowModal) {
             // The slash command is a form; a name typed into the option only prefills it.
             const categoryName =
@@ -606,6 +637,7 @@ export function createPartyModule({
         },
         run: async (ctx) => {
           const guildId = requireGuild(ctx.guildId);
+          await requireGuildManageChannels(guildId, ctx.user.id);
           if (!ctx.canShowModal) {
             throw new UserError("Edycja strefy wymaga komendy ukośnikowej: użyj /party edit.");
           }
@@ -636,6 +668,7 @@ export function createPartyModule({
         },
         run: async (ctx) => {
           const guildId = requireGuild(ctx.guildId);
+          await requireGuildManageChannels(guildId, ctx.user.id);
           await ctx.defer({ ephemeral: true });
           const area = await pickArea(guildId, ctx.args.channel, "do usunięcia");
           await dismantleArea(area);
@@ -1183,10 +1216,18 @@ export function createPartyModule({
   async function renameChannel(ctx: ControlContext, rawName: string): Promise<void> {
     const name = rawName.trim();
     if (name.length === 0) throw new UserError("Podaj nową nazwę kanału.");
+    // Discord refuses a name without visible characters with a generic error, so say it here.
+    if (name.replace(INVISIBLE, "").replace(BLANK_FILLERS, "").trim() === "") {
+      throw new UserError("Nazwa musi zawierać widoczne znaki.");
+    }
     if ([...name].length > MAX_NAME_LENGTH) {
       throw new UserError(`Nazwa może mieć najwyżej ${MAX_NAME_LENGTH} znaków.`);
     }
     const { channel, reason } = await controlledChannel(ctx, "rename");
+    if ((await permissions.channelName(channel.channelId)) === name) {
+      await ownerReply(ctx, channel, "rename", `Nazwa kanału już brzmi „${name}”.`);
+      return;
+    }
     if (await overRenameLimit(channel.channelId)) {
       throw new UserError("Discord pozwala zmienić nazwę 2 razy na 10 minut.");
     }

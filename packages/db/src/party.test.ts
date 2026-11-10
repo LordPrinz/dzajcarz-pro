@@ -177,3 +177,18 @@ describe.skipIf(!sql)("party repository", () => {
     expect(await repo().deleteChannel("501")).toBe(false);
   });
 });
+
+describe("party repository unique violations", () => {
+  const failingWith = (error: unknown) =>
+    createPartyRepository((() => Promise.reject(error)) as unknown as SQL);
+
+  test("transferOwner reports false when two handovers race into the one-channel-per-owner index", async () => {
+    const violation = Object.assign(new Error("duplicate key"), { errno: "23505" });
+    expect(await failingWith(violation).transferOwner("501", "601", "602")).toBe(false);
+  });
+
+  test("transferOwner still throws on any other database error", async () => {
+    const other = Object.assign(new Error("deadlock"), { errno: "40P01" });
+    await expect(failingWith(other).transferOwner("501", "601", "602")).rejects.toThrow("deadlock");
+  });
+});

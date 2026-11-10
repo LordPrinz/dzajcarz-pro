@@ -22,6 +22,7 @@ import {
   type PartyChannel,
   type PartyChannels,
   type PartyChat,
+  type PartyGuild,
   type PartyInvites,
   type PartyPermissions,
   type PartyRepository,
@@ -191,7 +192,17 @@ function setup({
   const moderators = new Set(["mod"]);
   /** Members with Manage Channels on the party channel itself. */
   const managers = new Set<string>();
+  /** Guild-level permission bits by member id; everyone holds Manage Channels unless listed. */
+  const guildBits = new Map<string, bigint>();
+  const guild: PartyGuild = {
+    memberPermissions: async (_guildId, userId) => guildBits.get(userId) ?? MANAGE_CHANNELS,
+  };
+  /** Current channel names; a channel not listed is called "Kanał". */
+  const channelNames = new Map<string, string>();
   const permissions: PartyPermissions = {
+    async channelName(channelId) {
+      return channelNames.get(channelId) ?? "Kanał";
+    },
     async setEveryone(channelId, access, reason) {
       calls.push(`everyone ${channelId} ${JSON.stringify(access)} (${reason})`);
     },
@@ -318,6 +329,7 @@ function setup({
     repository,
     channels,
     permissions,
+    guild,
     chat,
     invites,
     scheduler,
@@ -389,6 +401,8 @@ function setup({
     categories,
     renamed,
     names,
+    guildBits,
+    channelNames,
     submit,
     calls,
     managers,
@@ -467,6 +481,7 @@ describe("/party create", () => {
         renameArea: async () => {},
       },
       permissions: {} as PartyPermissions,
+      guild: { memberPermissions: async () => MANAGE_CHANNELS },
       chat: {} as PartyChat,
       invites: {} as PartyInvites,
       scheduler: createFakeScheduler(),
@@ -483,6 +498,57 @@ describe("/party create", () => {
     if (!command) throw new Error("missing");
     await executeCommand(command, ctx, silentLogger);
     expect(deleted.sort()).toEqual(["c", "j"]);
+  });
+});
+
+describe("area commands need Manage Channels in the guild, not on one channel", () => {
+  const caller = "200000000000000002";
+  const refusal = "na całym serwerze";
+
+  test("create, edit and delete refuse a caller whose channel grant is not backed by a guild role", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.guildBits.set(caller, 0n);
+    for (const subcommand of ["create", "edit", "delete"]) {
+      const answer = await t.run(subcommand);
+      expect(answer[0]).toContain(refusal);
+      expect(answer.modals).toHaveLength(0);
+    }
+    expect(
+      (await t.run("create", { name: "X" }, MANAGE_CHANNELS, undefined, "prefix"))[0],
+    ).toContain(refusal);
+    expect(t.areas.size).toBe(1);
+    expect(t.created).toHaveLength(0);
+  });
+
+  test("the area form refuses the submit of such a caller and changes nothing", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    const [spec] = (await t.run("edit")).modals;
+    t.guildBits.set(caller, 0n);
+    const ctx = await t.submit(spec?.customId ?? "", {
+      categoryName: "Zabawa",
+      joinChannelName: "Wejście",
+      nameTemplate: "{user}",
+      commandChannel: "off",
+    });
+    expect(replyText(ctx.replies[0])).toContain(refusal);
+    expect(t.renamed).toEqual([]);
+  });
+
+  test("a channel-level Manage Channels grant is refused when the guild bits lack it", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.guildBits.set(caller, 1n << 10n);
+    const answer = await t.run("delete", {}, MANAGE_CHANNELS);
+    expect(answer[0]).toContain(refusal);
+    expect(t.areas.size).toBe(1);
+  });
+
+  test("Administrator passes without Manage Channels", async () => {
+    const t = setup();
+    t.guildBits.set(caller, 1n << 3n);
+    expect((await t.run("create")).modals).toHaveLength(1);
   });
 });
 
@@ -1282,6 +1348,26 @@ describe("owner controls", () => {
     // 100 emoji are 200 UTF-16 units but still fit.
     await t.run("rename", { name: "🎉".repeat(100) }, none, "u1");
     expect(t.calls).toHaveLength(2);
+  });
+
+  test("a name made only of invisible characters gets a refusal instead of reaching Discord", async () => {
+    const t = await withChannel();
+    const [reply] = await t.run("rename", { name: "​⁠‍" }, none, "u1");
+    expect(reply).toContain("widoczne znaki");
+    for (const filler of ["ㅤ", "ᅟᅠ", "⠀", "ﾠ"]) {
+      expect((await t.run("rename", { name: filler }, none, "u1"))[0]).toContain("widoczne znaki");
+    }
+    expect(t.calls).toEqual([]);
+  });
+
+  test("renaming to the current name does not spend the rename counter", async () => {
+    const t = await withChannel();
+    t.channelNames.set("1000", "Sala");
+    for (let i = 0; i < 3; i++) await t.run("rename", { name: "Sala" }, none, "u1");
+    expect(t.calls).toEqual([]);
+    await t.run("rename", { name: "Jeden" }, none, "u1");
+    await t.run("rename", { name: "Dwa" }, none, "u1");
+    expect(t.calls).toEqual(["rename 1000 Jeden", "rename 1000 Dwa"]);
   });
 
   test("a channel can be renamed twice per window, then Discord is not called", async () => {

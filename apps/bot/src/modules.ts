@@ -30,6 +30,7 @@ import {
   createPartyModule,
   type PartyChannels,
   type PartyChat,
+  type PartyGuild,
   type PartyInvites,
   type PartyPermissions,
   type PartyRepository,
@@ -76,6 +77,7 @@ export interface ModuleServices {
   partyAreas: PartyRepository;
   partyChannels: PartyChannels;
   partyPermissions: PartyPermissions;
+  partyGuild: PartyGuild;
   partyChat: PartyChat;
   partyInvites: PartyInvites;
   scheduler: Scheduler;
@@ -141,6 +143,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       repository: services.partyAreas,
       channels: services.partyChannels,
       permissions: services.partyPermissions,
+      guild: services.partyGuild,
       chat: services.partyChat,
       invites: services.partyInvites,
       scheduler: services.scheduler,
