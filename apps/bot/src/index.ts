@@ -118,16 +118,18 @@ const musicPlayer =
     : createUnavailableMusicPlayer();
 if (!env.LAVALINK_URL) logger.info("LAVALINK_URL is not set; music is off");
 
-// Without a key the module still loads, so its commands explain that Riot stats are off.
+// Without a key the module still loads, so its commands explain that stats for that game are off.
 const riotStore = createRedisStore(redis);
-const riotStats = env.RIOT_API_KEY
-  ? createRiotStats({
-      apiKey: env.RIOT_API_KEY,
-      cache: riotStore,
-      logger: logger.child({ component: "riot" }),
-    })
-  : null;
-if (!env.RIOT_API_KEY) logger.info("RIOT_API_KEY is not set; Riot stats are off");
+const riotStats = createRiotStats({
+  valorantApiKey: env.RIOT_VALORANT_API_KEY,
+  lolApiKey: env.RIOT_LOL_API_KEY,
+  cache: riotStore,
+  logger: logger.child({ component: "riot" }),
+});
+if (!env.RIOT_VALORANT_API_KEY)
+  logger.info("RIOT_VALORANT_API_KEY is not set; Valorant stats are off");
+if (!env.RIOT_LOL_API_KEY)
+  logger.info("RIOT_LOL_API_KEY is not set; League of Legends stats are off");
 
 const botInGuild = (guildId: string) => client.guilds.cache.has(guildId);
 

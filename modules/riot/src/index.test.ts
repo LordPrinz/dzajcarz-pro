@@ -80,7 +80,7 @@ function fakeStats(): FakeStats {
   return stats;
 }
 
-function setup({ stats = fakeStats() as RiotStats | null } = {}) {
+function setup({ stats = fakeStats() as Partial<RiotStats> } = {}) {
   let time = 1_000_000;
   const store = createMemoryStore(() => time);
   const module = createRiotModule({ stats, store, now: () => time, logger: silentLogger });
@@ -115,15 +115,36 @@ const embedOf = (reply: Reply | undefined): Embed | undefined =>
   typeof reply === "string" ? undefined : reply?.embeds?.[0];
 
 describe("riot module", () => {
-  test("without an API key both commands say stats are off", async () => {
-    const { run } = setup({ stats: null });
-    for (const [name, args] of [
-      ["valorant", { riot_id: "Dzajcarz#EUNE" }],
-      ["lol", { riot_id: "Dzajcarz#EUNE" }],
+  test("without any API key both commands say stats are off", async () => {
+    const { run } = setup({ stats: {} });
+    for (const [name, args, game] of [
+      ["valorant", { riot_id: "Dzajcarz#EUNE" }, "Valorant"],
+      ["lol", { riot_id: "Dzajcarz#EUNE" }, "League of Legends"],
     ] as const) {
       const ctx = await run(name, args);
-      expect(textOf(ctx.replies[0])).toBe("Statystyki Riot są wyłączone: bot nie ma klucza API.");
+      expect(textOf(ctx.replies[0])).toBe(
+        `Statystyki ${game} są wyłączone: bot nie ma klucza API.`,
+      );
     }
+  });
+
+  test("a game without its key is off while the other one keeps working", async () => {
+    const full = fakeStats();
+    const onlyLol = setup({ stats: { lol: full.lol } });
+    const valorantOff = await onlyLol.run("valorant", { riot_id: "Dzajcarz#EUNE" });
+    expect(textOf(valorantOff.replies[0])).toBe(
+      "Statystyki Valorant są wyłączone: bot nie ma klucza API.",
+    );
+    const lolOn = await onlyLol.run("lol", { riot_id: "Dzajcarz#EUNE" });
+    expect(embedOf(lolOn.replies.at(-1))).toBeDefined();
+
+    const onlyValorant = setup({ stats: { valorant: full.valorant } });
+    const lolOff = await onlyValorant.run("lol", { riot_id: "Dzajcarz#EUNE" });
+    expect(textOf(lolOff.replies[0])).toBe(
+      "Statystyki League of Legends są wyłączone: bot nie ma klucza API.",
+    );
+    const valorantOn = await onlyValorant.run("valorant", { riot_id: "Dzajcarz#EUNE" });
+    expect(embedOf(valorantOn.replies.at(-1))).toBeDefined();
   });
 
   test("a malformed Riot ID is refused before any lookup", async () => {
@@ -293,7 +314,7 @@ describe("riot module", () => {
       const { run, store } = setup({ stats });
       const ctx = await run("valorant", { riot_id: "Dzajcarz#EUNE" });
       expect(textOf(ctx.replies[0])).toBe("Riot API prosi o przerwę. Spróbuj za 1 s.");
-      expect(await store.get("riot:retry-after")).toBe(String(1_000_000 + 1000));
+      expect(await store.get("riot:retry-after:valorant")).toBe(String(1_000_000 + 1000));
     });
 
     test("a huge Retry-After is capped at two minutes", async () => {
@@ -330,12 +351,23 @@ describe("riot module", () => {
 
       const first = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "1" });
       expect(textOf(first.replies[0])).toBe("Riot API prosi o przerwę. Spróbuj za 7 s.");
-      expect(await store.get("riot:retry-after")).toBe(String(1_000_000 + 7000));
+      expect(await store.get("riot:retry-after:valorant")).toBe(String(1_000_000 + 7000));
 
       advance(3000);
-      const second = await run("lol", { riot_id: "Dzajcarz#EUNE" }, { userId: "2" });
+      const second = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "2" });
       expect(textOf(second.replies[0])).toBe("Riot API prosi o przerwę. Spróbuj za 4 s.");
       expect(stats.calls).toHaveLength(1);
+    });
+
+    test("a pause on one game's key leaves the other game running", async () => {
+      const stats = fakeStats();
+      stats.failWith = new RiotLookupError("rate-limited", 7000);
+      const { run } = setup({ stats });
+      await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "1" });
+
+      stats.failWith = undefined;
+      const lol = await run("lol", { riot_id: "Dzajcarz#EUNE" }, { userId: "2" });
+      expect(embedOf(lol.replies[0])).toBeDefined();
     });
 
     test("lookups resume once the deadline has passed", async () => {

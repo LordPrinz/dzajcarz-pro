@@ -314,7 +314,7 @@ export const createDeployRegistry = () =>
       moderationGuild: unusedServices(),
       moderationLog: unusedServices(),
       moderationDmLimit: unusedServices(),
-      riotStats: null,
+      riotStats: {},
       riotStore: unusedServices(),
       // messages (its cron job is the shared stand-in above, so nothing is sent while deploying)
       scheduledMessages: unusedServices(),

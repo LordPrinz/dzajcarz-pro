@@ -100,7 +100,7 @@ export interface ModuleServices {
   moderationLog: ModerationLog;
   moderationDmLimit: Pick<KeyValueStore, "setIfAbsent">;
   // riot
-  riotStats: RiotStats | null;
+  riotStats: Partial<RiotStats>;
   riotStore: KeyValueStore;
   // messages
   scheduledMessages: ScheduledMessageStore;

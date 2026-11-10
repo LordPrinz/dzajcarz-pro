@@ -46,7 +46,7 @@ modules/
   messages/         messages (add through a form, list, remove), dm (on, off): scheduled messages to channels or members' DMs at a set time
   status/           rotates the bot's activity (the old bot's song)
   music/            play (p), search, queue, skip, stop, pause, resume, nowplaying (np), loop, shuffle, seek, volume, filter, remove, jump, back, clear, save (sv), a now playing panel with buttons
-  riot/             valorant, lol (player stats from the Riot API, needs RIOT_API_KEY)
+  riot/             valorant, lol (player stats from the Riot API, needs RIOT_VALORANT_API_KEY / RIOT_LOL_API_KEY)
   …                 moderation, fun (see the board)
 infra/              docker-compose files: development (Postgres, Redis, Lavalink and yt-cipher in profile "music") and production (docker-compose.prod.yml)
 Dockerfile          the bot compiled into one binary (docs/DEPLOYMENT.md)
@@ -91,8 +91,9 @@ At 9:00 and 21:00 Warsaw time the bot joins the voice channel with the most peop
 music is already playing there. Servers manage it with `/schedule` (Manage Server) or switch it off with
 `/modules disable schedule`. `SCHEDULED_SONG_CRON` and `SCHEDULED_SONG_TIMEZONE` change the time.
 
-`RIOT_API_KEY` is optional. Without it `/valorant` and `/lol` answer that stats are off. A development key
-from the [Riot developer portal](https://developer.riotgames.com) is enough for `/lol`; Valorant match
+`RIOT_VALORANT_API_KEY` and `RIOT_LOL_API_KEY` are optional and independent: Riot issues a key per game. Without a key
+its command (`/valorant` or `/lol`) answers that stats are off while the other keeps working. A development
+key from the [Riot developer portal](https://developer.riotgames.com) is enough for `/lol`; Valorant match
 history needs a production key (ADR 8).
 
 ## Scripts

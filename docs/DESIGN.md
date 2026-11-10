@@ -697,8 +697,9 @@ destroys the players and the node connection before the Discord client.
 
 `modules/riot` has `/valorant <riot_id>` and `/lol <riot_id> [region]`, both usable everywhere like `/help`.
 The module talks to a `RiotStats` port (`valorant(id)`, `lol(id, platform)`) and a small
-`KeyValueStore` slice; `apps/bot/src/riot/` implements the port (clients: ADR 8). Without `RIOT_API_KEY` the
-port is `null` and both commands answer that stats are off.
+`KeyValueStore` slice; `apps/bot/src/riot/` implements the port (clients: ADR 8). Each game has its own key
+(`RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`); the port omits a game without its key and that command answers that
+stats are off.
 
 - **Input.** `Name#TAG` is split on the last `#`: name 3 to 16 characters, tag 3 to 5 letters or digits.
   `/valorant` takes the rest of the line, so the name may hold spaces; `/lol` quotes such a name in the
@@ -720,8 +721,9 @@ port is `null` and both commands answer that stats are off.
 - **Rate limits.** A budget of 30 lookups per minute for all users together (`riot:global`, a fixed window)
   answers "za chwilę" when spent. A per-user cooldown (`riot:user:<id>`, 10 s) comes after the shared pause check, so a
   blocked user does not use it up. A 429 stores the deadline `now + Retry-After` (10 s without the header or with a zero one, at most 120 s)
-  as the value of `riot:retry-after`, with the same duration as its TTL; until then every lookup answers
-  "Spróbuj za N s" without calling Riot.
+  as the value of `riot:retry-after:<game>`, with the same duration as its TTL; Riot limits each key on its own,
+  so the pause covers only that game, and until it ends that game's lookups answer "Spróbuj za N s" without
+  calling Riot.
 - **Errors.** 404 is "not found", 401 and 403 are "the key has no access", 429 is the pause above, and
   timeouts, 5xx and malformed answers are "Riot does not respond". A development key gets a 403 on
   `val/match/v1`, so `/valorant` with one answers that match history needs a production key; `/lol` says the
