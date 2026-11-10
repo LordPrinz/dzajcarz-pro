@@ -8,6 +8,7 @@ import {
 import {
   createDb,
   createDzajcoRepository,
+  createGuildDataRepository,
   createGuildSettingsRepository,
   createModerationRepository,
   createModuleToggleRepository,
@@ -41,6 +42,7 @@ import { createScheduleVoice } from "./discord/schedule.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleEnabled } from "./event-scope.ts";
+import { createGuildCleanup } from "./guild-cleanup.ts";
 import { gatewayReady, startHealthServer } from "./health.ts";
 import { runHealthcheck } from "./healthcheck.ts";
 import { createModuleGate } from "./module-gate.ts";
@@ -218,6 +220,15 @@ attachHandlers(client, {
   cooldowns: createRedisStore(redis),
   logger,
 });
+
+client.on(
+  Events.GuildDelete,
+  createGuildCleanup(
+    createGuildDataRepository(sql),
+    [prefixes.forget, timeZones.forget, gate.forget],
+    logger.child({ component: "guild-cleanup" }),
+  ),
+);
 
 client.once(Events.ClientReady, (ready) => {
   logger.info("Logged in", {

@@ -98,12 +98,6 @@ function createStore(zones: Zones = {}): ScheduledMessageStore & {
         .filter((row) => row.guildId === guildId)
         .sort((a, b) => a.time.localeCompare(b.time) || a.id - b.id);
     },
-    async removeGuild(guildId) {
-      const before = rows.length;
-      for (let i = rows.length - 1; i >= 0; i--)
-        if (rows[i]?.guildId === guildId) rows.splice(i, 1);
-      return before - rows.length;
-    },
     async remove(guildId, id) {
       const index = rows.findIndex((row) => row.guildId === guildId && row.id === id);
       if (index < 0) return false;
@@ -1138,49 +1132,5 @@ describe("sending, under load and at the edges", () => {
     });
     await s.fire();
     expect(s.dmSends[0]?.content).toBe(`Hej\n-# Zaplanowana wiadomość z serwera ${OTHER_GUILD}.`);
-  });
-});
-
-describe("leaving a server", () => {
-  const forget = (s: ReturnType<typeof setup>) => {
-    const handler = s.module.events?.find((event) => event.event === "guildDelete");
-    if (!handler) throw new Error("no guildDelete handler");
-    expect(handler.alwaysRun).toBe(true);
-    return handler.run({ id: GUILD });
-  };
-
-  test("deletes that server's messages and keeps the others", async () => {
-    const s = setup();
-    await s.schedule({
-      time: "19:00",
-      content: "a",
-      target: { kind: "channel", channelId: GENERAL },
-    });
-    await s.schedule({ time: "20:00", content: "b", target: { kind: "dm", userId: MEMBER } });
-    await s.schedule({
-      guildId: OTHER_GUILD,
-      time: "19:00",
-      content: "c",
-      target: { kind: "dm", userId: MEMBER },
-    });
-    await forget(s);
-    expect(s.store.rows.map((row) => row.guildId)).toEqual([OTHER_GUILD]);
-    expect(s.infos).toEqual([
-      {
-        message: "Removed the scheduled messages of a server the bot left",
-        fields: { guildId: GUILD, removed: 2 },
-      },
-    ]);
-  });
-
-  test("a failing store is logged, not thrown", async () => {
-    const s = setup();
-    s.store.removeGuild = async () => {
-      throw new Error("database is down");
-    };
-    await forget(s);
-    expect(s.warnings.map((entry) => entry.message)).toEqual([
-      "Could not remove the scheduled messages of a server the bot left",
-    ]);
   });
 });

@@ -7,7 +7,6 @@ import {
   DISCORD_LIMITS,
   defineButton,
   defineCommand,
-  defineEvent,
   defineModal,
   defineSubcommand,
   fitLines,
@@ -60,8 +59,6 @@ export interface ScheduledMessageStore {
   list(guildId: string): Promise<ScheduledMessage[]>;
   /** False when the guild has no message with that id. */
   remove(guildId: string, id: number): Promise<boolean>;
-  /** Deletes every message of the guild; resolves how many there were. */
-  removeGuild(guildId: string): Promise<number>;
   /**
    * At most `limit` messages, of every guild, whose time of day is the minute `at` falls on in that guild's
    * time zone, each with the date on that guild's clock.
@@ -568,34 +565,9 @@ export function createMessagesModule({
     },
   });
 
-  // A server the bot left would only make every row fail daily, and its text should not outlive the bot there.
-  const forgetGuild = defineEvent({
-    name: "messages-forget-guild",
-    event: "guildDelete",
-    // The toggles do not matter here: a server the bot left keeps nothing.
-    alwaysRun: true,
-    run: async (guild: { id: string }) => {
-      try {
-        const removed = await store.removeGuild(guild.id);
-        if (removed > 0) {
-          logger.info("Removed the scheduled messages of a server the bot left", {
-            guildId: guild.id,
-            removed,
-          });
-        }
-      } catch (error) {
-        logger.warn("Could not remove the scheduled messages of a server the bot left", {
-          guildId: guild.id,
-          error,
-        });
-      }
-    },
-  });
-
   return {
     name: MODULE_NAME,
     commands: [messages, dm],
-    events: [forgetGuild],
     modals: [addForm],
     components: [optOutButton],
     dispose: stop,

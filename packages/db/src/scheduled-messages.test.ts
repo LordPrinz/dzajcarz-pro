@@ -128,16 +128,6 @@ describe.skipIf(!sql)("scheduled message repository", () => {
     expect(await repo().remove(guild, message.id)).toBe(false);
   });
 
-  test("removeGuild deletes every message of that guild and no other", async () => {
-    await add(guild, "19:00", "A");
-    await add(guild, "20:00", "B", dmTo(member));
-    await add(otherGuild, "19:00", "C");
-    expect(await repo().removeGuild(guild)).toBe(2);
-    expect(await count(guild)).toBe(0);
-    expect(await count(otherGuild)).toBe(1);
-    expect(await repo().removeGuild(guild)).toBe(0);
-  });
-
   test("add refuses a guild at its cap", async () => {
     for (let i = 0; i < 3; i++) await add(guild, `1${i}:00`, `${i}`);
     const result = await repo().add(
