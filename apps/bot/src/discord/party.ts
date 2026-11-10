@@ -2,6 +2,7 @@ import type {
   EveryoneAccess,
   PartyChannels,
   PartyChat,
+  PartyGuild,
   PartyInvites,
   PartyPermissions,
 } from "@dzajcarz/module-party";
@@ -229,6 +230,10 @@ export function createPartyPermissions(client: Client): PartyPermissions {
       await channel.setName(name, reason);
     },
 
+    async channelName(channelId) {
+      return (await voiceChannel(channelId)).name;
+    },
+
     async disconnect(guildId, userId, channelId, reason) {
       try {
         const member = await memberOf(guildId, userId);
@@ -264,6 +269,21 @@ export function createPartyPermissions(client: Client): PartyPermissions {
       const channel = await voiceChannel(channelId);
       const member = await memberOf(guildId, userId);
       return channel.permissionsFor(member).has(PermissionFlagsBits.ManageChannels);
+    },
+  };
+}
+
+export function createPartyGuild(client: Client): PartyGuild {
+  return {
+    async memberPermissions(guildId, userId) {
+      const guild = await client.guilds.fetch(guildId);
+      try {
+        // The member's own guild-level bits: unlike `permissionsIn(channel)`, no overwrite is mixed in.
+        return (await guild.members.fetch(userId)).permissions.bitfield;
+      } catch (error) {
+        if (hasCode(error, UNKNOWN_MEMBER)) return 0n;
+        throw error;
+      }
     },
   };
 }

@@ -53,6 +53,9 @@ export interface PartyRepository {
   transferOwner(channelId: string, expectedOwnerId: string, newOwnerId: string): Promise<boolean>;
 }
 
+/** Postgres SQLSTATE of a unique index violation; Bun.SQL puts it in `errno`. */
+const UNIQUE_VIOLATION = "23505";
+
 const toArea = (row: PartyAreaRow): PartyArea => ({
   guildId: row.guild_id,
   categoryId: row.category_id,
@@ -176,17 +179,23 @@ export function createPartyRepository(sql: SQL): PartyRepository {
     },
 
     async transferOwner(channelId, expectedOwnerId, newOwnerId) {
-      const updated = await sql<PartyChannelRow[]>`
-        UPDATE party_channel SET owner_id = ${newOwnerId}
-        WHERE channel_id = ${channelId}
-          AND owner_id = ${expectedOwnerId}
-          AND NOT EXISTS (
-            SELECT 1 FROM party_channel other
-            WHERE other.guild_id = party_channel.guild_id AND other.owner_id = ${newOwnerId}
-          )
-        RETURNING *
-      `;
-      return updated.length > 0;
+      try {
+        const updated = await sql<PartyChannelRow[]>`
+          UPDATE party_channel SET owner_id = ${newOwnerId}
+          WHERE channel_id = ${channelId}
+            AND owner_id = ${expectedOwnerId}
+            AND NOT EXISTS (
+              SELECT 1 FROM party_channel other
+              WHERE other.guild_id = party_channel.guild_id AND other.owner_id = ${newOwnerId}
+            )
+          RETURNING *
+        `;
+        return updated.length > 0;
+      } catch (error) {
+        // The NOT EXISTS check cannot see a handover that commits at the same moment; the unique index can.
+        if ((error as { errno?: unknown }).errno === UNIQUE_VIOLATION) return false;
+        throw error;
+      }
     },
   };
 }

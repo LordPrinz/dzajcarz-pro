@@ -33,6 +33,7 @@ import { createDirectMessages, createPanelMessages, createVoiceChannels } from "
 import {
   createPartyChannels,
   createPartyChat,
+  createPartyGuild,
   createPartyInvites,
   createPartyPermissions,
 } from "./discord/party.ts";
@@ -174,6 +175,7 @@ const modules = createModules({
   partyAreas: createPartyRepository(sql),
   partyChannels: createPartyChannels(client),
   partyPermissions: createPartyPermissions(client),
+  partyGuild: createPartyGuild(client),
   partyChat: createPartyChat(client),
   partyInvites: createPartyInvites(client),
   scheduler: createScheduler(),
