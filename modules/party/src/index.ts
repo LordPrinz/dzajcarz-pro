@@ -1220,7 +1220,7 @@ export function createPartyModule({
     if (name.replace(INVISIBLE, "").replace(BLANK_FILLERS, "").trim() === "") {
       throw new UserError("Nazwa musi zawierać widoczne znaki.");
     }
-    if ([...name].length > MAX_NAME_LENGTH) {
+    if (characterCount(name) > MAX_NAME_LENGTH) {
       throw new UserError(`Nazwa może mieć najwyżej ${MAX_NAME_LENGTH} znaków.`);
     }
     const { channel, reason } = await controlledChannel(ctx, "rename");

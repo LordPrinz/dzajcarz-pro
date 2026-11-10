@@ -214,8 +214,17 @@ describe("reactions", () => {
 
   test("slash: no response message to react to is fine", async () => {
     const interaction = fakeInteraction([], null);
-    Object.assign(interaction, { reply: async () => ({ resource: null }) });
-    await contextFromInteraction(interaction).reply({ content: "ok", reactions: EMOJI });
+    const calls: unknown[] = [];
+    Object.assign(interaction, {
+      reply: async (options: unknown) => {
+        calls.push(options);
+        return { resource: null };
+      },
+    });
+    await expect(
+      contextFromInteraction(interaction).reply({ content: "ok", reactions: EMOJI }),
+    ).resolves.toBeUndefined();
+    expect(calls[0]).toMatchObject({ content: "ok" });
   });
 
   test("prefix: reacts to the sent reply", async () => {

@@ -1,6 +1,9 @@
 import { canonicalTimeZone, DEFAULT_TIME_ZONE, prefixProblem } from "@dzajcarz/core";
 import { z } from "zod";
 
+/** Nine and twenty-one o'clock: the "Lato z Radiem" times. */
+export const DEFAULT_SCHEDULED_SONG_CRON = "0 9,21 * * *";
+
 const snowflake = z.string().regex(/^\d{17,20}$/, "expected a Discord id (17–20 digits)");
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
@@ -79,7 +82,7 @@ const EnvFields = z.object({
   // When the scheduled song plays (five-field cron, read on each server's clock, see /timezone).
   SCHEDULED_SONG_CRON: z
     .string()
-    .default("0 9,21 * * *")
+    .default(DEFAULT_SCHEDULED_SONG_CRON)
     .refine(isCron, "expected a cron expression that fires"),
   // The time zone of servers that did not choose one with /timezone.
   DEFAULT_TIME_ZONE: z

@@ -1,5 +1,6 @@
 import type { DirectMessages, PanelMessages, VoiceChannels } from "@dzajcarz/module-music";
 import { type Client, RESTJSONErrorCodes } from "discord.js";
+import { sendDirectMessage } from "./direct.ts";
 import { hasCode } from "./errors.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
@@ -18,10 +19,7 @@ export function createVoiceChannels(client: Client): VoiceChannels {
 }
 
 function isUnknown(error: unknown): boolean {
-  return (
-    hasCode(error, RESTJSONErrorCodes.UnknownMessage) ||
-    hasCode(error, RESTJSONErrorCodes.UnknownChannel)
-  );
+  return hasCode(error, RESTJSONErrorCodes.UnknownMessage, RESTJSONErrorCodes.UnknownChannel);
 }
 
 export function createPanelMessages(client: Client): PanelMessages {
@@ -76,14 +74,7 @@ export function createDirectMessages(client: Client): DirectMessages {
   return {
     async send(userId, message) {
       const { content, embeds, components } = toReplyPayload(message);
-      try {
-        const user = await client.users.fetch(userId);
-        await user.send({ content, embeds, components, allowedMentions: NO_MENTIONS });
-        return true;
-      } catch (error) {
-        if (hasCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
-        throw error;
-      }
+      return sendDirectMessage(client, userId, { content, embeds, components });
     },
   };
 }

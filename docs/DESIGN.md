@@ -60,9 +60,8 @@ Replies carry `components` as plain data; handlers are `defineButton` / `defineS
 `BotModule.components`. A click is routed by `custom_id` (`<module>:<component>:<owner>:<data>`), checked
 against the module toggle like a command, and refused ephemerally for anyone but the member who ran the
 command (`owner`). Small state rides in `<data>`; larger state goes to `KeyValueStore` for 15 minutes and
-an expired one answers "To menu wygasło". The state store (`createComponentStateStore`) is available in
-core but not wired into the composition root: the first module that needs it creates one from the
-`KeyValueStore` it is given. `createPaginator` renders `◀ | Strona N/M | ▶`; its `data` shares the
+an expired one answers "To menu wygasło". The state store (`createComponentStateStore`) lives in core; a module
+creates one from the storage it is given (music does, through `componentState` in the composition root). `createPaginator` renders `◀ | Strona N/M | ▶`; its `data` shares the
 100-character `custom_id` with the names, the owner id and the page number, so keep it short or pass a state
 store key. A click that the handler leaves unanswered is acknowledged automatically. Slash and prefix
 replies work alike. See ADR 6.
@@ -190,7 +189,7 @@ abbreviations (`CET`) are refused, since Postgres reads a bare offset with the o
 the zone and what its clock reads now, `reset` goes back to `DEFAULT_TIME_ZONE` (`Europe/Warsaw`), which is
 also the zone outside servers. The zone must also be known to Postgres (`pg_timezone_names`), whose tzdata
 can lack names the runtime accepts; scheduled messages are converted there. There is no autocomplete for the
-zone (core has none yet); the option description and the refusal give examples. Modules get the zone through the `GuildTimeZones` port from core; apps/bot
+zone; the option description and the refusal give examples. Modules get the zone through the `GuildTimeZones` port from core; apps/bot
 caches it in Redis like the prefix (`createGuildSettingCache`).
 
 ### Leaving a server
@@ -357,7 +356,7 @@ created it, never an existing one that may have people in it.
 
 When the owner leaves a channel that still has people, ownership passes to the first remaining member who
 owns no other channel in the server (`transferOwner`); if nobody qualifies the owner stays. Controls built
-on the owner (#7) therefore follow whoever is in charge now.
+on the owner therefore follow whoever is in charge now.
 
 A party channel is deleted when its last person (bots do not count) leaves. The row is dropped only after
 Discord confirms the delete (a channel that is already gone counts as deleted); if Discord refuses, the row
@@ -510,7 +509,7 @@ early still counts as the coming one) and reads at most 500 rows due then across
 when that is hit): Postgres turns the instant into each server's wall clock (`guild_settings.time_zone`,
 else `DEFAULT_TIME_ZONE`) and compares it with `time_of_day`, so one query serves every zone. It sends them
 five at a time. Each row is handled on its own: a failure is a warning
-with the row id, and the whole tick is wrapped too.
+with the row id, and the whole tick is wrapped too. For each row, in order:
 
 - skip a server the bot is no longer in;
 - the module toggle: a channel message asks for its channel, a DM for the server as a whole (it has no

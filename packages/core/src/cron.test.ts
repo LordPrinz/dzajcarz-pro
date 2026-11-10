@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createCronScheduler, type StartCronJob } from "./cron.ts";
+import { createCronScheduler, type StartCronJob, tickMinute } from "./cron.ts";
 
 const WARSAW = "Europe/Warsaw";
 const NINE_AND_TWENTY_ONE = "0 9,21 * * *";
@@ -100,5 +100,19 @@ describe("createCronScheduler", () => {
   test("works with the real Bun.cron", () => {
     const stop = createCronScheduler().every(NINE_AND_TWENTY_ONE, WARSAW, () => {});
     expect(() => stop()).not.toThrow();
+  });
+});
+
+describe("tickMinute", () => {
+  const minuteOf = (iso: string) => tickMinute(new Date(iso)).toISOString();
+
+  test("an on-time or late tick keeps its own minute", () => {
+    expect(minuteOf("2026-01-01T09:00:00.000Z")).toBe("2026-01-01T09:00:00.000Z");
+    expect(minuteOf("2026-01-01T09:00:54.999Z")).toBe("2026-01-01T09:00:00.000Z");
+  });
+
+  test("a tick up to 5 s early belongs to the coming minute", () => {
+    expect(minuteOf("2026-01-01T09:00:55.000Z")).toBe("2026-01-01T09:01:00.000Z");
+    expect(minuteOf("2026-01-01T09:00:59.999Z")).toBe("2026-01-01T09:01:00.000Z");
   });
 });

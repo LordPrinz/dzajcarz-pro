@@ -31,6 +31,17 @@ export function createCronScheduler(start: StartCronJob = Bun.cron): CronSchedul
   };
 }
 
+/** How early a minute tick may fire and still count as the coming minute. */
+const EARLY_TICK_MS = 5_000;
+
+/**
+ * The minute a cron tick belongs to. A tick up to 5 s early counts for the coming minute; a late one keeps
+ * its own, so a tick delayed past :30 does not skip ahead.
+ */
+export function tickMinute(now: Date): Date {
+  return new Date(Math.floor((now.getTime() + EARLY_TICK_MS) / 60_000) * 60_000);
+}
+
 /**
  * Whether a five-field cron `expression` fires at the minute starting at `minute` (seconds dropped) on the
  * wall clock of `timeZone`. Lets one ticking job serve servers in different zones.

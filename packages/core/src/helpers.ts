@@ -20,6 +20,12 @@ export function requireGuild(guildId: string | null, message = GUILD_ONLY): stri
   return guildId;
 }
 
+/** Cuts to `max` code points with an ellipsis, for Discord's label, title and list-line limits. */
+export function truncate(text: string, max: number): string {
+  const points = [...text];
+  return points.length <= max ? text : `${points.slice(0, max - 1).join("")}…`;
+}
+
 /** Asks Discord about channels, so a channel id typed by a member is never trusted on its own. */
 export interface TextChannels {
   /** Whether the channel is a text or announcement channel of this guild. */

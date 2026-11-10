@@ -8,7 +8,6 @@ import {
   parseQuery,
   parseTime,
   progressLine,
-  truncate,
 } from "./format.ts";
 import { tracksWord } from "./panel.ts";
 
@@ -105,11 +104,6 @@ describe("formatting", () => {
     expect(escapeMarkdown("# big")).toBe("\\# big");
     expect(escapeMarkdown("-# small")).toBe("\\-\\# small");
     expect(escapeMarkdown("<@123> <t:1:R>")).toBe("\\<@123\\> \\<t:1:R\\>");
-  });
-
-  test("truncate counts code points", () => {
-    expect(truncate("abc", 3)).toBe("abc");
-    expect(truncate("🎵🎵🎵🎵", 3)).toBe("🎵🎵…");
   });
 
   test("only http(s) URLs pass", () => {

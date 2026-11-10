@@ -1,6 +1,6 @@
 import type { ButtonSpec, Embed } from "@dzajcarz/core";
-import { plural } from "@dzajcarz/core";
-import { escapeMarkdown, formatDuration, httpUrl, progressLine, truncate } from "./format.ts";
+import { plural, truncate } from "@dzajcarz/core";
+import { escapeMarkdown, formatDuration, httpUrl, progressLine } from "./format.ts";
 import type { LoopMode, MusicFilter, MusicTrack, PanelMessage, PlayerState } from "./ports.ts";
 
 export const PANEL_COLOR = 0x1db954;

@@ -79,12 +79,6 @@ export function escapeMarkdown(text: string): string {
   return text.replace(/[\\*_~`|>[\]()#<-]/g, "\\$&");
 }
 
-/** Cuts to `max` code points with an ellipsis, for Discord's label and title limits. */
-export function truncate(text: string, max: number): string {
-  const points = [...text];
-  return points.length <= max ? text : `${points.slice(0, max - 1).join("")}…`;
-}
-
 /** Longest link put into an embed; Discord refuses the whole message over its limit. */
 export const MAX_URL_LENGTH = 2048;
 

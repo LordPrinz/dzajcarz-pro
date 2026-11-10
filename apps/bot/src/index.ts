@@ -76,6 +76,7 @@ try {
 }
 const redis = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
 keepConnected(redis, logger);
+const redisStore = createRedisStore(redis);
 
 const guildSettings = createGuildSettingsRepository(sql);
 // Replaced by DEFAULT_TIME_ZONE and /timezone; a leftover value would otherwise be dropped without a word.
@@ -93,13 +94,13 @@ if (!(await guildSettings.isKnownTimeZone(env.DEFAULT_TIME_ZONE))) {
 }
 const prefixes = createPrefixResolver({
   settings: guildSettings,
-  cache: createRedisStore(redis),
+  cache: redisStore,
   defaultPrefix: env.BOT_PREFIX,
   logger: logger.child({ component: "prefix" }),
 });
 const timeZones = createTimeZones({
   settings: guildSettings,
-  cache: createRedisStore(redis),
+  cache: redisStore,
   defaultTimeZone: env.DEFAULT_TIME_ZONE,
   logger: logger.child({ component: "time-zone" }),
 });
@@ -107,7 +108,7 @@ const timeZones = createTimeZones({
 const moduleToggleRepository = createModuleToggleRepository(sql);
 const gate = createModuleGate({
   toggles: moduleToggleRepository,
-  cache: createRedisStore(redis),
+  cache: redisStore,
   logger: logger.child({ component: "module-gate" }),
 });
 
@@ -142,11 +143,10 @@ const musicPlayer =
 if (!env.LAVALINK_URL) logger.info("LAVALINK_URL is not set; music is off");
 
 // Without a key the module still loads, so its commands explain that stats for that game are off.
-const riotStore = createRedisStore(redis);
 const riotStats = createRiotStats({
   valorantApiKey: env.RIOT_VALORANT_API_KEY,
   lolApiKey: env.RIOT_LOL_API_KEY,
-  cache: riotStore,
+  cache: redisStore,
   logger: logger.child({ component: "riot" }),
 });
 if (!env.RIOT_VALORANT_API_KEY)
@@ -179,14 +179,14 @@ const modules = createModules({
   partyChat: createPartyChat(client),
   partyInvites: createPartyInvites(client),
   scheduler: createScheduler(),
-  partyLock: createRedisStore(redis),
+  partyLock: redisStore,
   presence: createPresence(client),
   clock: createClock(),
   musicPlayer,
   voiceChannels: createVoiceChannels(client),
   musicPanels: createPanelMessages(client),
   directMessages: createDirectMessages(client),
-  componentState: createRedisStore(redis),
+  componentState: redisStore,
   cron: createCronScheduler(),
   scheduleSettings: createScheduledSongRepository(sql),
   scheduleVoice: createScheduleVoice(client),
@@ -197,19 +197,19 @@ const modules = createModules({
   defaultTimeZone: env.DEFAULT_TIME_ZONE,
   dzajcoSettings: createDzajcoRepository(sql),
   dzajcoResponder: createDzajcoResponder(client, logger.child({ component: "dzajco" }), DZAJCO_GIF),
-  dzajcoStore: createRedisStore(redis),
+  dzajcoStore: redisStore,
   dzajcoChannels: createDzajcoChannels(client),
   moderationGuild: createModerationGuild(client),
   moderationLog: createModerationRepository(sql),
-  moderationDmLimit: createRedisStore(redis),
+  moderationDmLimit: redisStore,
   riotStats,
-  riotStore,
+  riotStore: redisStore,
   scheduledMessages: createScheduledMessageRepository(sql, {
     defaultTimeZone: env.DEFAULT_TIME_ZONE,
   }),
   scheduledMessageSender: createScheduledMessageSender(client),
   guildModuleEnabled: (guildId, module) => gate.isEnabled(guildId, null, module),
-  messageLock: createRedisStore(redis),
+  messageLock: redisStore,
   messageChannels: createMessageChannels(client),
   logger,
 });
@@ -219,7 +219,7 @@ attachHandlers(client, {
   prefixes,
   gate,
   botInGuild,
-  cooldowns: createRedisStore(redis),
+  cooldowns: redisStore,
   logger,
 });
 
@@ -262,7 +262,6 @@ process.on("uncaughtException", (error) => {
 });
 client.on(Events.Error, (error) => logger.error("Discord client error", { error }));
 
-const probeStore = createRedisStore(redis);
 let healthServer: ReturnType<typeof startHealthServer> | undefined;
 if (env.HEALTH_PORT !== 0) {
   try {
@@ -276,7 +275,7 @@ if (env.HEALTH_PORT !== 0) {
           await sql`select 1`;
           return true;
         },
-        redis: () => probeStore.ping(),
+        redis: () => redisStore.ping(),
       },
     });
   } catch (error) {

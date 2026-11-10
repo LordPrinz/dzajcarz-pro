@@ -7,7 +7,7 @@ import {
 } from "@dzajcarz/core";
 import { type RESTPostAPIChatInputApplicationCommandsJSONBody, Routes } from "discord.js";
 import { toSlashCommand } from "./discord/slash.ts";
-import type { DeployEnv } from "./env.ts";
+import { DEFAULT_SCHEDULED_SONG_CRON, type DeployEnv } from "./env.ts";
 import { createModules } from "./modules.ts";
 import { SCHEDULED_SONGS } from "./music/scheduled-songs.ts";
 import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
@@ -313,7 +313,7 @@ export const createDeployRegistry = () =>
       scheduleVoice: unusedServices(),
       scheduledSongPlayer: unusedServices(),
       scheduledSongs: SCHEDULED_SONGS,
-      scheduledSongCron: "0 9,21 * * *",
+      scheduledSongCron: DEFAULT_SCHEDULED_SONG_CRON,
       timeZones: unusedServices(),
       defaultTimeZone: DEFAULT_TIME_ZONE,
       dzajcoSettings: unusedServices(),

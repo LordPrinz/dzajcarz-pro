@@ -1,5 +1,6 @@
 import {
   type BotModule,
+  characterCount,
   codeBlocks,
   defineCommand,
   defineEvent,
@@ -67,7 +68,7 @@ export function createWelcomeModule({
   async function saveWelcome(guildId: string, channelId: string, message: string): Promise<string> {
     const template = message.trim();
     if (template.length === 0) throw new UserError("Treść powitania nie może być pusta.");
-    if ([...template].length > MAX_MESSAGE_LENGTH) {
+    if (characterCount(template) > MAX_MESSAGE_LENGTH) {
       throw new UserError(tooLong);
     }
     if (!(await channels.isTextChannelOf(guildId, channelId))) {
@@ -100,7 +101,7 @@ export function createWelcomeModule({
     },
     run: async (ctx) => {
       const message = ctx.values.message ?? "";
-      if ([...message.trim()].length > MAX_MESSAGE_LENGTH) {
+      if (characterCount(message.trim()) > MAX_MESSAGE_LENGTH) {
         // The member typed all of it in a form that is now gone: hand the text back so it can be pasted again.
         await ctx.reply({ content: tooLong, ephemeral: true });
         for (const chunk of codeBlocks(message))

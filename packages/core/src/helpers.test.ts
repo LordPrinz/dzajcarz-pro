@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { codeBlocks, fitLines, plural, requireGuild, UserError } from "./index.ts";
+import { codeBlocks, fitLines, plural, requireGuild, truncate, UserError } from "./index.ts";
 
 describe("requireGuild", () => {
   test("passes a guild id through and refuses a DM with the given text", () => {
@@ -45,5 +45,12 @@ describe("fitLines", () => {
     const cut = fitLines(lines, 100);
     expect(cut.length).toBeLessThanOrEqual(100);
     expect(cut.endsWith("… i jeszcze 7")).toBe(true);
+  });
+});
+
+describe("truncate", () => {
+  test("counts code points, not UTF-16 units", () => {
+    expect(truncate("abc", 3)).toBe("abc");
+    expect(truncate("🎵🎵🎵🎵", 3)).toBe("🎵🎵…");
   });
 });
