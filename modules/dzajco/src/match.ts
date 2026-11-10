@@ -4,7 +4,10 @@ const SPACELESS =
 
 const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}]`;
 
-/** Longest stretch of a message that is searched; Discord allows 4000 for Nitro and nobody says "what" later. */
+/**
+ * Longest stretch of a message that is searched, after emoji and links are removed; Discord allows 4000 for
+ * Nitro and nobody says "what" later.
+ */
 const MAX_SEARCHED_LENGTH = 2000;
 
 /**
@@ -18,6 +21,11 @@ function fold(text: string): string {
     .normalize("NFC")
     .toLowerCase()
     .replace(/(.)\1+/gsu, "$1");
+}
+
+/** Custom emoji and http(s) links carry names and paths ("<:co:1>", "https://x/what") that nobody said. */
+function withoutMarkup(text: string): string {
+  return text.replace(/<a?:\w+:\d+>/gu, " ").replace(/https?:\/\/\S+/giu, " ");
 }
 
 function escapeRegExp(character: string): string {
@@ -63,5 +71,8 @@ export function createWhatMatcher(words: readonly string[]): (text: string) => b
   if (spaceless.length > 0) alternatives.push(`(?:${spaceless.join("|")})`);
   if (alternatives.length === 0) return () => false;
   const pattern = new RegExp(alternatives.join("|"), "u");
-  return (text) => pattern.test(fold(text.slice(0, MAX_SEARCHED_LENGTH)));
+  return (text) =>
+    pattern.test(
+      fold(withoutMarkup(text.slice(0, 2 * MAX_SEARCHED_LENGTH)).slice(0, MAX_SEARCHED_LENGTH)),
+    );
 }

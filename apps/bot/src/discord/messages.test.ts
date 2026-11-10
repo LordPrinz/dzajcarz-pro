@@ -23,6 +23,7 @@ function discordError(code: number): Error {
 
 function clientWith(options: {
   channel?: unknown;
+  fetchChannel?: () => Promise<unknown>;
   member?: () => Promise<unknown>;
   guildName?: string;
 }): Client {
@@ -31,7 +32,7 @@ function clientWith(options: {
     members: { fetch: options.member ?? (async () => null) },
   };
   return {
-    channels: { fetch: async () => options.channel ?? null },
+    channels: { fetch: options.fetchChannel ?? (async () => options.channel ?? null) },
     guilds: { cache: new Map([[GUILD, guild]]) },
   } as unknown as Client;
 }
@@ -49,6 +50,22 @@ describe("scheduled message sender: channels", () => {
     const sender = createScheduledMessageSender(clientWith({ channel: textChannel(GUILD, sent) }));
     await sender.toChannel(GUILD, CHANNEL, "@everyone hej");
     expect(sent).toEqual([{ content: "@everyone hej", allowedMentions: NO_MENTIONS }]);
+  });
+
+  test("reports a channel Discord no longer knows as gone", async () => {
+    const fetchChannel = async () => {
+      throw discordError(RESTJSONErrorCodes.UnknownChannel);
+    };
+    const sender = createScheduledMessageSender(clientWith({ fetchChannel }));
+    expect(await sender.toChannel(GUILD, CHANNEL, "x")).toBe("gone");
+  });
+
+  test("any other Discord error, such as Missing Access, still rejects", async () => {
+    const fetchChannel = async () => {
+      throw discordError(RESTJSONErrorCodes.MissingAccess);
+    };
+    const sender = createScheduledMessageSender(clientWith({ fetchChannel }));
+    await expect(sender.toChannel(GUILD, CHANNEL, "x")).rejects.toThrow("Discord error 50001");
   });
 
   test("refuses a channel of another guild, a DM channel, a voice channel and a missing one", async () => {

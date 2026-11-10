@@ -131,6 +131,8 @@ function setup(
     disabledChannels?: string[];
     disabledGuilds?: string[];
     failChannels?: string[];
+    /** Channels Discord no longer knows. */
+    goneChannels?: string[];
     closedDms?: string[];
     botGuilds?: string[];
     failDue?: boolean;
@@ -162,9 +164,11 @@ function setup(
   };
   const sender: ScheduledMessageSender = {
     async toChannel(guildId, channelId, content) {
-      if (options.failChannels?.includes(channelId)) throw new Error("Unknown Channel");
+      if (options.failChannels?.includes(channelId)) throw new Error("Missing Permissions");
+      if (options.goneChannels?.includes(channelId)) return "gone";
       await options.onSend?.();
       channelSends.push({ guildId, channelId, content });
+      return "sent";
     },
     async toMember(guildId, userId, content, components) {
       if (options.closedDms?.includes(userId)) return false;
@@ -579,6 +583,22 @@ describe("sending", () => {
       },
     ]);
     expect(s.warnings).toEqual([]);
+  });
+
+  test("a message whose channel is gone is deleted and logged at info", async () => {
+    const s = setup({ goneChannels: [GENERAL] });
+    const gone = await s.schedule({
+      time: "19:00",
+      content: "x",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    await s.schedule({ time: "19:00", content: "y", target: { kind: "channel", channelId: NEWS } });
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["y"]);
+    expect(s.warnings).toEqual([]);
+    expect(s.infos[0]?.message).toBe("Scheduled message deleted: its channel no longer exists");
+    expect(s.infos[0]?.fields).toMatchObject({ id: gone.id, guildId: GUILD });
+    expect((await s.store.list(GUILD)).map((m) => m.id)).not.toContain(gone.id);
   });
 
   test("one failing message is logged and the others still go out", async () => {

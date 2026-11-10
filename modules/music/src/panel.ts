@@ -70,13 +70,34 @@ export function panelMessage(state: PlayerState, buttons: PanelButtons): PanelMe
   };
 }
 
-/** One line of `/queue`: `3. [Title](link) · 3:21 · @member`. */
-export function queueLine(index: number, track: MusicTrack): string {
+/** A link longer than this is not worth its share of the embed; the title stays without it. */
+const MAX_QUEUE_LINK_LENGTH = 300;
+/** Room for one `/queue` page's lines inside the 4096-character description, after the "now playing" head. */
+const QUEUE_LINES_BUDGET = 3700;
+
+/** One line of `/queue`: `3. [Title](link) · 3:21 · @member`; `withLink` false keeps only the title. */
+function queueLine(index: number, track: MusicTrack, withLink: boolean): string {
   const title = escapeMarkdown(truncate(track.title, 60));
-  const url = httpUrl(track.uri);
+  const url = withLink ? httpUrl(track.uri) : undefined;
   const label = url ? `[${title}](${url.replaceAll(")", "%29")})` : title;
   const length = track.isStream ? "na żywo" : formatDuration(track.durationMs);
   return `\`${index}.\` ${label} · ${length} · <@${track.requesterId}>`;
+}
+
+/**
+ * The lines of one `/queue` page, numbered from `firstIndex`. A long link is dropped, and when the page would
+ * still pass the budget the links go from the last line backwards, so the description always fits.
+ */
+export function queueLines(firstIndex: number, tracks: readonly MusicTrack[]): string[] {
+  const linked = tracks.map((track) => (httpUrl(track.uri)?.length ?? 0) <= MAX_QUEUE_LINK_LENGTH);
+  const render = () =>
+    tracks.map((track, i) => queueLine(firstIndex + i, track, linked[i] ?? false));
+  let lines = render();
+  for (let i = tracks.length - 1; i >= 0 && lines.join("\n").length > QUEUE_LINES_BUDGET; i--) {
+    linked[i] = false;
+    lines = render();
+  }
+  return lines;
 }
 
 /** 1 utwór, 2 utwory, 5 utworów, 22 utwory. */

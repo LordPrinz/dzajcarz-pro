@@ -141,12 +141,18 @@ export function createLolStats({ apiKey, store, logger, fetch = globalThis.fetch
       );
       const puuid = encodeURIComponent(account.puuid);
       // The summoner goes first on its own: a 429 or 403 here stops the other requests from being sent.
+      // A 404 here means the account exists but has no League profile on this platform, not "no such player".
       const summoner = await riot(
         `summoner:${platform}:${account.puuid}`,
         `${host}/lol/summoner/v4/summoners/by-puuid/${puuid}`,
         SHORT_TTL_MS,
         SummonerSchema,
-      );
+      ).catch((error: unknown) => {
+        if (error instanceof RiotLookupError && error.kind === "not-found") {
+          throw new RiotLookupError("no-region-profile");
+        }
+        throw error;
+      });
       const [entries, mastery, ddragon] = await Promise.all([
         riot(
           `entries:${platform}:${account.puuid}`,

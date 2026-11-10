@@ -31,11 +31,17 @@ export function createMessageChannels(client: Client): MessageChannels {
 export function createScheduledMessageSender(client: Client): ScheduledMessageSender {
   return {
     async toChannel(guildId, channelId, content) {
-      const channel = await client.channels.fetch(channelId);
-      if (!channel?.isTextBased() || channel.isDMBased() || channel.guildId !== guildId) {
-        throw new Error(`Channel ${channelId} is not a text channel of guild ${guildId}`);
+      try {
+        const channel = await client.channels.fetch(channelId);
+        if (!channel?.isTextBased() || channel.isDMBased() || channel.guildId !== guildId) {
+          throw new Error(`Channel ${channelId} is not a text channel of guild ${guildId}`);
+        }
+        await channel.send({ content, allowedMentions: NO_MENTIONS });
+        return "sent";
+      } catch (error) {
+        if (hasCode(error, RESTJSONErrorCodes.UnknownChannel)) return "gone";
+        throw error;
       }
-      await channel.send({ content, allowedMentions: NO_MENTIONS });
     },
 
     async toMember(guildId, userId, content, components) {

@@ -101,6 +101,12 @@ describe("formatting", () => {
     expect(escapeMarkdown("**a_b** [x](y) `c`")).toBe("\\*\\*a\\_b\\*\\* \\[x\\]\\(y\\) \\`c\\`");
   });
 
+  test("headings, subtext and mention or timestamp markup in titles are escaped", () => {
+    expect(escapeMarkdown("# big")).toBe("\\# big");
+    expect(escapeMarkdown("-# small")).toBe("\\-\\# small");
+    expect(escapeMarkdown("<@123> <t:1:R>")).toBe("\\<@123\\> \\<t:1:R\\>");
+  });
+
   test("truncate counts code points", () => {
     expect(truncate("abc", 3)).toBe("abc");
     expect(truncate("🎵🎵🎵🎵", 3)).toBe("🎵🎵…");

@@ -9,6 +9,7 @@ import {
   defineCommand,
   defineEvent,
   defineSelect,
+  type LogFields,
   type Logger,
   PUBLIC_OWNER,
   requireGuild,
@@ -29,7 +30,7 @@ import {
   LOOP_LABELS,
   PANEL_COLOR,
   panelMessage,
-  queueLine,
+  queueLines,
   settingsLine,
   trackEmbed,
   tracksWord,
@@ -136,6 +137,13 @@ export function createMusicModule({
   // Commands are guild-only by default and the components declare guildOnly, so this never fires.
   const guildOf = (ctx: Pick<CommandContext, "guildId">) =>
     requireGuild(ctx.guildId, "Muzyka działa tylko na serwerze.");
+
+  /** What the logs may say about a query: what it was, never what the member typed. */
+  function describeQuery(query: MusicQuery): LogFields {
+    return query.kind === "search"
+      ? { kind: "search", length: query.text.length }
+      : { kind: query.kind };
+  }
 
   /** The member's input as a query; a link to another site is refused here. */
   function queryOf(input: string, emptyText: string): MusicQuery {
@@ -538,9 +546,7 @@ export function createMusicModule({
       if (!state?.current) return { content: NOTHING_PLAYING, pageCount: 1 };
       const pageCount = Math.max(1, Math.ceil(state.upcoming.length / QUEUE_PAGE_SIZE));
       const start = page * QUEUE_PAGE_SIZE;
-      const lines = state.upcoming
-        .slice(start, start + QUEUE_PAGE_SIZE)
-        .map((track, index) => queueLine(start + index + 1, track));
+      const lines = queueLines(start + 1, state.upcoming.slice(start, start + QUEUE_PAGE_SIZE));
       const total = state.upcoming.reduce((sum, track) => sum + track.durationMs, 0);
       return {
         embeds: [
@@ -586,7 +592,11 @@ export function createMusicModule({
       await ctx.defer();
       const result = await player.search(query, ctx.user.id);
       if (result.kind === "error") {
-        logger.info("Loading a track failed", { guildId, query, message: result.message });
+        logger.info("Loading a track failed", {
+          guildId,
+          query: describeQuery(query),
+          message: result.message,
+        });
         throw new UserError("Nie udało się wczytać tego utworu.");
       }
       if (result.kind === "empty" || result.tracks.length === 0) {
@@ -647,7 +657,11 @@ export function createMusicModule({
       await ctx.defer({ ephemeral: true });
       const result = await player.search(query, ctx.user.id);
       if (result.kind === "error") {
-        logger.info("Search failed", { guildId, query, message: result.message });
+        logger.info("Search failed", {
+          guildId,
+          query: describeQuery(query),
+          message: result.message,
+        });
         throw new UserError("Wyszukiwanie się nie udało.");
       }
       const tracks = result.kind === "empty" ? [] : result.tracks.slice(0, MAX_SEARCH_RESULTS);

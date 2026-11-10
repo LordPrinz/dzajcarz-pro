@@ -74,8 +74,11 @@ export interface ScheduledMessageStore {
 
 /** Delivers scheduled messages; channel and member ids come from members, so the adapter checks them. */
 export interface ScheduledMessageSender {
-  /** Posts with no mentions at all; throws when the channel is not a text channel of the guild. */
-  toChannel(guildId: string, channelId: string, content: string): Promise<void>;
+  /**
+   * Posts with no mentions at all; throws when the channel is not a text channel of the guild. "gone" when
+   * Discord no longer knows the channel; any other failure throws.
+   */
+  toChannel(guildId: string, channelId: string, content: string): Promise<"sent" | "gone">;
   /**
    * DMs a member of the guild, allowing a ping of that member only; `components` go under the message.
    * False when the member does not accept DMs from the bot.
@@ -364,7 +367,15 @@ export function createMessagesModule({
     if (!(await lock.setIfAbsent(key, "1", LOCK_TTL_MS))) return;
 
     if (target.kind === "channel") {
-      await sender.toChannel(guildId, target.channelId, message.content);
+      const result = await sender.toChannel(guildId, target.channelId, message.content);
+      if (result === "gone") {
+        // It would fail the same way every day; a missing permission may be fixed, so only this deletes.
+        await store.remove(guildId, message.id);
+        logger.info("Scheduled message deleted: its channel no longer exists", {
+          id: message.id,
+          guildId,
+        });
+      }
       return;
     }
     if ((await sender.memberStatus(guildId, target.userId)) !== "member") return;

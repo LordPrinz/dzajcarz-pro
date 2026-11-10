@@ -71,9 +71,12 @@ export function progressLine(positionMs: number, durationMs: number, isStream: b
   return `${bar} ${formatDuration(Math.min(positionMs, durationMs))} / ${formatDuration(durationMs)}`;
 }
 
-/** Track titles are user-controlled text: keep them from turning into Markdown (or breaking a link). */
+/**
+ * Track titles are user-controlled text: keep them from turning into Markdown (or breaking a link). `#` and
+ * `-` start a heading, a list or `-#` subtext at the head of a line, and `<` opens `<@…>` and `<t:…>`.
+ */
 export function escapeMarkdown(text: string): string {
-  return text.replace(/[\\*_~`|>[\]()]/g, "\\$&");
+  return text.replace(/[\\*_~`|>[\]()#<-]/g, "\\$&");
 }
 
 /** Cuts to `max` code points with an ellipsis, for Discord's label and title limits. */
