@@ -367,10 +367,13 @@ export function createPartyChat(client: Client, now: () => number = Date.now): P
       const messages = await channel.messages.fetch({ limit: HISTORY_PAGE });
       return [...messages.values()].map((message) => ({
         id: message.id,
+        authorId: message.author.id,
         pinned: message.pinned,
         system: message.system,
       }));
     },
+
+    selfId: () => client.user?.id,
 
     async deleteMessages(channelId, messageIds) {
       const channel = await chatOf(channelId);

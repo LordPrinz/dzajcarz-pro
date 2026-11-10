@@ -124,11 +124,14 @@ export interface PartyChat {
   /** The most recent messages (up to 100), newest first. */
   recentMessages(channelId: string): Promise<ChatMessage[]>;
   deleteMessages(channelId: string, messageIds: string[]): Promise<void>;
+  /** The bot's own user id, to tell its messages from members'. Undefined before the client is ready. */
+  selfId(): string | undefined;
 }
 
 /** What the cleanup needs to know about a message to decide whether to spare it. */
 export interface ChatMessage {
   id: string;
+  authorId: string;
   pinned: boolean;
   /** Joins, pins, boosts and the like: Discord does not let bots delete some of them. */
   system: boolean;
@@ -997,10 +1000,19 @@ export function createPartyModule({
     await repository.setPanelMessage(area.joinChannelId, null);
   }
 
-  /** Pinned and system messages are somebody's on purpose (or not ours to delete): the sweep leaves them. */
+  /**
+   * Pinned and system messages are somebody's on purpose (or not ours to delete): the sweep leaves them.
+   * So are the bot's own, which are the now-playing panel and the notes of commands run from this chat.
+   */
   async function deleteLeftovers(joinChannelId: string, panelId: string): Promise<void> {
     const stale = (await chat.recentMessages(joinChannelId))
-      .filter((message) => message.id !== panelId && !message.pinned && !message.system)
+      .filter(
+        (message) =>
+          message.id !== panelId &&
+          !message.pinned &&
+          !message.system &&
+          message.authorId !== chat.selfId(),
+      )
       .map((message) => message.id);
     if (stale.length > 0) await chat.deleteMessages(joinChannelId, stale);
   }
@@ -1066,12 +1078,15 @@ export function createPartyModule({
       id: string;
       channelId: string;
       guildId: string | null;
+      author?: { id: string };
       pinned?: boolean;
       system?: boolean;
     }) => {
       if (!message.guildId || !commandChannels.has(message.channelId)) return;
       // System messages (joins, pins) are not ours to delete, and a pinned one was kept on purpose.
       if (message.pinned || message.system) return;
+      // The bot's own messages (panel, now-playing, notes) are not clutter; members' are.
+      if (message.author && message.author.id === chat.selfId()) return;
       try {
         const area = await repository.findAreaByJoinChannel(message.channelId);
         if (!area?.commandChannel || message.id === area.panelMessageId) return;
