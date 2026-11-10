@@ -2,7 +2,7 @@
 
 Production runs on one Docker host with [`infra/docker-compose.prod.yml`](../infra/docker-compose.prod.yml).
 The bot is a single image: the [`Dockerfile`](../Dockerfile) compiles it with `bun build --compile` into one
-binary that migrates the database, connects to Discord and deploys the slash commands. Postgres 17, Redis 8,
+binary that migrates the database, connects to Discord and deploys the slash commands. Postgres 18, Redis 8,
 Lavalink 4.2.2 and yt-cipher run next to it as separate services. Music is always on in production.
 
 Nothing is published to the network except the health endpoint, which compose always binds to
@@ -134,6 +134,23 @@ Every release leaves its image behind. Remove the bot images no container uses t
 ```bash
 docker image prune -a --filter "label=org.opencontainers.image.title=dzajcarz-bot" --filter "until=720h"
 ```
+
+### Upgrading Postgres from 17 to 18
+
+The 18 image keeps its data in a versioned subdirectory, so the volume is mounted at `/var/lib/postgresql`
+and it refuses a volume that holds a 17 cluster. Dump with a 17 container, then restore into a fresh volume:
+
+```bash
+prod stop bot postgres
+docker run -d --name pg17 -v dzajcarz-prod_postgres-data:/var/lib/postgresql/data postgres:17-alpine
+docker exec pg17 pg_dumpall -U dzajcarz > pg17.sql && docker rm -f pg17
+docker volume create dzajcarz-prod_postgres-data-pg17-backup   # then copy the old volume into it
+docker volume rm dzajcarz-prod_postgres-data
+prod up -d postgres
+docker exec -i dzajcarz-prod-postgres-1 psql -U dzajcarz -d postgres < pg17.sql   # "already exists" errors are expected
+```
+
+Keep the backup volume and `pg17.sql` until the bot has run cleanly for a day.
 
 ## Backups
 
