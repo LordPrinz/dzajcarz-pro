@@ -1,3 +1,4 @@
+import { prefixProblem } from "@dzajcarz/core";
 import { z } from "zod";
 
 const snowflake = z.string().regex(/^\d{17,20}$/, "expected a Discord id (17–20 digits)");
@@ -16,6 +17,15 @@ const flag = z.preprocess(
   (value) => (value === undefined ? false : (FLAG_VALUES[String(value)] ?? value)),
   z.boolean(),
 );
+
+/** Bun.cron.parse throws on text it cannot read and returns null for an expression that never fires. */
+function isCron(value: string): boolean {
+  try {
+    return Bun.cron.parse(value) !== null;
+  } catch {
+    return false;
+  }
+}
 
 function isTimeZone(value: string): boolean {
   try {
@@ -59,7 +69,13 @@ const EnvFields = z.object({
   DISCORD_DEV_TOKEN: optional(z.string().min(50)),
   DISCORD_DEV_CLIENT_ID: optional(snowflake),
   DISCORD_DEV_GUILD_ID: optional(snowflake),
-  BOT_PREFIX: z.string().min(1).max(5).default("!"),
+  BOT_PREFIX: z
+    .string()
+    .default("!")
+    .refine(
+      (value) => prefixProblem(value) === null,
+      "expected 1-5 characters without spaces, invisible characters or a backtick (the /prefix rule)",
+    ),
   DATABASE_URL: connectionUrl(/^postgres(ql)?$/),
   REDIS_URL: connectionUrl(/^rediss?$/),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
@@ -73,7 +89,7 @@ const EnvFields = z.object({
   SCHEDULED_SONG_CRON: z
     .string()
     .default("0 9,21 * * *")
-    .refine((value) => Bun.cron.parse(value) !== null, "expected a cron expression that fires"),
+    .refine(isCron, "expected a cron expression that fires"),
   SCHEDULED_SONG_TIMEZONE: z
     .string()
     .default("Europe/Warsaw")

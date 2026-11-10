@@ -47,20 +47,24 @@ Put that digest in `infra/docker-compose.yml` and recreate the `yt-cipher` and `
 **A youtube-plugin snapshot.** With the cipher working, every client in 1.18.2 still failed. Only the
 IOS client update on youtube-source `main` (not in a release yet) plays, so the plugin is pinned to the
 snapshot of commit `2be8e542d3f6f178e048dca565892684c2e40177` (`snapshot: true`, from
-`maven.lavalink.dev/snapshots`). Lavalink downloads it on start and deletes the old jar from the plugins
-volume. To move back to a release once one contains these fixes (anything newer than 1.18.2), set the
-version in `infra/lavalink/application.yml`, set `snapshot: false`, recreate `lavalink`, check the log
-says `Loaded 'youtube-plugin-<version>.jar'`, and run the per-client check below again.
+`maven.lavalink.dev/snapshots`). To move back to a release once one contains these fixes (anything newer
+than 1.18.2), set the version in `infra/lavalink/application.yml`, set `snapshot: false`, update the
+checksum file (below), recreate `lavalink-plugins-init` and `lavalink`, check the log says
+`Loaded 'youtube-plugin-<version>.jar'`, and run the per-client check below again.
 
-Lavalink downloads the jar at runtime and does not verify it, so we record its hash and compare after a
-deploy (`prod exec lavalink sha256sum /opt/Lavalink/plugins/*.jar`, see [Deployment](../DEPLOYMENT.md)).
-Downloaded on 2026-11-09:
+Lavalink would download the jar itself and not verify it, and a snapshot coordinate can be republished with
+different content. So `lavalink-plugins-init` (`infra/lavalink/fetch-plugin.sh`) downloads it first and
+compares it with `infra/lavalink/youtube-plugin.sha256`; on a mismatch it exits and compose does not start
+Lavalink. Lavalink finds the jar of the configured version in the plugins volume and loads it without
+downloading. Downloaded on 2026-11-09:
 
 ```
 b062effdda6abeaa46913dfd1b5d5600120b65f239ce88f30948c7213a3ca1c0  youtube-plugin-2be8e542d3f6f178e048dca565892684c2e40177.jar
 ```
 
-A plugin bump in `application.yml` must replace this line with the hash of the new jar.
+A plugin bump in `application.yml` must replace this line and the checksum file with the hash of the new
+jar (a test keeps the three in sync). For a release, also change the repository in `fetch-plugin.sh` from
+`snapshots` to `releases`.
 
 **Clients.** Per-client results on 2026-11-08, from a home connection in Poland, snapshot plus cipher,
 streamed through the plugin's `/youtube/stream/{id}?withClient=` route. Every client was tried on 4 fixed

@@ -119,6 +119,8 @@ function setup({
 
   /** channel id -> member ids; absent = deleted on Discord. */
   const discord = new Map<string, Set<string>>();
+  /** Channels whose guild Discord has not made available yet, so their members are unknown. */
+  const unavailable = new Set<string>();
   const moves: { userId: string; channelId: string }[] = [];
   const created: { name: string; categoryId: string; ownerId: string }[] = [];
   const categories: { categoryName: string; joinChannelName: string }[] = [];
@@ -144,6 +146,7 @@ function setup({
     },
     async members(channelId) {
       if (memberGone) return null;
+      if (unavailable.has(channelId)) return undefined;
       const members = discord.get(channelId);
       return members ? [...members] : null;
     },
@@ -380,6 +383,7 @@ function setup({
     areas,
     owned,
     discord,
+    unavailable,
     moves,
     created,
     categories,
@@ -433,7 +437,7 @@ describe("/party create", () => {
     const { run, areas } = setup();
     const [reply] = await run("create", { name: "x" }, 0n, undefined, "prefix");
     expect(areas.size).toBe(0);
-    expect(reply).toBeDefined();
+    expect(reply).toBe("Nie masz uprawnień do tej komendy.");
   });
 
   test("rejects an empty or too long name", async () => {
@@ -506,6 +510,14 @@ describe("party area form", () => {
     const answer = await t.run("create", { name: "Impreza" });
     expect(answer.modals[0]?.fields.find((f) => f.customId === "categoryName")?.value).toBe(
       "Impreza",
+    );
+  });
+
+  test("a long name with an emoji at the cut is shortened without splitting the emoji", async () => {
+    const t = setup();
+    const answer = await t.run("create", { name: `${"a".repeat(99)}🎉 reszta` });
+    expect(answer.modals[0]?.fields.find((f) => f.customId === "categoryName")?.value).toBe(
+      "a".repeat(99),
     );
   });
 
@@ -1029,6 +1041,7 @@ describe("leaving a party channel", () => {
       "party-panel-deleted",
       "party-panels",
       "party-reconcile",
+      "party-reconcile-late",
     ]);
     expect(module.events?.find((e) => e.name === "party-join")?.alwaysRun).toBeUndefined();
   });
@@ -1125,6 +1138,61 @@ describe("startup reconciliation", () => {
     t.discord.set("1", new Set());
     await t.eventFor("clientReady").run(ready);
     expect(t.owned.has("1")).toBe(true);
+  });
+
+  test("keeps channels of a guild that is still unavailable, then checks them when it comes back", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.discord.set("400", new Set());
+    t.discord.set("300", new Set());
+    t.owned.set("1", row("1", "a"));
+    t.owned.set("2", { ...row("2", "b"), guildId: "other-guild" });
+    t.discord.set("1", new Set());
+    t.discord.set("2", new Set());
+    t.unavailable.add("1");
+    await t.eventFor("clientReady").run(ready);
+    expect(t.owned.has("1")).toBe(true);
+    expect(t.discord.has("1")).toBe(true);
+    expect(t.owned.has("2")).toBe(false);
+
+    t.unavailable.delete("1");
+    await t.eventFor("guildAvailable").run({ id: guildId } as never);
+    expect(t.owned.has("1")).toBe(false);
+    expect(t.discord.has("1")).toBe(false);
+  });
+
+  test("a late guild only checks its own channels", async () => {
+    const t = setup();
+    t.owned.set("1", row("1", "a"));
+    t.owned.set("2", { ...row("2", "b"), guildId: "other-guild" });
+    t.discord.set("1", new Set());
+    t.discord.set("2", new Set());
+    t.unavailable.add("1");
+    t.unavailable.add("2");
+    await t.eventFor("clientReady").run(ready);
+    t.unavailable.clear();
+    await t.eventFor("guildAvailable").run({ id: "other-guild" } as never);
+    expect([...t.owned.keys()]).toEqual(["1"]);
+  });
+
+  test("guildAvailable while the bot starts, before clientReady, checks nothing", async () => {
+    const t = setup();
+    t.owned.set("1", row("1", "a"));
+    t.discord.set("1", new Set());
+    await t.eventFor("guildAvailable").run({ id: guildId } as never);
+    expect(t.owned.has("1")).toBe(true);
+    await t.eventFor("guildAvailable").run({ id: guildId } as never);
+    expect(t.owned.has("1")).toBe(true);
+  });
+
+  test("a leave in a guild with unknown voice states deletes nothing", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    t.unavailable.add("1000");
+    await t.voice("1000", null);
+    expect(t.owned.has("1000")).toBe(true);
+    expect(t.discord.has("1000")).toBe(true);
   });
 
   test("drops an area whose join channel or category is gone", async () => {
@@ -1273,9 +1341,15 @@ describe("owner controls", () => {
     const t = await withChannel();
     expect((await t.run("invite", { user: "friend" }, none, "u1"))[0]).toContain("<@friend>");
     expect(t.calls).toEqual(["allow 1000 friend"]);
+    const refusals: Record<string, unknown> = {};
     for (const user of ["u1", "bot-self", "nobody"]) {
-      expect((await t.run("invite", { user }, none, "u1"))[0]).toBeDefined();
+      refusals[user] = (await t.run("invite", { user }, none, "u1"))[0];
     }
+    expect(refusals).toEqual({
+      u1: "Nie możesz zrobić tego sam sobie.",
+      "bot-self": "Tego nie zrobię botowi.",
+      nobody: "Nie ma takiej osoby na tym serwerze.",
+    });
     expect(t.calls).toEqual(["allow 1000 friend"]);
   });
 

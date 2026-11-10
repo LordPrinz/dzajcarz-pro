@@ -111,6 +111,22 @@ describe("module toggles in routing", () => {
     expect(ran).toEqual(["command"]);
   });
 
+  test("a prefix command from another bot is ignored", async () => {
+    const { ran, replies, message, deps } = setup([]);
+    Object.assign(message, { author: { bot: true } });
+    await handleMessage(message, undefined, deps);
+    expect(ran).toEqual([]);
+    expect(replies).toEqual([]);
+  });
+
+  test("a prefix command posted by a webhook is ignored", async () => {
+    const { ran, replies, message, deps } = setup([]);
+    Object.assign(message, { webhookId: "500000000000000005" });
+    await handleMessage(message, undefined, deps);
+    expect(ran).toEqual([]);
+    expect(replies).toEqual([]);
+  });
+
   test("passes deps.cooldowns to the dispatcher, so a second call is refused", async () => {
     const { ran, replies, message, deps } = setup([]);
     const windows = new Map<string, number>();
@@ -151,8 +167,30 @@ describe("module toggles in routing", () => {
     await handleMessage(message, undefined, deps);
     expect(ran).toEqual([]);
     expect(replies).toEqual([
-      expect.objectContaining({ content: "Ta komenda działa tylko na serwerze." }),
+      expect.objectContaining({
+        content: "Ta komenda działa tylko na serwerze.",
+        failIfNotExists: false,
+      }),
     ]);
+  });
+
+  test("a parse error answers with failIfNotExists off, like the access refusal", async () => {
+    const { replies, message, deps } = setup([]);
+    const strict = createRegistry([
+      {
+        name: "fun",
+        commands: [
+          defineCommand({
+            name: "ping",
+            description: "x",
+            options: { times: { type: "integer", description: "x", required: true } },
+            run: async () => {},
+          }),
+        ],
+      },
+    ]);
+    await handleMessage(message, undefined, { ...deps, registry: strict });
+    expect(replies).toEqual([expect.objectContaining({ failIfNotExists: false })]);
   });
 
   test("a command with a DM context runs in a DM and uses the default prefix", async () => {

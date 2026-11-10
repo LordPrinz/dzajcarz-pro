@@ -63,6 +63,8 @@ export interface LavalinkPlayerOptions {
   logger: Logger;
   /** Builds the client library's manager; the tests pass a stub. */
   createManager?: (options: ManagerOptions) => LavalinkManager;
+  /** How long past its length a local file may play before it counts as over without an end event. */
+  localFileGraceMs?: number;
 }
 
 /** Searched tracks kept to enqueue without asking the node again; older ones are decoded on demand. */
@@ -71,6 +73,8 @@ const TRACK_CACHE_SIZE = 2000;
 const VOLUME = 100;
 /** How long a recovery waits for Discord to confirm that the bot left voice before joining again. */
 const REJOIN_TIMEOUT_MS = 5000;
+/** setTimeout fires at once above this (2^31 - 1 ms), so a longer wait is split into several checks. */
+const MAX_TIMER_MS = 2_147_483_647;
 /** A song file name in the music directory: no separators, so no way out of it. */
 const LOCAL_FILE_NAME = /^[a-z0-9_]+\.mp3$/;
 
@@ -106,6 +110,7 @@ export function createLavalinkMusicPlayer({
   password,
   logger,
   createManager = (options) => new LavalinkManager(options),
+  localFileGraceMs = 60_000,
 }: LavalinkPlayerOptions): LavalinkMusicPlayer {
   const manager = createManager({
     nodes: [nodeOptions(url, password)],
@@ -516,7 +521,40 @@ export function createLavalinkMusicPlayer({
         if (player) await destroyPlayer(player, "scheduled song failed");
         throw error;
       }
-      const { queued } = await finished;
+      // A lost end event (node restart, dropped socket) would keep the guild's scheduled song running until
+      // the bot restarts, so past its length plus a margin it counts as over. Pausing holds the deadline; on
+      // resume it restarts from where the file stopped. A dead node's position never moves, so it is read
+      // only at that moment.
+      const lengthMs = Number.isFinite(track.info.duration) ? Math.max(0, track.info.duration) : 0;
+      let deadline = Date.now() + lengthMs + localFileGraceMs;
+      let wasPaused = false;
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      const arm = (delayMs: number) => {
+        watchdog = setTimeout(check, Math.min(Math.max(0, delayMs), MAX_TIMER_MS));
+      };
+      const check = () => {
+        if (localPlays.get(guildId)?.encoded !== raw.encoded) return;
+        const player = manager.getPlayer(guildId);
+        if (player?.queue.current?.encoded === raw.encoded) {
+          if (player.paused) {
+            wasPaused = true;
+            arm(localFileGraceMs);
+            return;
+          }
+          if (wasPaused) {
+            wasPaused = false;
+            deadline = Date.now() + Math.max(0, lengthMs - player.position) + localFileGraceMs;
+          }
+          if (Date.now() < deadline) {
+            arm(deadline - Date.now());
+            return;
+          }
+        }
+        logger.warn("Scheduled song got no end event; treating it as over", { guildId, file });
+        finishLocal(guildId, (player?.queue.tracks.length ?? 0) > 0);
+      };
+      arm(deadline - Date.now());
+      const { queued } = await finished.finally(() => clearTimeout(watchdog));
       return { status: "played", queued };
     },
 

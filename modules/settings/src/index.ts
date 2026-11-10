@@ -4,6 +4,8 @@ import {
   defineSubcommand,
   fitLines,
   MANAGE_GUILD,
+  MAX_PREFIX_LENGTH,
+  prefixProblem,
   requireGuild,
   UserError,
 } from "@dzajcarz/core";
@@ -52,24 +54,21 @@ export interface SettingsModuleDeps {
 /** Modules that stay on: without them nobody could turn anything back on or ask for help. `status` has no per-server behaviour, so a toggle would do nothing. */
 export const PROTECTED_MODULES: ReadonlySet<string> = new Set(["general", "settings", "status"]);
 
-const MAX_PREFIX_LENGTH = 5;
 const MAX_ECHOED_NAME = 32;
 /** The /modules list stays well under Discord's 2000; fitLines keeps room for its "… i jeszcze N" line. */
 const MAX_LIST_LENGTH = 1900;
 const MAX_CHANNELS_PER_LINE = 10;
 
-/** Throws a UserError (Polish) unless the prefix is 1-5 characters of non-whitespace, non-backtick text. */
+const PREFIX_PROBLEMS = {
+  length: `Prefiks musi mieć od 1 do ${MAX_PREFIX_LENGTH} znaków.`,
+  whitespace: "Prefiks nie może zawierać spacji ani niewidocznych znaków.",
+  backtick: "Prefiks nie może zawierać znaku `.",
+} as const;
+
+/** Throws a UserError (Polish) when the prefix breaks the core rule. */
 function validatePrefix(prefix: string): void {
-  const length = [...prefix].length;
-  if (length < 1 || length > MAX_PREFIX_LENGTH) {
-    throw new UserError(`Prefiks musi mieć od 1 do ${MAX_PREFIX_LENGTH} znaków.`);
-  }
-  // \p{Cf} covers invisible characters such as zero-width spaces, which would look like an empty prefix.
-  if (/[\s\p{Cf}]/u.test(prefix)) {
-    throw new UserError("Prefiks nie może zawierać spacji ani niewidocznych znaków.");
-  }
-  // The prefix is echoed inside code spans, where a backtick would close the span.
-  if (prefix.includes("`")) throw new UserError("Prefiks nie może zawierać znaku `.");
+  const problem = prefixProblem(prefix);
+  if (problem) throw new UserError(PREFIX_PROBLEMS[problem]);
 }
 
 export function createSettingsModule({

@@ -4,6 +4,7 @@ import {
   type ButtonSpec,
   createRegistry,
   executeCommand,
+  GENERIC_ERROR,
   type Reply,
   type SelectSpec,
   silentLogger,
@@ -27,13 +28,16 @@ import {
 import {
   createMusicModule,
   EMPTY_QUEUE,
+  FAILED_NOTE_WINDOW_MS,
   IDLE_MS,
   MAX_PLAYLIST_TRACKS,
   MAX_QUEUE_LENGTH,
+  moreTracksFailedText,
   NOT_IN_VOICE,
   NOTHING_PLAYING,
   otherChannel,
   queueChanged,
+  SEARCH_COOLDOWN_MS,
   trackFailedText,
   UNAVAILABLE,
   UNSUPPORTED_LINK,
@@ -314,6 +318,7 @@ describe("music module", () => {
       expect(replyText(stranger.replies[0])).toBe("To nie Twoje menu.");
 
       const picked = await click(select.customId, CALLER, ["3"]);
+      expect(picked.deferred).toBe(true);
       expect(replyText(picked.updates[0])).toBe("Gram: **Wynik 3** (3:20).");
       expect(player.state(GUILD)?.current?.title).toBe("Wynik 3");
     });
@@ -324,6 +329,8 @@ describe("music module", () => {
       const select = (ctx.replies[0] as Exclude<Reply, string>).components?.[0]?.[0] as SelectSpec;
       voice.members.delete(CALLER);
       const picked = await click(select.customId, CALLER, ["0"]);
+      // The refusal comes after the defer, as a follow-up reply.
+      expect(picked.deferred).toBe(true);
       expect(replyText(picked.replies[0])).toBe(NOT_IN_VOICE);
       expect(player.state(GUILD)).toBeNull();
     });
@@ -659,6 +666,56 @@ describe("music module", () => {
     });
   });
 
+  test("/play and /search have a per-user cooldown, the other commands do not", () => {
+    const { registry } = setup();
+    expect(registry.find("play")?.cooldownMs).toBe(SEARCH_COOLDOWN_MS);
+    expect(registry.find("search")?.cooldownMs).toBe(SEARCH_COOLDOWN_MS);
+    expect(registry.find("skip")?.cooldownMs).toBeUndefined();
+  });
+
+  describe("player failures", () => {
+    test("/play when joining the channel fails answers with the generic error and the next /play works", async () => {
+      const { run, player } = setup();
+      player.failNext("join", new Error("Missing Connect permission"));
+      const failed = await run("play", { query: "a" });
+      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(player.state(GUILD)).toBeNull();
+
+      const retried = await run("play", { query: "a" });
+      expect(replyText(retried.replies.at(-1) as Reply)).toStartWith("Gram:");
+      expect(player.state(GUILD)?.current?.title).toBe("Pierwszy");
+    });
+
+    test("/play when the node refuses the tracks keeps the queue usable", async () => {
+      const { run, player } = setup();
+      player.failNext("enqueue", new Error("Node disconnected"));
+      const failed = await run("play", { query: "a" });
+      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(player.state(GUILD)?.current ?? null).toBeNull();
+
+      await run("play", { query: "a" });
+      expect(player.state(GUILD)?.current?.title).toBe("Pierwszy");
+    });
+
+    test("/play when the search itself throws answers with the generic error", async () => {
+      const { run, player } = setup();
+      player.failNext("search", new Error("Node unreachable"));
+      const failed = await run("play", { query: "a" });
+      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(player.joins).toEqual([]);
+    });
+
+    test("/skip when the node fails keeps the current track", async () => {
+      const { run, player } = setup();
+      player.nextResult = { kind: "playlist", name: "L", tracks: [track("A"), track("B")] };
+      await run("play", { query: "a" });
+      player.failNext("skip");
+      const failed = await run("skip");
+      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(player.state(GUILD)?.current?.title).toBe("A");
+    });
+  });
+
   describe("player events", () => {
     test("a failed track gets a short note in the panel's channel", async () => {
       const { run, player, panels } = setup();
@@ -676,6 +733,61 @@ describe("music module", () => {
         "Nie udało się odtworzyć **Zły \\*tytuł\\***, gram dalej.",
       );
       expect(player.state(GUILD)?.current?.title).toBe("B");
+    });
+
+    test("a burst of failed tracks gets one note and one count, not a message per track", async () => {
+      const { run, player, panels, scheduler } = setup();
+      player.nextResult = {
+        kind: "playlist",
+        name: "Usunięte",
+        tracks: ["A", "B", "C", "D", "E"].map((title) => track(title)),
+      };
+      await run("play", { query: "a" });
+      for (let i = 0; i < 4; i++) player.failTrack(GUILD);
+      await settle();
+      const notes = () =>
+        [...panels.messages.values()].map((m) => m.message.content).filter(Boolean);
+      expect(notes()).toEqual([trackFailedText("A")]);
+      scheduler.advance(FAILED_NOTE_WINDOW_MS);
+      await settle();
+      expect(notes()).toEqual([trackFailedText("A"), moreTracksFailedText(3)]);
+      expect(player.state(GUILD)?.current?.title).toBe("E");
+    });
+
+    test("leaving ends the window: no late note, and the next session gets its own first note", async () => {
+      const { run, player, panels, scheduler } = setup();
+      player.nextResult = {
+        kind: "playlist",
+        name: "Usunięte",
+        tracks: ["A", "B", "C"].map((title) => track(title)),
+      };
+      await run("play", { query: "a" });
+      player.failTrack(GUILD);
+      player.failTrack(GUILD);
+      player.destroy(GUILD);
+      scheduler.advance(FAILED_NOTE_WINDOW_MS);
+      await settle();
+      const notes = () =>
+        [...panels.messages.values()].map((m) => m.message.content).filter(Boolean);
+      expect(notes()).toEqual([trackFailedText("A")]);
+
+      player.nextResult = { kind: "playlist", name: "Nowa", tracks: [track("D"), track("E")] };
+      await run("play", { query: "d" });
+      player.failTrack(GUILD);
+      await settle();
+      expect(notes()).toEqual([trackFailedText("A"), trackFailedText("D")]);
+    });
+
+    test("a single failed track adds nothing when its window closes", async () => {
+      const { run, player, panels, scheduler } = setup();
+      player.nextResult = { kind: "playlist", name: "Dwa", tracks: [track("A"), track("B")] };
+      await run("play", { query: "a" });
+      player.failTrack(GUILD);
+      scheduler.advance(FAILED_NOTE_WINDOW_MS);
+      await settle();
+      expect([...panels.messages.values()].map((m) => m.message.content).filter(Boolean)).toEqual([
+        trackFailedText("A"),
+      ]);
     });
 
     test("a failed track the bot played on its own gets no note", async () => {
@@ -906,7 +1018,8 @@ describe("music module", () => {
         );
         expect(ctx.player.state(GUILD)?.positionMs).toBe(0);
         await ctx.run("seek", { time: "3:20" });
-        expect(ctx.player.state(GUILD)?.positionMs).toBe(200_000);
+        // The end itself finishes the track; with nothing queued the player has nothing left to play.
+        expect(ctx.player.state(GUILD)?.current).toBeNull();
       });
 
       test("refuses a track whose source cannot seek", async () => {
@@ -1044,12 +1157,12 @@ describe("music module", () => {
         expect(ctx.panel()?.embeds?.[0]?.title).toBe("C");
       });
 
-      test("jump with the queue loop moves the passed tracks to the end", async () => {
+      test("jump with the queue loop moves the passed tracks and the current one to the end", async () => {
         const ctx = await playing(["A", "B", "C", "D"]);
         await ctx.run("loop", { mode: "queue" });
         expect(lastText(await ctx.run("jump", { place: 3 }))).toBe("Przeskoczono do: **D**.");
         expect(ctx.player.state(GUILD)?.current?.title).toBe("D");
-        expect(upcoming(ctx)).toEqual(["B", "C"]);
+        expect(upcoming(ctx)).toEqual(["B", "C", "A"]);
       });
 
       test("jump while a skip is on its way asks to try again", async () => {
@@ -1117,6 +1230,54 @@ describe("music module", () => {
         ctx.player.skipInFlight = true;
         expect(lastText(await ctx.run("back"))).toBe(queueChanged);
         expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+      });
+    });
+
+    describe("loop modes", () => {
+      test("the track loop plays the same track again when it ends", async () => {
+        const ctx = await playing(["A", "B"]);
+        await ctx.run("loop", { mode: "track" });
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
+        expect(upcoming(ctx)).toEqual(["B"]);
+      });
+
+      test("/skip leaves a looped track", async () => {
+        const ctx = await playing(["A", "B"]);
+        await ctx.run("loop", { mode: "track" });
+        await ctx.run("skip");
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+      });
+
+      test("the queue loop sends a finished track to the end", async () => {
+        const ctx = await playing(["A", "B"]);
+        await ctx.run("loop", { mode: "queue" });
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+        expect(upcoming(ctx)).toEqual(["A"]);
+      });
+
+      test("/back after track-loop repeats goes to the track before, not to another copy", async () => {
+        const ctx = await playing(["A", "B"]);
+        ctx.player.finishTrack(GUILD);
+        await ctx.run("loop", { mode: "track" });
+        ctx.player.finishTrack(GUILD);
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(lastText(await ctx.run("back"))).toBe("Wracam do: **A**.");
+        expect(upcoming(ctx)).toEqual(["B"]);
+      });
+
+      test("/back with the queue loop does not leave a second copy of the track at the end", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        await ctx.run("loop", { mode: "queue" });
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(upcoming(ctx)).toEqual(["C", "A"]);
+        expect(lastText(await ctx.run("back"))).toBe("Wracam do: **A**.");
+        expect(upcoming(ctx)).toEqual(["B", "C"]);
       });
     });
 

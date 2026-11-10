@@ -1,6 +1,7 @@
 import type { CommandContext, CommandPlace, Invocation, Reply } from "../command.ts";
 import { type ComponentContext, validateRows } from "../component.ts";
 import { executeComponent, executeModal, UNKNOWN_COMPONENT, UNKNOWN_MODAL } from "../dispatch.ts";
+import { validateReplyLimits } from "../limits.ts";
 import { silentLogger } from "../logger.ts";
 import {
   type ModalBaseContext,
@@ -56,7 +57,7 @@ export function createFakeContext<A = Record<string, unknown>>({
     deferred: false,
     canShowModal: invocation === "slash",
     async reply(reply) {
-      checkComponents(reply);
+      checkReply(reply);
       ctx.replies.push(reply);
     },
     async defer(options) {
@@ -81,7 +82,9 @@ const NOT_FIRST_ANSWER =
 
 export const NO_MODAL_UPDATE = "update() works only on a modal opened from a message component";
 
-function checkComponents(reply: Reply): void {
+/** What Discord would refuse: broken component rows and text over its limits. */
+function checkReply(reply: Reply): void {
+  validateReplyLimits(reply);
   if (typeof reply !== "string" && reply.components) validateRows(reply.components);
 }
 
@@ -138,14 +141,14 @@ export function createFakeComponentContext({
       ctx.modals.push(modal);
     },
     async update(reply) {
-      checkComponents(reply);
+      checkReply(reply);
       ctx.updates.push(reply);
     },
     async defer() {
       ctx.deferred = true;
     },
     async reply(reply) {
-      checkComponents(reply);
+      checkReply(reply);
       ctx.replies.push(reply);
     },
   };
@@ -228,7 +231,7 @@ export function createFakeModalContext({
     },
     async update(reply) {
       if (!ctx.canUpdate) throw new Error(NO_MODAL_UPDATE);
-      checkComponents(reply);
+      checkReply(reply);
       ctx.updates.push(reply);
     },
     async defer(options) {
@@ -236,7 +239,7 @@ export function createFakeModalContext({
       ctx.deferOptions = options;
     },
     async reply(reply) {
-      checkComponents(reply);
+      checkReply(reply);
       ctx.replies.push(reply);
     },
   };

@@ -47,12 +47,68 @@ describe("prefix resolver", () => {
     expect(lookups()).toBe(1);
   });
 
-  test("forget makes the next call read Postgres again", async () => {
-    const { resolver, lookups } = setup("?");
-    await resolver.resolve(GUILD);
+  test("forget caches the prefix Postgres holds now", async () => {
+    let prefix = "?";
+    const resolver = createPrefixResolver({
+      settings: { find: async () => row(prefix) },
+      cache: createMemoryStore(),
+      defaultPrefix: "!",
+      logger: silentLogger,
+    });
+    expect(await resolver.resolve(GUILD)).toBe("?");
+    prefix = "dz";
     await resolver.forget(GUILD);
+    expect(await resolver.resolve(GUILD)).toBe("dz");
+  });
+
+  test("a lookup that read the old prefix before a change does not put it back into the cache", async () => {
+    let prefix = "?";
+    let releaseSlowRead: () => void = () => {};
+    let slow = true;
+    const resolver = createPrefixResolver({
+      settings: {
+        async find() {
+          const seen = prefix;
+          if (slow) {
+            slow = false;
+            await new Promise<void>((resolve) => {
+              releaseSlowRead = resolve;
+            });
+          }
+          return row(seen);
+        },
+      },
+      cache: createMemoryStore(),
+      defaultPrefix: "!",
+      logger: silentLogger,
+    });
+    const staleRead = resolver.resolve(GUILD);
+    await Bun.sleep(0);
+    prefix = "dz";
+    await resolver.forget(GUILD);
+    releaseSlowRead();
+    expect(await staleRead).toBe("?");
+    expect(await resolver.resolve(GUILD)).toBe("dz");
+  });
+
+  test("forget drops the entry when Postgres cannot be read", async () => {
+    const cache = createMemoryStore();
+    let down = false;
+    const resolver = createPrefixResolver({
+      settings: {
+        find: async () => {
+          if (down) throw new Error("connection refused");
+          return row("?");
+        },
+      },
+      cache,
+      defaultPrefix: "!",
+      logger: silentLogger,
+    });
     await resolver.resolve(GUILD);
-    expect(lookups()).toBe(2);
+    down = true;
+    await resolver.forget(GUILD);
+    expect(await cache.get(`guild:${GUILD}:prefix`)).toBeNull();
   });
 
   test("keeps working when Redis is down", async () => {
@@ -68,6 +124,7 @@ describe("prefix resolver", () => {
   test("forget does not throw when Redis is down", async () => {
     const broken: KeyValueStore = {
       ...createMemoryStore(),
+      set: () => Promise.reject(new Error("ECONNREFUSED")),
       del: () => Promise.reject(new Error("ECONNREFUSED")),
     };
     const { resolver } = setup("?", broken);

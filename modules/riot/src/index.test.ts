@@ -136,7 +136,7 @@ describe("riot module", () => {
       "Statystyki Valorant są wyłączone: bot nie ma klucza API.",
     );
     const lolOn = await onlyLol.run("lol", { riot_id: "Dzajcarz#EUNE" });
-    expect(embedOf(lolOn.replies.at(-1))).toBeDefined();
+    expect(embedOf(lolOn.replies.at(-1))?.title).toBe("Dzajcarz#EUNE");
 
     const onlyValorant = setup({ stats: { valorant: full.valorant } });
     const lolOff = await onlyValorant.run("lol", { riot_id: "Dzajcarz#EUNE" });
@@ -144,7 +144,7 @@ describe("riot module", () => {
       "Statystyki League of Legends są wyłączone: bot nie ma klucza API.",
     );
     const valorantOn = await onlyValorant.run("valorant", { riot_id: "Dzajcarz#EUNE" });
-    expect(embedOf(valorantOn.replies.at(-1))).toBeDefined();
+    expect(embedOf(valorantOn.replies.at(-1))?.title).toBe("Dzajcarz#EUNE");
   });
 
   test("a malformed Riot ID is refused before any lookup", async () => {
@@ -329,7 +329,7 @@ describe("riot module", () => {
       const { run, advance, stats } = setup();
       for (let user = 1; user <= 30; user++) {
         const ctx = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: String(user) });
-        expect(embedOf(ctx.replies[0])).toBeDefined();
+        expect(embedOf(ctx.replies[0])?.title).toBe("Dzajcarz#EUNE");
       }
       const over = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "31" });
       expect(textOf(over.replies[0])).toBe(
@@ -339,7 +339,7 @@ describe("riot module", () => {
 
       advance(60_001);
       const later = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "32" });
-      expect(embedOf(later.replies[0])).toBeDefined();
+      expect(embedOf(later.replies[0])?.title).toBe("Dzajcarz#EUNE");
     });
   });
 
@@ -367,7 +367,7 @@ describe("riot module", () => {
 
       stats.failWith = undefined;
       const lol = await run("lol", { riot_id: "Dzajcarz#EUNE" }, { userId: "2" });
-      expect(embedOf(lol.replies[0])).toBeDefined();
+      expect(embedOf(lol.replies[0])?.title).toBe("Dzajcarz#EUNE");
     });
 
     test("lookups resume once the deadline has passed", async () => {
@@ -399,11 +399,11 @@ describe("riot module", () => {
     expect(textOf(again.replies[0])).toBe("Poczekaj chwilę przed kolejnym sprawdzeniem.");
 
     const other = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "2" });
-    expect(embedOf(other.replies[0])).toBeDefined();
+    expect(embedOf(other.replies[0])?.title).toBe("Dzajcarz#EUNE");
 
     advance(10_001);
     const later = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "1" });
-    expect(embedOf(later.replies[0])).toBeDefined();
+    expect(embedOf(later.replies[0])?.title).toBe("Dzajcarz#EUNE");
   });
 
   test("both commands are available everywhere", () => {

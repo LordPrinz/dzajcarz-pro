@@ -159,8 +159,9 @@ describe("coalescing", () => {
       5_000,
     );
     const pending = Array.from({ length: 5 }, () => fetch(`${base}/health`));
-    while (calls < 1) await Bun.sleep(5);
-    await Bun.sleep(20);
+    // All five must be inside the server before the probe finishes, or a late one would start a second run.
+    const server = servers.at(-1);
+    while ((server?.pendingRequests ?? 0) < 5) await Bun.sleep(1);
     release();
     const responses = await Promise.all(pending);
     expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);

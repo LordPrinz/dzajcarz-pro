@@ -44,6 +44,16 @@ describe("scheduled song player", () => {
     expect(createScheduledSongPlayer(fakeMusic(false).music).isPlaying("g")).toBe(false);
   });
 
+  test("every listed file is in infra/lavalink/music, which Lavalink mounts", async () => {
+    const dir = new URL("../../../../infra/lavalink/music/", import.meta.url);
+    for (const { file } of SCHEDULED_SONG_FILES) {
+      expect({ file, exists: await Bun.file(new URL(file, dir)).exists() }).toEqual({
+        file,
+        exists: true,
+      });
+    }
+  });
+
   test("every listed file name stays inside the music directory", () => {
     for (const { name, file } of SCHEDULED_SONG_FILES) {
       expect(file).toMatch(/^[a-z0-9_]+\.mp3$/);
