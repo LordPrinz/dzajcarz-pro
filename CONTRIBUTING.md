@@ -129,6 +129,10 @@ interaction responses only.
 | `pre-commit`         | `biome check --staged --write` on staged files |
 | `pre-push`           | branch name check, `typecheck`, `bun test`     |
 
+`pre-push` also prints a warning, without blocking the push, when `TEST_DATABASE_URL` or `TEST_REDIS_URL`
+is unset: the database and Redis suites are then skipped locally and only run in CI. Set both (see
+`.env.example`) to run them.
+
 CI repeats every check, so `--no-verify` only moves the failure to the PR.
 
 ## Definition of done
