@@ -1159,8 +1159,22 @@ describe("startup reconciliation", () => {
     t.owned.set("2", { ...row("2", "b"), guildId: "other-guild" });
     t.discord.set("1", new Set());
     t.discord.set("2", new Set());
+    t.unavailable.add("1");
+    t.unavailable.add("2");
+    await t.eventFor("clientReady").run(ready);
+    t.unavailable.clear();
     await t.eventFor("guildAvailable").run({ id: "other-guild" } as never);
     expect([...t.owned.keys()]).toEqual(["1"]);
+  });
+
+  test("guildAvailable while the bot starts, before clientReady, checks nothing", async () => {
+    const t = setup();
+    t.owned.set("1", row("1", "a"));
+    t.discord.set("1", new Set());
+    await t.eventFor("guildAvailable").run({ id: guildId } as never);
+    expect(t.owned.has("1")).toBe(true);
+    await t.eventFor("guildAvailable").run({ id: guildId } as never);
+    expect(t.owned.has("1")).toBe(true);
   });
 
   test("a leave in a guild with unknown voice states deletes nothing", async () => {

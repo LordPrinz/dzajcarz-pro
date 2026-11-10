@@ -1861,12 +1861,18 @@ export function createPartyModule({
     run: (_client: Client<true>) => reconcileChannels(),
   });
 
-  // A guild that was still unavailable at startup has no voice states yet, so its channels wait for this.
+  /** Guilds whose voice states were unknown during the startup reconcile; their channels wait for them. */
+  const waitingGuilds = new Set<string>();
+
+  // discord.js also emits guildAvailable for every guild while it starts, before clientReady; only a guild
+  // the startup reconcile could not check needs a second look.
   const reconcileLate = defineEvent({
     name: "party-reconcile-late",
     event: "guildAvailable",
     alwaysRun: true,
-    run: (guild: Guild) => reconcileChannels(guild.id),
+    run: async (guild: Guild) => {
+      if (waitingGuilds.delete(guild.id)) await reconcileChannels(guild.id);
+    },
   });
 
   /** Catches up with what happened while the bot was offline; never throws. Without a guild id checks all. */
@@ -1878,12 +1884,13 @@ export function createPartyModule({
       );
       let removedCount = 0;
       let unknownCount = 0;
-      for (const { channelId, createdAt } of stored) {
+      for (const { channelId, guildId: channelGuild, createdAt } of stored) {
         if (Date.now() - createdAt.getTime() < RECONCILE_GRACE_MS) continue;
         try {
           const members = await channels.members(channelId);
           if (members === undefined) {
             unknownCount++;
+            waitingGuilds.add(channelGuild);
             continue;
           }
           if (members !== null && members.length > 0) continue;
