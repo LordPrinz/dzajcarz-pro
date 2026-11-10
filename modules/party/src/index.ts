@@ -584,7 +584,8 @@ export function createPartyModule({
           const guildId = guildOf(ctx.guildId);
           if (ctx.canShowModal) {
             // The slash command is a form; a name typed into the option only prefills it.
-            const categoryName = ctx.args.name?.trim().slice(0, MAX_NAME_LENGTH) || undefined;
+            const categoryName =
+              fitModalText(ctx.args.name?.trim() ?? "", MAX_NAME_LENGTH) || undefined;
             await ctx.showModal(areaModal.build(ctx.user.id, NEW_AREA, { categoryName }));
             return;
           }

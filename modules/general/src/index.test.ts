@@ -199,6 +199,12 @@ describe("general module", () => {
     expect(describeCommand(summary(3), "!").fields).toHaveLength(4);
   });
 
+  test("help echoes at most 32 characters of an unknown name, so the reply stays under 2000", async () => {
+    expect(await setup().run("help", { command: "x".repeat(3000) })).toEqual([
+      { content: `Nie znam komendy \`${"x".repeat(32)}\`.`, ephemeral: true },
+    ]);
+  });
+
   test("help says when a command does not exist", async () => {
     expect(await setup().run("help", { command: "nope" })).toEqual([
       { content: "Nie znam komendy `nope`.", ephemeral: true },

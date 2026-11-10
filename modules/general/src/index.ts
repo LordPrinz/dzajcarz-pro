@@ -14,6 +14,8 @@ export interface GeneralModuleDeps extends HelpDeps {
 
 /** Discord: an embed holds at most 25 fields. */
 const MAX_EMBED_FIELDS = 25;
+/** Discord's limit for a slash command name. */
+const MAX_COMMAND_NAME = 32;
 
 /** Everywhere: servers, a DM with the bot and other private channels, for both install types. */
 const EVERYWHERE: CommandContexts = {
@@ -43,8 +45,10 @@ export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
       command: { type: "string", description: "Nazwa komendy" },
     },
     run: async (ctx) => {
-      // Backticks would close the code span around the echoed name and let it inject markdown.
-      const wanted = ctx.args.command?.toLowerCase().replaceAll("`", "");
+      // Backticks would close the code span around the echoed name and let it inject markdown. No command
+      // name is longer than Discord's 32, and a longer one echoed back could push the reply past 2000.
+      const typed = ctx.args.command?.toLowerCase().replaceAll("`", "");
+      const wanted = typed && [...typed].slice(0, MAX_COMMAND_NAME).join("");
       if (!wanted) {
         await ctx.reply({ ...(await helpMenu.startPage(ctx, ctx.invocation)), ephemeral: true });
         return;

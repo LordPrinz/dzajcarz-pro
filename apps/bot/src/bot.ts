@@ -261,13 +261,13 @@ export async function handleMessage(
   const context = contextFromMessage(message, {}, undefined, logger);
   const denied = checkPrefixAccess(command, invocation.rest, context);
   if (denied) {
-    await message.reply({ content: denied, allowedMentions: NO_MENTIONS });
+    await message.reply(prefixAnswer(denied));
     return;
   }
 
   const parsed = parsePrefixArgs(command, invocation.rest);
   if (!parsed.ok) {
-    await message.reply({ content: parsed.error, allowedMentions: NO_MENTIONS });
+    await message.reply(prefixAnswer(parsed.error));
     return;
   }
   await executeCommand(
@@ -276,6 +276,11 @@ export async function handleMessage(
     logger,
     deps.cooldowns,
   );
+}
+
+/** A plain message still answers when the command message was deleted before the reply went out. */
+function prefixAnswer(content: string) {
+  return { content, allowedMentions: NO_MENTIONS, failIfNotExists: false };
 }
 
 /** A text command starts with the guild prefix or with a mention of the bot (`@Dżajcarz ping`). */

@@ -81,7 +81,35 @@ describe("module gate", () => {
     expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(false);
     await gate.forget(GUILD);
     expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(true);
+    // forget itself loaded the new set; the check after it is served from the cache.
     expect(state.lookups).toBe(2);
+  });
+
+  test("a lookup that read the old toggles before a change does not put them back into the cache", async () => {
+    const entries: DisabledModule[] = [{ module: "music", channelId: null }];
+    let current = entries;
+    let releaseSlowRead: () => void = () => {};
+    let slow = true;
+    const toggles = {
+      async listDisabled() {
+        const seen = current;
+        if (slow) {
+          slow = false;
+          await new Promise<void>((resolve) => {
+            releaseSlowRead = resolve;
+          });
+        }
+        return seen;
+      },
+    };
+    const gate = createModuleGate({ toggles, cache: createMemoryStore(), logger: silentLogger });
+    const staleRead = gate.isEnabled(GUILD, CHANNEL, "music");
+    await Bun.sleep(0);
+    current = [];
+    await gate.forget(GUILD);
+    releaseSlowRead();
+    expect(await staleRead).toBe(false);
+    expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(true);
   });
 
   test("an empty set is cached too", async () => {
@@ -94,6 +122,9 @@ describe("module gate", () => {
   test("reloads from Postgres when the cached value is garbage", async () => {
     const { gate, state, cache } = setup([{ module: "music", channelId: null }]);
     await cache.set(`guild:${GUILD}:modules-off`, "{not json");
+    expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(false);
+    expect(state.lookups).toBe(1);
+    // The garbage was replaced, so the next check does not go to Postgres again.
     expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(false);
     expect(state.lookups).toBe(1);
   });

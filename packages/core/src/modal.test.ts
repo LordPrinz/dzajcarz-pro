@@ -7,6 +7,7 @@ import {
   MODAL_MAX_TITLE,
   NOT_YOUR_MODAL,
   parseModalValues,
+  REJECTED_MODAL_VALUE,
   UNKNOWN_MODAL,
   validateModal,
 } from "./index.ts";
@@ -190,6 +191,16 @@ describe("submitting a modal", () => {
     expect(
       parseModalValues(feedback.fields, { ...valid, topic: ` ${"x".repeat(20)} ` }).topic,
     ).toBe("x".repeat(20));
+  });
+
+  test("a text field the adapter refused is invalid, while the word rejected typed by a member is fine", () => {
+    const { feedback } = setup();
+    expect(() =>
+      parseModalValues(feedback.fields, { ...valid, topic: REJECTED_MODAL_VALUE }),
+    ).toThrow("nieprawidłową wartość");
+    expect(parseModalValues(feedback.fields, { ...valid, topic: "rejected" }).topic).toBe(
+      "rejected",
+    );
   });
 
   test("a handler may spread its context; the wrapper keeps working", async () => {

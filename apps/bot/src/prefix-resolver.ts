@@ -5,7 +5,7 @@ import type { KeyValueStore } from "@dzajcarz/kv";
 export interface PrefixResolver {
   /** The prefix that starts a text command in this guild (the default in DMs). */
   resolve(guildId: string | null): Promise<string>;
-  /** Drops the cached value after the guild changes its prefix. */
+  /** After the guild changes its prefix: puts what Postgres now holds into the cache (drops it on failure). */
   forget(guildId: string): Promise<void>;
 }
 
@@ -49,17 +49,26 @@ export function createPrefixResolver({
         logger.error("Prefix lookup failed; using the default prefix", { guildId, error });
         return defaultPrefix;
       }
-      await cache.set(key(guildId), stored ?? DEFAULT_MARKER, ttlMs).catch((error: unknown) => {
-        logger.warn("Prefix cache write failed", { guildId, error });
-      });
+      // Only into an empty slot: a change made while this read was in flight has already written the newer
+      // value, and an unconditional set would put the old prefix back for the whole TTL.
+      await cache
+        .setIfAbsent(key(guildId), stored ?? DEFAULT_MARKER, ttlMs)
+        .catch((error: unknown) => {
+          logger.warn("Prefix cache write failed", { guildId, error });
+        });
       return stored ?? defaultPrefix;
     },
 
     async forget(guildId) {
-      // The new prefix is already in Postgres; a stale cache entry expires on its own.
-      await cache.del(key(guildId)).catch((error: unknown) => {
-        logger.warn("Prefix cache invalidation failed", { guildId, error });
-      });
+      try {
+        const stored = (await settings.find(guildId))?.prefix ?? null;
+        await cache.set(key(guildId), stored ?? DEFAULT_MARKER, ttlMs);
+      } catch (error) {
+        logger.warn("Prefix cache refresh failed; dropping the entry", { guildId, error });
+        await cache.del(key(guildId)).catch((delError: unknown) => {
+          logger.warn("Prefix cache invalidation failed", { guildId, error: delError });
+        });
+      }
     },
   };
 }

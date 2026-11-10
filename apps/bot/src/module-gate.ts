@@ -75,7 +75,13 @@ export function createModuleGate({
       logger.error("Module toggle lookup failed; treating modules as enabled", { guildId, error });
       return null;
     }
-    await cache.set(key(guildId), JSON.stringify(entries), ttlMs).catch((error: unknown) => {
+    // An empty slot is only filled, so a toggle written while this read was in flight is not undone (see
+    // forget); a garbage entry is overwritten.
+    const value = JSON.stringify(entries);
+    await (cached === null
+      ? cache.setIfAbsent(key(guildId), value, ttlMs)
+      : cache.set(key(guildId), value, ttlMs)
+    ).catch((error: unknown) => {
       logger.warn("Module toggle cache write failed", { guildId, error });
     });
     return entries;
@@ -112,10 +118,15 @@ export function createModuleGate({
     },
 
     async forget(guildId) {
-      // Postgres already has the change; a stale cache entry expires on its own.
-      await cache.del(key(guildId)).catch((error: unknown) => {
-        logger.warn("Module toggle cache invalidation failed", { guildId, error });
-      });
+      try {
+        const entries = await toggles.listDisabled(guildId);
+        await cache.set(key(guildId), JSON.stringify(entries), ttlMs);
+      } catch (error) {
+        logger.warn("Module toggle cache refresh failed; dropping the entry", { guildId, error });
+        await cache.del(key(guildId)).catch((delError: unknown) => {
+          logger.warn("Module toggle cache invalidation failed", { guildId, error: delError });
+        });
+      }
     },
   };
 }

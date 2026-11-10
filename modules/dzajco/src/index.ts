@@ -106,17 +106,24 @@ export function createDzajcoModule({
       }
     }
     const stored = await settings.get(guildId, channelId);
-    await kv.set(settingsKey(channelId), JSON.stringify(stored), SETTINGS_CACHE_TTL_MS);
+    const value = JSON.stringify(stored);
+    // An empty slot is only filled, so a change written while this read was in flight is not undone (see
+    // refresh); a broken entry is overwritten.
+    if (cached === null) await kv.setIfAbsent(settingsKey(channelId), value, SETTINGS_CACHE_TTL_MS);
+    else await kv.set(settingsKey(channelId), value, SETTINGS_CACHE_TTL_MS);
     return stored ?? defaults;
   }
 
-  /** Called after every write, so a new chance or cooldown applies at once. */
-  async function invalidate(channelId: string): Promise<void> {
+  /** Called after every write: caches what the database now holds and ends the running cooldown. */
+  async function refresh(guildId: string, channelId: string): Promise<void> {
     try {
-      await kv.del(settingsKey(channelId));
+      const stored = await settings.get(guildId, channelId);
+      await kv.set(settingsKey(channelId), JSON.stringify(stored), SETTINGS_CACHE_TTL_MS);
       await kv.del(cooldownKey(channelId));
     } catch (error) {
-      logger.warn("Dżajco cache could not be cleared", { channelId, error });
+      logger.warn("Dżajco cache could not be refreshed; dropping it", { channelId, error });
+      await kv.del(settingsKey(channelId)).catch(() => {});
+      await kv.del(cooldownKey(channelId)).catch(() => {});
     }
   }
 
@@ -126,7 +133,9 @@ export function createDzajcoModule({
     if (content.trim().length === 0) return;
     try {
       if (!matchesWhat(content)) return;
-      if (content.startsWith(await prefixFor(guildId))) return;
+      // The command parser ignores case, so `Co?` with the prefix `co` is a command call, not a question.
+      const prefix = (await prefixFor(guildId)).toLowerCase();
+      if (content.toLowerCase().startsWith(prefix)) return;
       const botId = message.client?.user?.id;
       if (botId && (content.startsWith(`<@${botId}>`) || content.startsWith(`<@!${botId}>`)))
         return;
@@ -220,7 +229,7 @@ export function createDzajcoModule({
             cooldownSeconds: cooldown ?? current.cooldownSeconds,
           };
           await settings.set(guildId, channelId, next);
-          await invalidate(channelId);
+          await refresh(guildId, channelId);
           await ctx.reply({
             content: `Dżajco na <#${channelId}>: ${describe(next)}.`,
             ephemeral: true,
@@ -234,7 +243,7 @@ export function createDzajcoModule({
           const guildId = guildOf(ctx.guildId);
           const channelId = await targetChannel(guildId, ctx.args.channel, ctx.channelId);
           const removed = await settings.clear(guildId, channelId);
-          await invalidate(channelId);
+          await refresh(guildId, channelId);
           await ctx.reply({
             content: removed
               ? `Przywrócono domyślne ustawienia Dżajco na <#${channelId}>.`

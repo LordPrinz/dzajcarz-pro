@@ -1,5 +1,20 @@
 import type { AnyCommand, OptionDef, OptionsDef } from "./command.ts";
 
+export const MAX_PREFIX_LENGTH = 5;
+
+/**
+ * Why a command prefix is unusable, or null when it is fine: 1-5 characters, no whitespace or invisible
+ * characters (a zero-width space would look like an empty prefix), no backtick (the prefix is echoed inside
+ * code spans, where it would close the span). One rule for `/prefix` and `BOT_PREFIX`.
+ */
+export function prefixProblem(prefix: string): "length" | "whitespace" | "backtick" | null {
+  const length = [...prefix].length;
+  if (length < 1 || length > MAX_PREFIX_LENGTH) return "length";
+  if (/[\s\p{Cf}]/u.test(prefix)) return "whitespace";
+  if (prefix.includes("`")) return "backtick";
+  return null;
+}
+
 export interface PrefixInvocation {
   /** Lowercased command name or alias. */
   name: string;
