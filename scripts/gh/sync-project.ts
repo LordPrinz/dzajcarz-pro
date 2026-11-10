@@ -4,6 +4,7 @@ import {
   createGraphql,
   ensureIssueItem,
   getProject,
+  isIssueClosed,
   type StatusName,
   setSingleSelect,
 } from "./github.ts";
@@ -52,6 +53,10 @@ const issueNumber = Number(ticket.slice("DZAJ-".length));
 
 if (!env.PROJECTS_TOKEN) {
   console.warn("PROJECTS_TOKEN secret is not set; skipping board update.");
+  process.exit(0);
+}
+if (await isIssueClosed(env.GITHUB_TOKEN ?? "", owner, repo, issueNumber)) {
+  console.info(`Issue #${issueNumber} is closed; leaving its card where the board put it.`);
   process.exit(0);
 }
 const graphql = createGraphql(env.PROJECTS_TOKEN);

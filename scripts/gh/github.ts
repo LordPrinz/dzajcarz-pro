@@ -135,3 +135,25 @@ export async function setSingleSelect(
     { projectId, itemId, fieldId, optionId },
   );
 }
+
+/**
+ * A closed issue is finished work: its board card is already in Done, and the sync run (which starts
+ * before a quick merge and ends after it) must not drag it back to QA or In Progress.
+ */
+export async function isIssueClosed(
+  token: string,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  const res = await fetchImpl(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+    {
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
+    },
+  );
+  if (!res.ok)
+    throw new Error(`Failed to read issue #${issueNumber}: ${res.status} ${await res.text()}`);
+  return ((await res.json()) as { state: string }).state === "closed";
+}
