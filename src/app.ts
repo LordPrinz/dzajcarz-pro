@@ -1,45 +1,40 @@
-import dotenv from "dotenv";
-import Logger from "./utils/debug/Logger";
-import client from "./bot";
-import dzajcordServer from "./server";
+import { Client } from "discord.js";
 
-dotenv.config();
+import WOK from "wokcommands";
+import path from "path";
 
-const botLogger = new Logger("dzajcarz");
-const serverLogger = new Logger("dzajserver");
+import { botOwners, intents, partials, testServers } from "@/conf/bot";
+import { syncCoRedis, syncPartyRedisMongo, syncVCRedis } from "./helpers/redis";
+import { configureRedis } from "./lib/redisClient";
 
-if (process.env.NODE_ENV === "development") {
-	client.login(process.env.DEV_TOKEN);
-}
-
-if (process.env.NODE_ENV === "production") {
-	client.login(process.env.PROD_TOKEN);
-}
-
-process.on("uncaughtException", (err) => {
-	botLogger.saveLog(`${err.name}${err.message}`, "error");
+export const client = new Client({
+	intents,
+	partials,
 });
 
-process.on("warning", (warn) => {
-	botLogger.saveLog(`${warn.name}${warn.message}`, "warn");
-});
-
-const port = process.env.PCHPORT || 4761;
-
-const dzajServer = dzajcordServer.listen(port, () => {
-	serverLogger.saveLog(`App running on port ${port}`, "info");
-});
-
-process.on("unhandledRejection", (err: Error) => {
-	botLogger.saveLog(`${err.name}${err.message}`, "error");
-});
-
-process.on("SIGTERM", () => {
-	botLogger.saveLog("SIGTERM RECEIVED. Shutting down gracefully", "info");
-	client.destroy();
-	dzajServer.close(() => {
-		serverLogger.saveLog("CHANNEL LISTENER TERMINATED!", "info");
+client.on("ready", async () => {
+	new WOK({
+		client,
+		defaultPrefix: "$",
+		mongoUri: process.env.MONGO_URI,
+		commandsDir: path.join(__dirname, "commands"),
+		events: {
+			dir: path.join(__dirname, "events"),
+		},
+		featuresDir: path.join(__dirname, "features"),
+		botOwners,
+		testServers,
 	});
 
-	process.exit(2);
+	console.log(`Logged in as ${client.user?.tag}!`);
+
+	// Sync VC with redis
+
+	await configureRedis();
+
+	await syncPartyRedisMongo();
+
+	await syncVCRedis(client);
+
+	await syncCoRedis();
 });
