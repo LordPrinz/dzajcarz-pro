@@ -23,7 +23,13 @@ const channelId = "400000000000000004";
 const announcementId = "400000000000000005";
 const foreignChannelId = "900000000000000009";
 
-function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
+function setup({
+  sendFails = false,
+  disabledChannels = [],
+}: {
+  sendFails?: boolean;
+  disabledChannels?: string[];
+} = {}) {
   const configs = new Map<string, WelcomeConfig>();
   const store: WelcomeConfigStore = {
     get: async (id) => configs.get(id) ?? null,
@@ -51,7 +57,14 @@ function setup({ sendFails = false }: { sendFails?: boolean } = {}) {
     warn: (message, fields) => void warnings.push({ message, fields }),
     child: () => logger,
   };
-  const module = createWelcomeModule({ store, sender, guilds, channels, logger });
+  const module = createWelcomeModule({
+    store,
+    sender,
+    guilds,
+    channels,
+    moduleEnabled: async (_guild, channel) => !disabledChannels.includes(channel),
+    logger,
+  });
   const registry = createRegistry([module]);
   const command = registry.find("welcome");
   if (!command) throw new Error("welcome command missing");
@@ -337,6 +350,20 @@ describe("guildMemberAdd handler", () => {
     expect(sent).toEqual([]);
   });
 
+  test("posts nothing when the module is off on the greeting channel", async () => {
+    const { event, configs, sent } = setup({ disabledChannels: [channelId] });
+    configs.set(guildId, { channelId, template: "x" });
+    await event.run(fakeMember());
+    expect(sent).toEqual([]);
+  });
+
+  test("a switch-off on another channel changes nothing", async () => {
+    const { event, configs, sent } = setup({ disabledChannels: [announcementId] });
+    configs.set(guildId, { channelId, template: "x" });
+    await event.run(fakeMember());
+    expect(sent).toHaveLength(1);
+  });
+
   test("a send failure is logged as a warning and does not throw", async () => {
     const { event, configs, warnings } = setup({ sendFails: true });
     configs.set(guildId, { channelId, template: "x" });
@@ -358,6 +385,7 @@ describe("guildMemberAdd handler", () => {
       sender: { send: async () => {} },
       guilds: { describe: async () => null },
       channels: { isTextChannelOf: async () => true },
+      moduleEnabled: async () => true,
       logger: {
         ...silentLogger,
         warn: (message, fields) => void warnings.push({ message, fields }),

@@ -52,6 +52,8 @@ export interface WelcomeModuleDeps {
   sender: WelcomeSender;
   guilds: GuildLookup;
   channels: TextChannels;
+  /** The module toggle for a channel: the greeting is gated on the channel it is posted to. */
+  moduleEnabled: (guildId: string, channelId: string, module: string) => Promise<boolean>;
   logger: Logger;
 }
 
@@ -60,6 +62,7 @@ export function createWelcomeModule({
   sender,
   guilds,
   channels,
+  moduleEnabled,
   logger,
 }: WelcomeModuleDeps): BotModule {
   const tooLong = `Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`;
@@ -218,6 +221,8 @@ export function createWelcomeModule({
     try {
       const config = await store.get(guildId);
       if (!config) return;
+      // The event is only gated guild-wide; a switch-off on the greeting channel is checked here.
+      if (!(await moduleEnabled(guildId, config.channelId, "welcome"))) return;
       const text = renderWelcome(config.template, {
         userId: member.id,
         username: member.displayName,

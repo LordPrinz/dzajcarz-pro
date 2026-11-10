@@ -193,6 +193,16 @@ describe("settings module: /modules", () => {
     expect(disabled).toEqual([]);
   });
 
+  test("says scheduled DMs cannot be switched off on a channel", async () => {
+    const { run, modules } = setupModules();
+    modules.moduleNames = () => ["general", "messages"];
+    const [onChannel] = await run("disable", { module: "messages", channel: CHANNEL });
+    expect(onChannel).toContain(`na kanale <#${CHANNEL}>`);
+    expect(onChannel).toContain("prywatne");
+    const [wholeServer] = await run("disable", { module: "messages" });
+    expect(wholeServer).toBe("Moduł `messages` jest wyłączony na serwerze.");
+  });
+
   test("disable and enable for the whole server", async () => {
     const { run, disabled } = setupModules();
     expect(await run("disable", { module: "music" })).toEqual([

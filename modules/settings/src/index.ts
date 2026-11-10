@@ -274,8 +274,13 @@ export function createSettingsModule({
           const guildId = requireGuild(ctx.guildId);
           await requireToggleableChannel(guildId, channelId);
           await modules.disable(guildId, module, channelId);
+          // Scheduled DMs belong to no channel, so only a server-wide switch-off stops them.
+          const dmNote =
+            module === "messages" && channelId !== null
+              ? " Zaplanowane wiadomości prywatne wyłączysz tylko na całym serwerze."
+              : "";
           await ctx.reply({
-            content: `Moduł \`${module}\` jest wyłączony ${where(channelId)}.`,
+            content: `Moduł \`${module}\` jest wyłączony ${where(channelId)}.${dmNote}`,
             ephemeral: true,
           });
         },
