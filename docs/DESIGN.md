@@ -465,7 +465,10 @@ song gets their track queued behind it, and the first such `/play` makes its cha
 member's track starts, the panel appears there as usual. The song plays at the player's volume and with
 its effect: an idle player keeps what members set, a new one starts at 100 with no effect. It never
 repeats: the adapter keeps the player's loop off while the song plays, so neither the track loop nor the
-queue loop replays it, and a `/loop` sent meanwhile applies to the tracks after it. `/back` during the song
+queue loop replays it. Members cannot pause, skip, stop, seek, loop or replace it: `/pause`, `/skip`, `/stop`,
+`/seek`, `/loop`, `/jump`, `/back` and the matching panel buttons answer that it plays to the end (`/resume`, `/volume` and
+`/filter` stay open, and a member's own track stays fully controllable). The song has no panel of its own, and a panel
+left from before it is removed when the song starts. `/back` during the song
 ends it without queueing it again, `/jump` follows the members' loop mode, and `/back` later passes over
 the song in the history. The schedule module and the music module never import each other; the flag on
 the track is all they share.
