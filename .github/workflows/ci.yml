@@ -100,4 +100,6 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
-      - run: bun test --coverage
+      - run: bun test --coverage --coverage-reporter=text --coverage-reporter=lcov
+      # Bun's own threshold applies per file; this checks the totals.
+      - run: bun scripts/ci/coverage.ts
