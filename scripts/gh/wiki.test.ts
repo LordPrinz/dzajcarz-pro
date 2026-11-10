@@ -43,7 +43,7 @@ describe("wiki", () => {
 
   test("points code links at the trunk branch and leaves external links alone", () => {
     expect(rewriteLinks("[api](apps/api/)", "README.md", pages, REPO)).toBe(
-      `[api](${REPO}/blob/v5/apps/api)`,
+      `[api](${REPO}/blob/main/apps/api)`,
     );
     expect(rewriteLinks("[b](https://bun.com) [g](#goals)", "README.md", pages, REPO)).toBe(
       "[b](https://bun.com) [g](#goals)",
@@ -52,7 +52,7 @@ describe("wiki", () => {
 
   test("serves images raw and rewrites links with a title", () => {
     expect(rewriteLinks("![d](diagram.png)", "docs/DESIGN.md", pages, REPO)).toBe(
-      `![d](${REPO}/raw/v5/docs/diagram.png)`,
+      `![d](${REPO}/raw/main/docs/diagram.png)`,
     );
     expect(rewriteLinks('[d](DESIGN.md "Design")', "docs/x.md", pages, REPO)).toBe(
       '[d](Design "Design")',

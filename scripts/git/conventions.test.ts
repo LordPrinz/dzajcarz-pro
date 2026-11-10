@@ -50,6 +50,6 @@ describe("git conventions", () => {
   test("extracts the ticket from a branch", () => {
     expect(ticketFromBranch("DZAJ-44-set-user-permissions")).toBe("DZAJ-44");
     expect(ticketFromBranch("main")).toBeUndefined();
-    expect(ticketFromBranch("v5")).toBeUndefined();
+    expect(ticketFromBranch("main")).toBeUndefined();
   });
 });

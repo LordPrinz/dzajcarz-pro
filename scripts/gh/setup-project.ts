@@ -131,7 +131,7 @@ await graphql(
   `mutation($projectId: ID!, $readme: String!) {
     updateProjectV2(input: {
       projectId: $projectId,
-      shortDescription: "Dzajcarz v5 — tasks, bugs and research spikes",
+      shortDescription: "Dzajcarz — tasks, bugs and research spikes",
       public: false,
       readme: $readme
     }) { projectV2 { id } }

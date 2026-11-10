@@ -4,13 +4,12 @@ Discord bot for a group of friends: music from YouTube and other sources (Lavali
 created on demand, moderation, welcome messages and a few running jokes. Every command works both as a
 slash command (`/ping`) and with a prefix (`!ping`, the prefix is set per server).
 
-This is v5, a rewrite on Bun. The earlier versions live on the `main`, `dzajcarzv4` and `release/botv3`
-branches and are kept as history only.
+This is v5, a rewrite on Bun. The history of the earlier versions (v3 and v4) sits underneath it on `main`.
 
 - **Architecture & decisions:** [docs/DESIGN.md](docs/DESIGN.md)
 - **Workflow & conventions:** [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Production & releases:** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
-- **Wiki:** generated from these docs on every merge to `v5` ([`wiki.yml`](.github/workflows/wiki.yml)); edit the files in this repository, not the wiki
+- **Wiki:** generated from these docs on every merge to `main` ([`wiki.yml`](.github/workflows/wiki.yml)); edit the files in this repository, not the wiki
 - **Board:** GitHub Projects → _Dzajcarz_ (private)
 
 ## Stack

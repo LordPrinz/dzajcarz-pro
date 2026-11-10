@@ -20,7 +20,7 @@ The script prints the few steps GitHub only allows in the browser (board views, 
 | Todo        | Planned for the current sprint          | sprint planning (manual)                 |
 | In Progress | Someone is working on it                | branch `DZAJ-<n>-…` pushed (automatic)   |
 | QA          | PR open: code review + test on a server | PR opened / ready for review (automatic) |
-| Done        | Merged to `v5`                          | PR merged (automatic)                    |
+| Done        | Merged to `main`                        | PR merged (automatic)                    |
 
 Fields: **Area**, **Priority** (P0 blocks others · P1 this sprint · P2 nice to have), **Size** (S ≤ ½ day ·
 M 1–2 days · L split it), **Sprint** (2 weeks).
@@ -31,11 +31,11 @@ draft (drafts have no number).
 ## Flow
 
 ```bash
-gh issue develop 12 --base v5 --name DZAJ-12-music-queue --checkout   # or "Create a branch" on the issue
+gh issue develop 12 --base main --name DZAJ-12-music-queue --checkout   # or "Create a branch" on the issue
 # …work…
 git commit -m "feat(music): Add queue command"   # hook turns it into "[DZAJ-12] feat(music): Add queue command"
 git push -u origin HEAD                           # pre-push: branch name, typecheck, tests
-gh pr create --base v5 --fill                     # PR title must follow the same format
+gh pr create --base main --fill                     # PR title must follow the same format
 ```
 
 Test new commands on a private test server: set `DISCORD_DEV_GUILD_ID`, so slash commands show up there at
@@ -73,15 +73,14 @@ interaction responses only.
 
 ## Conventions
 
-- **Trunk** is `v5`, an orphan branch. `main`, `dzajcarzv4` and `release/botv3` hold the old bot and are
-  never merged into it.
+- **Trunk** is `main`. It carries the history of the old bot (v3 and v4) underneath the current code.
 - **Ticket** `DZAJ-<n>` is issue `#<n>` (autolinked on GitHub).
 - **Branch:** `DZAJ-<n>-short-kebab-description`.
 - **Commit / PR title:** `[DZAJ-<n>] <type>(<optional scope>): <Description>`
   - types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`, `ci`, `build`
   - scopes: `core`, `bot`, `db`, `kv`, `general`, `settings`, `music`, `party`, `moderation`, `welcome`, `status`, `fun`, `infra`
   - `!` after the type/scope marks a breaking change.
-- PRs are **squash-merged**; the PR title becomes the commit on `v5`.
+- PRs are **squash-merged**; the PR title becomes the commit on `main`.
 - **Dependabot** keeps its own `dependabot/…` branches; its PRs use the umbrella ticket DZAJ-3
   (`[DZAJ-3] build(deps): Bump …`) and go through the same checks.
 - Code, comments, docs and commits are in English. What the bot says on Discord is in Polish.

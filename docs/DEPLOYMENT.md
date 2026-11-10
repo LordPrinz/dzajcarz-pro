@@ -51,7 +51,7 @@ of this repository: the image is built from it, and Lavalink mounts `infra/laval
 `infra/lavalink/music`.
 
 ```bash
-git clone git@github.com:LordPrinz/dzajcarz-pro.git dzajcarz && cd dzajcarz   # v5 is the default branch
+git clone git@github.com:LordPrinz/dzajcarz-pro.git dzajcarz && cd dzajcarz   # main is the default branch
 cp .env.example .env && chmod 600 .env
 # fill in DISCORD_TOKEN, DISCORD_CLIENT_ID and the three passwords (openssl rand -hex 32 for each)
 bun run prod:up
@@ -125,7 +125,7 @@ bun run prod:up     # the old image is still there, so the build is mostly cache
 
 Migrations are forward-only, and the old binary ignores tables and columns it does not know. A release whose
 migration removed or changed something the old code still uses cannot be rolled back this way: restore the
-backup taken before it instead. Go back to the branch with `git checkout v5` before the next `git pull`.
+backup taken before it instead. Go back to the branch with `git checkout main` before the next `git pull`.
 
 ### Old images
 

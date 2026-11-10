@@ -16,7 +16,7 @@ on:
       - infra/docker-compose.prod.yml
       - .github/workflows/docker.yml
   push:
-    branches: [v5]
+    branches: [main]
     paths:
       - Dockerfile
       - .dockerignore
