@@ -240,6 +240,18 @@ describe("riot module", () => {
     expect((ctx.replies[0] as { ephemeral?: boolean }).ephemeral).toBe(true);
   });
 
+  test("a missing League profile names the chosen region", async () => {
+    const stats = fakeStats();
+    stats.failWith = new RiotLookupError("no-region-profile");
+    const { run } = setup({ stats });
+    const defaultRegion = await run("lol", { riot_id: "Dzajcarz#EUNE" });
+    expect(textOf(defaultRegion.replies[0])).toBe(
+      "Gracz **Dzajcarz#EUNE** nie ma konta League of Legends na serwerze EUNE. Spróbuj z innym regionem.",
+    );
+    const na = await setup({ stats }).run("lol", { riot_id: "Dzajcarz#EUNE", region: "na1" });
+    expect(textOf(na.replies[0])).toContain("na serwerze NA.");
+  });
+
   test("forbidden reads differently for /lol", async () => {
     const stats = fakeStats();
     stats.failWith = new RiotLookupError("forbidden");

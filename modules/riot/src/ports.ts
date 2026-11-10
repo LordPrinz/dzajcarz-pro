@@ -1,4 +1,10 @@
-export type RiotFailureKind = "not-found" | "forbidden" | "rate-limited" | "unavailable";
+export type RiotFailureKind =
+  | "not-found"
+  /** The Riot account exists, but the player has no League account on the chosen platform. */
+  | "no-region-profile"
+  | "forbidden"
+  | "rate-limited"
+  | "unavailable";
 
 /** What the adapters throw; the module turns it into a Polish `UserError`. */
 export class RiotLookupError extends Error {

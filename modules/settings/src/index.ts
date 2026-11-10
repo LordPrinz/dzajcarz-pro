@@ -168,7 +168,7 @@ export function createSettingsModule({
           const zone =
             canonical !== null && (await timeZones.isKnown(canonical)) ? canonical : null;
           if (zone === null) {
-            const shown = ctx.args.zone.replaceAll("`", "").slice(0, 64);
+            const shown = [...ctx.args.zone.replaceAll("`", "")].slice(0, 64).join("");
             throw new UserError(
               `Nie znam strefy \`${shown}\`. Podaj nazwę IANA, np. \`Europe/Warsaw\`, \`Europe/London\` albo \`America/New_York\`.`,
             );
@@ -210,7 +210,7 @@ export function createSettingsModule({
     if (!known.includes(module)) {
       const valid = known.filter((n) => !PROTECTED_MODULES.has(n));
       // The name is echoed inside a code span: a backtick would close it, and length is capped for Discord's limit.
-      const shown = name.replaceAll("`", "").slice(0, MAX_ECHOED_NAME);
+      const shown = [...name.replaceAll("`", "")].slice(0, MAX_ECHOED_NAME).join("");
       throw new UserError(
         `Nie ma modułu \`${shown}\`. Dostępne moduły: ${valid.map((n) => `\`${n}\``).join(", ") || "brak"}.`,
       );

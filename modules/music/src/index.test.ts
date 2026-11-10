@@ -5,6 +5,8 @@ import {
   createRegistry,
   executeCommand,
   GENERIC_ERROR,
+  type LogFields,
+  type Logger,
   type Reply,
   type SelectSpec,
   silentLogger,
@@ -51,6 +53,12 @@ const CALLER = "200000000000000002";
 const FRIEND = "200000000000000009";
 
 function setup() {
+  const infos: { message: string; fields?: LogFields }[] = [];
+  const logger: Logger = {
+    ...silentLogger,
+    info: (message, fields) => void infos.push({ message, fields }),
+    child: () => logger,
+  };
   const player = createFakePlayer();
   const voice = createFakeVoice();
   const panels = createFakePanels();
@@ -63,7 +71,7 @@ function setup() {
     directMessages,
     scheduler,
     stateStorage: createMemoryStorage(),
-    logger: silentLogger,
+    logger,
   });
   const registry = createRegistry([module]);
   voice.members.set(CALLER, VOICE);
@@ -108,6 +116,7 @@ function setup() {
   }
 
   return {
+    infos,
     player,
     voice,
     panels,
@@ -301,6 +310,19 @@ describe("music module", () => {
   });
 
   describe("/search", () => {
+    test("a failed lookup is logged with the kind and length, never the text", async () => {
+      const { run, player, infos } = setup();
+      player.nextResult = { kind: "error", message: "boom" };
+      await run("search", { query: "tajny tekst" });
+      await run("play", { query: "https://youtu.be/abc" });
+      expect(infos.map((info) => info.fields)).toMatchObject([
+        { query: { kind: "search", length: 11 } },
+        { query: { kind: "url" } },
+      ]);
+      expect(JSON.stringify(infos)).not.toContain("tajny");
+      expect(JSON.stringify(infos)).not.toContain("youtu.be");
+    });
+
     test("offers up to ten results to the caller only and queues the chosen one", async () => {
       const { run, player, click } = setup();
       player.nextResult = {
@@ -364,6 +386,23 @@ describe("music module", () => {
       const next = await click(nav[2]?.customId ?? "");
       const second = next.updates[0] as Exclude<Reply, string>;
       expect(second.embeds?.[0]?.description).toContain("`11.` [T11]");
+    });
+
+    test("a page of ten long-linked tracks still fits the 4096-character description", async () => {
+      const { run, player } = setup();
+      const long = (title: string) => ({
+        ...track(title),
+        uri: `https://example.com/${"a".repeat(1980)}`,
+      });
+      player.nextResult = {
+        kind: "playlist",
+        name: "Lista",
+        // The first track becomes the current one, the other ten wait.
+        tracks: [long("_".repeat(80)), ...Array.from({ length: 10 }, () => long("_".repeat(60)))],
+      };
+      await run("play", { query: "https://www.youtube.com/playlist?list=x" });
+      const page = (await run("queue")).replies[0] as Exclude<Reply, string>;
+      expect(page.embeds?.[0]?.description?.length).toBeLessThanOrEqual(4096);
     });
 
     test("says when nothing plays", async () => {

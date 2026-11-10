@@ -87,6 +87,8 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     game: Game,
     input: string,
     fetchEmbed: ((id: RiotId) => Promise<Embed>) | undefined,
+    /** The region choice's label ("EUNE"), for the failures that name it. */
+    region?: string,
   ): Promise<void> {
     if (!fetchEmbed) {
       throw new UserError(`Statystyki ${GAME_NAMES[game]} są wyłączone: bot nie ma klucza API.`);
@@ -112,16 +114,25 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     try {
       await ctx.reply({ embeds: [await fetchEmbed(id)] });
     } catch (error) {
-      if (error instanceof RiotLookupError) throw await toUserError(error, game, id);
+      if (error instanceof RiotLookupError) throw await toUserError(error, game, id, region);
       throw error;
     }
   }
 
-  async function toUserError(error: RiotLookupError, game: Game, id: RiotId): Promise<UserError> {
+  async function toUserError(
+    error: RiotLookupError,
+    game: Game,
+    id: RiotId,
+    region?: string,
+  ): Promise<UserError> {
     switch (error.kind) {
       case "not-found":
         return new UserError(
           `Nie znalazłem gracza **${escapeMarkdown(id.gameName)}#${escapeMarkdown(id.tagLine)}**.`,
+        );
+      case "no-region-profile":
+        return new UserError(
+          `Gracz **${escapeMarkdown(id.gameName)}#${escapeMarkdown(id.tagLine)}** nie ma konta League of Legends na serwerze ${region ?? "tym"}. Spróbuj z innym regionem.`,
         );
       case "forbidden":
         return new UserError(
@@ -197,6 +208,7 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
         "lol",
         ctx.args.riot_id,
         lolStats && (async (id) => lolEmbed(await lolStats(id, platform))),
+        REGIONS.find((region) => region.value === platform)?.name.toUpperCase(),
       );
     },
   });

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { silentLogger } from "@dzajcarz/core";
+import { type LogFields, type Logger, silentLogger } from "@dzajcarz/core";
 import type { MusicListener, MusicTrack } from "@dzajcarz/module-music";
 import type { Client } from "discord.js";
 import { EQList, FilterManager, type LavalinkManager } from "lavalink-client";
@@ -173,6 +173,8 @@ class StubPlayer {
 class StubManager extends EventEmitter {
   nodeUp = true;
   failPlay = false;
+  /** `sendRawData` rejects while true, like a node that is down. */
+  rawFails = false;
   destroyFailsEarly = false;
   /** The node refuses player updates (filters) while true. */
   failUpdate = false;
@@ -234,7 +236,9 @@ class StubManager extends EventEmitter {
   }
 
   async init() {}
-  async sendRawData() {}
+  async sendRawData() {
+    if (this.rawFails) throw new Error("Lavalink node is down");
+  }
 
   /** A player that already plays `current` with `upcoming` queued. */
   playing(guildId: string, current: StubTrack | null, upcoming: StubTrack[] = []): StubPlayer {
@@ -259,17 +263,26 @@ function setup({ localFileGraceMs }: { localFileGraceMs?: number } = {}) {
   const manager = new StubManager();
   const gateway: unknown[] = [];
   const shard = { send: (payload: unknown) => void gateway.push(payload) };
+  const handlers = new Map<string, (...args: unknown[]) => void>();
   const client = {
-    on() {},
+    on(event: string, handler: (...args: unknown[]) => void) {
+      handlers.set(event, handler);
+    },
     off() {},
     once() {},
     guilds: { cache: new Map([[GUILD, { shard }]]) },
   } as unknown as Client;
+  const warnings: { message: string; fields?: LogFields }[] = [];
+  const logger: Logger = {
+    ...silentLogger,
+    warn: (message, fields) => void warnings.push({ message, fields }),
+    child: () => logger,
+  };
   const music = createLavalinkMusicPlayer({
     client,
     url: "http://localhost:2333",
     password: "pw",
-    logger: silentLogger,
+    logger,
     createManager: () => manager as unknown as LavalinkManager,
     localFileGraceMs,
   });
@@ -282,13 +295,26 @@ function setup({ localFileGraceMs }: { localFileGraceMs?: number } = {}) {
     trackFailed: (_guildId, track) => void failed.push(track),
   };
   music.subscribe(listener);
-  return { manager, music, gateway, events, failed };
+  const forwardRaw = (packet: unknown) => handlers.get("raw")?.(packet);
+  return { manager, music, gateway, events, failed, warnings, forwardRaw };
 }
 
 /** Lets fire-and-forget recovery work finish. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("lavalink music player", () => {
+  describe("forwarding voice packets", () => {
+    test("a rejection while the node is down is logged, not left unhandled", async () => {
+      const { manager, warnings, forwardRaw } = setup();
+      manager.rawFails = true;
+      forwardRaw({ t: "VOICE_SERVER_UPDATE", d: { guild_id: GUILD } });
+      await settle();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]?.message).toBe("Voice update not forwarded");
+      expect(warnings[0]?.fields).toMatchObject({ guildId: GUILD });
+    });
+  });
+
   describe("destroying a player", () => {
     test("leave during a node outage still drops the player and tells the module", async () => {
       const { manager, music, events } = setup();
@@ -957,6 +983,18 @@ describe("lavalink music player", () => {
   });
 
   describe("search", () => {
+    test("an HTTP error does not carry the member's text into the error result", async () => {
+      const { manager, music } = setup();
+      manager.response = new Error(
+        "Request failed | request-PATH: /v4/loadtracks?identifier=ytsearch%3Atajny%20tekst&x=1 | status: 500",
+      );
+      const result = await music.search({ kind: "search", text: "tajny tekst" }, "u1");
+      expect(result.kind).toBe("error");
+      const message = result.kind === "error" ? result.message : "";
+      expect(message).toContain("identifier=<redacted>&x=1");
+      expect(message).not.toContain("tajny");
+    });
+
     test("a malformed or failed node answer is a result, never a throw", async () => {
       const { manager, music } = setup();
       for (const [response, kind] of [

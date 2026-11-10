@@ -395,8 +395,12 @@ export function createLavalinkMusicPlayer({
     logger.warn("Lavalink node error", { node: node.id, error });
   });
 
+  // Voice packets keep arriving while the node is down; sendRawData then rejects.
   const forwardVoice = (packet: unknown) => {
-    void manager.sendRawData(packet as Parameters<typeof manager.sendRawData>[0]);
+    const guildId = (packet as { d?: { guild_id?: unknown } } | null)?.d?.guild_id;
+    manager
+      .sendRawData(packet as Parameters<typeof manager.sendRawData>[0])
+      .catch((error: unknown) => logger.warn("Voice update not forwarded", { guildId, error }));
   };
   client.on(Events.Raw, forwardVoice);
   client.once(Events.ClientReady, (ready) => {
@@ -464,7 +468,12 @@ export function createLavalinkMusicPlayer({
         for (const track of tracks) remember(track);
         return found;
       } catch (error) {
-        return { kind: "error", message: error instanceof Error ? error.message : String(error) };
+        const message = error instanceof Error ? error.message : String(error);
+        // The client's HTTP error message carries the request path, which holds what the member typed.
+        return {
+          kind: "error",
+          message: message.replace(/identifier=[^&\s|]*/g, "identifier=<redacted>"),
+        };
       }
     },
 

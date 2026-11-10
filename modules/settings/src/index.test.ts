@@ -267,6 +267,12 @@ describe("settings module: /modules", () => {
     expect(reply).toContain(`Nie ma modułu \`${"x".repeat(32)}\`.`);
   });
 
+  test("the echoed name is cut on code points, not in the middle of an emoji", async () => {
+    const { run } = setupModules();
+    const [reply] = await run("disable", { module: "😀".repeat(40) });
+    expect(reply).toContain(`Nie ma modułu \`${"😀".repeat(32)}\`.`);
+  });
+
   test("list stays under 2000 characters and counts what it left out", async () => {
     const { run, modules } = setupModules();
     const names = Array.from({ length: 200 }, (_, i) => `module${i}`);
@@ -387,6 +393,12 @@ describe("settings module: /timezone", () => {
       expect((await run("set", { zone }))[0]).toStartWith(`Nie znam strefy \`${zone}\`.`);
     }
     expect(zones.size).toBe(0);
+  });
+
+  test("an unknown zone is echoed cut on code points, not in the middle of an emoji", async () => {
+    const { run } = setupZones();
+    const [reply] = await run("set", { zone: "😀".repeat(70) });
+    expect(reply).toStartWith(`Nie znam strefy \`${"😀".repeat(64)}\`.`);
   });
 
   test("reset goes back to the default", async () => {

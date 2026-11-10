@@ -38,12 +38,22 @@ describe("Latin script", () => {
     "co?",
     "cooo",
     "Kto to? co",
+    "co <:x:1>",
   ])("%p matches", (text) => expect(matches(text)).toBe(true));
 
-  test.each(["whatever", "somewhat", "cos", "komeda", "scope", "hello there", ""])(
-    "%p does not match",
-    (text) => expect(matches(text)).toBe(false),
-  );
+  test.each([
+    "whatever",
+    "somewhat",
+    "cos",
+    "komeda",
+    "scope",
+    "hello there",
+    "",
+    "<:co:123>",
+    "<a:what:456>",
+    "https://x/what",
+    "HTTPS://x/what",
+  ])("%p does not match", (text) => expect(matches(text)).toBe(false));
 
   test("case and Unicode normalisation are folded", () => {
     expect(matches("QUÉ")).toBe(true);
@@ -64,6 +74,12 @@ describe("Latin script", () => {
     expect(matches("He   aha")).toBe(true);
     expect(matches("che  cosa")).toBe(true);
     expect(matches("Quid\test")).toBe(true);
+  });
+});
+
+describe("markup at the search limit", () => {
+  test("an emoji cut by the 2000-character boundary is stripped whole, not left as <:co", () => {
+    expect(matches(`${"x ".repeat(998)}<:co:123>`)).toBe(false);
   });
 });
 

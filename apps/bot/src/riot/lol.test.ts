@@ -163,6 +163,13 @@ describe("createLolStats", () => {
     }
   });
 
+  test("a 404 on the summoner means no League account in that region", async () => {
+    const { stats } = setup({
+      "/lol/summoner/v4/summoners/by-puuid/": () => new Response("", { status: 404 }),
+    });
+    await expect(stats.lol(id, "eun1")).rejects.toEqual(new RiotLookupError("no-region-profile"));
+  });
+
   test("a 429 on the summoner stops the remaining requests", async () => {
     const { stats, calls } = setup({
       "/lol/summoner/v4/summoners/by-puuid/": () => new Response("", { status: 429 }),
