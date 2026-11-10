@@ -71,7 +71,7 @@ try {
   process.exit(1);
 }
 const redis = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
-keepConnected(redis);
+keepConnected(redis, logger);
 
 const guildSettings = createGuildSettingsRepository(sql);
 const prefixes = createPrefixResolver({

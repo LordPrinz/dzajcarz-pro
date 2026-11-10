@@ -7,6 +7,7 @@ import {
   RESTJSONErrorCodes,
   SnowflakeUtil,
 } from "discord.js";
+import { hasCode } from "./errors.ts";
 import { NO_MENTIONS } from "./reply.ts";
 
 export const BOT_MISSING_PERMISSIONS =
@@ -19,10 +20,6 @@ export const NOT_A_TEXT_CHANNEL = "Tu nie mogę usuwać wiadomości.";
 const MAX_FETCH = 100;
 /** Bulk delete works up to 14 days; stay a minute inside so a message does not age out in flight. */
 const BULK_MAX_AGE_MS = 14 * 24 * 3_600_000 - 60_000;
-
-function hasCode(error: unknown, code: number): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code;
-}
 
 /** The refusals a moderator can act on become UserErrors; anything else stays an error to log. */
 function explain(error: unknown): never {

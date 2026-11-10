@@ -269,7 +269,7 @@ describe("settings module: /modules", () => {
     modules.moduleNames = () => names;
     const reply = (await run("list"))[0] ?? "";
     expect(reply.length).toBeLessThan(2000);
-    expect(reply).toMatch(/\n…i jeszcze \d+$/);
+    expect(reply).toMatch(/\n… i jeszcze \d+$/);
   });
 
   test("list shortens a very long channel list", async () => {

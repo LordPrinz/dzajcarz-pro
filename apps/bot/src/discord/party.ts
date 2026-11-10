@@ -13,21 +13,14 @@ import {
   RESTJSONErrorCodes,
 } from "discord.js";
 import { downloadDiscordFile } from "./download.ts";
+import { hasCode } from "./errors.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 const UNKNOWN_CHANNEL = RESTJSONErrorCodes.UnknownChannel;
 
-function isUnknownChannel(error: unknown): boolean {
-  return (
-    typeof error === "object" && error !== null && "code" in error && error.code === UNKNOWN_CHANNEL
-  );
-}
+const isUnknownChannel = (error: unknown) => hasCode(error, UNKNOWN_CHANNEL);
 
 const UNKNOWN_MEMBER = RESTJSONErrorCodes.UnknownMember;
-
-function hasCode(error: unknown, code: number): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code;
-}
 
 export function createPartyChannels(client: Client): PartyChannels {
   /** The voice channel, or null when it was deleted. */

@@ -14,7 +14,6 @@ import { clickComponent, createFakeContext, replyText, submitModal } from "@dzaj
 import { createMemoryStore } from "@dzajcarz/kv";
 import {
   createMessagesModule,
-  fitLines,
   MAX_CONTENT_LENGTH,
   MAX_DMS_PER_RECIPIENT,
   MAX_DUE_PER_TICK,
@@ -881,14 +880,6 @@ describe("messages list", () => {
     const more = lines.at(-1)?.match(/^… i jeszcze (\d+)$/);
     expect(more).not.toBeNull();
     expect(lines.length - 1 + Number(more?.[1])).toBe(MAX_MESSAGES_PER_GUILD);
-  });
-
-  test("fitLines keeps everything that fits and counts the rest", () => {
-    expect(fitLines(["a", "b"], 100)).toBe("a\nb");
-    const lines = Array.from({ length: 10 }, (_, i) => `${i}`.padEnd(20, "."));
-    const cut = fitLines(lines, 100);
-    expect(cut.length).toBeLessThanOrEqual(100);
-    expect(cut.endsWith("… i jeszcze 7")).toBe(true);
   });
 });
 

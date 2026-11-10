@@ -1,4 +1,5 @@
 import type { ButtonSpec, Embed } from "@dzajcarz/core";
+import { plural } from "@dzajcarz/core";
 import { escapeMarkdown, formatDuration, httpUrl, progressLine, truncate } from "./format.ts";
 import type { LoopMode, MusicFilter, MusicTrack, PanelMessage, PlayerState } from "./ports.ts";
 
@@ -80,8 +81,5 @@ export function queueLine(index: number, track: MusicTrack): string {
 
 /** 1 utwór, 2 utwory, 5 utworów, 22 utwory. */
 export function tracksWord(count: number): string {
-  if (count === 1) return "utwór";
-  const lastTwo = count % 100;
-  const last = count % 10;
-  return last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) ? "utwory" : "utworów";
+  return plural(count, "utwór", "utwory", "utworów");
 }

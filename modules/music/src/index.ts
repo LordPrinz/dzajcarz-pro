@@ -11,6 +11,7 @@ import {
   defineSelect,
   type Logger,
   PUBLIC_OWNER,
+  requireGuild,
   type Scheduler,
   type StateStorage,
   UserError,
@@ -132,11 +133,9 @@ export function createMusicModule({
 }: MusicModuleDeps): BotModule {
   const searches = createComponentStateStore(stateStorage);
 
-  function guildOf(ctx: Pick<CommandContext, "guildId">): string {
-    // Commands are guild-only by default and the components declare guildOnly, so this never fires.
-    if (ctx.guildId === null) throw new UserError("Muzyka działa tylko na serwerze.");
-    return ctx.guildId;
-  }
+  // Commands are guild-only by default and the components declare guildOnly, so this never fires.
+  const guildOf = (ctx: Pick<CommandContext, "guildId">) =>
+    requireGuild(ctx.guildId, "Muzyka działa tylko na serwerze.");
 
   /** The member's input as a query; a link to another site is refused here. */
   function queryOf(input: string, emptyText: string): MusicQuery {
@@ -523,7 +522,7 @@ export function createMusicModule({
   const guildGone = defineEvent({
     name: "music-guild-gone",
     event: "guildDelete",
-    // The bot was removed from the server (or it went unavailable): nothing is left to play into.
+    // The bot was removed from the server: nothing is left to play into. (An outage is guildUnavailable.)
     alwaysRun: true,
     async run(guild) {
       if (player.state(guild.id)) await player.leave(guild.id);

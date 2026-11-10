@@ -1,10 +1,14 @@
 import {
   type BotModule,
+  codeBlocks,
   defineCommand,
   defineEvent,
   defineModal,
   defineSubcommand,
   type Logger,
+  MANAGE_GUILD,
+  requireGuild,
+  type TextChannels,
   UserError,
 } from "@dzajcarz/core";
 import type { GuildMember } from "discord.js";
@@ -35,11 +39,7 @@ export interface WelcomeSender {
   send(guildId: string, channelId: string, text: string, memberId: string): Promise<void>;
 }
 
-/** Asks Discord about channels, so a channel id typed by a member is never trusted on its own. */
-export interface TextChannels {
-  /** Whether the channel is a text or announcement channel of this guild. */
-  isTextChannelOf(guildId: string, channelId: string): Promise<boolean>;
-}
+export type { TextChannels } from "@dzajcarz/core";
 
 /** Name and size of a guild, for `/welcome test`. */
 export interface GuildLookup {
@@ -54,23 +54,6 @@ export interface WelcomeModuleDeps {
   logger: Logger;
 }
 
-/** Discord caps a message at 2000 characters; the fences and a margin leave room for the text. */
-const CHUNK_SIZE = 1900;
-
-/** The text as ephemeral-sized code blocks; a run of backticks gets a zero-width space so it cannot close one. */
-function codeBlocks(text: string): string[] {
-  const safe = text.replaceAll("`", "`\u200b");
-  const characters = [...safe];
-  const blocks: string[] = [];
-  for (let start = 0; start < characters.length; start += CHUNK_SIZE) {
-    blocks.push(`\`\`\`\n${characters.slice(start, start + CHUNK_SIZE).join("")}\n\`\`\``);
-  }
-  return blocks;
-}
-
-/** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
-const MANAGE_GUILD = 1n << 5n;
-
 export function createWelcomeModule({
   store,
   sender,
@@ -78,11 +61,6 @@ export function createWelcomeModule({
   channels,
   logger,
 }: WelcomeModuleDeps): BotModule {
-  const guildOf = (guildId: string | null): string => {
-    if (guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
-    return guildId;
-  };
-
   const tooLong = `Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`;
 
   /** Shared by the prefix form and the modal, so both refuse the same input. */
@@ -129,7 +107,7 @@ export function createWelcomeModule({
           await ctx.reply({ content: chunk, ephemeral: true });
         return;
       }
-      const content = await saveWelcome(guildOf(ctx.guildId), ctx.values.channel, message);
+      const content = await saveWelcome(requireGuild(ctx.guildId), ctx.values.channel, message);
       await ctx.reply({ content, ephemeral: true });
     },
   });
@@ -157,7 +135,7 @@ export function createWelcomeModule({
           },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           if (ctx.canShowModal) {
             // showModal has to be the first answer, so only what is needed to prefill is looked up.
             const current = await store.get(guildId);
@@ -186,7 +164,7 @@ export function createWelcomeModule({
       off: defineSubcommand({
         description: "Wyłącza powitania",
         run: async (ctx) => {
-          const removed = await store.delete(guildOf(ctx.guildId));
+          const removed = await store.delete(requireGuild(ctx.guildId));
           await ctx.reply({
             content: removed ? "Powitania wyłączone." : "Powitania nie były ustawione.",
             ephemeral: true,
@@ -196,7 +174,7 @@ export function createWelcomeModule({
       test: defineSubcommand({
         description: "Wysyła powitanie dla Ciebie na skonfigurowany kanał",
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           // Fetching the guild and posting can take longer than the 3 s a slash command may stay silent.
           await ctx.defer({ ephemeral: true });
           const config = await store.get(guildId);

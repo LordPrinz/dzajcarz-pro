@@ -18,7 +18,7 @@ export interface LocalMinute {
 }
 
 /** The wall-clock minute `now` falls on in `timeZone`, with the date on that zone's side of midnight. */
-export function warsawMinute(now: Date, timeZone: string): LocalMinute {
+export function localMinute(now: Date, timeZone: string): LocalMinute {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     hourCycle: "h23",

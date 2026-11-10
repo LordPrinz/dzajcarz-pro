@@ -4,6 +4,9 @@ import {
   defineEvent,
   defineSubcommand,
   type Logger,
+  MANAGE_GUILD,
+  requireGuild,
+  type TextChannels,
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
@@ -36,11 +39,7 @@ export interface DzajcoResponder {
   respond(channelId: string, messageId: string): Promise<void>;
 }
 
-/** Asks Discord about channels, so a channel id typed by a member is never trusted on its own. */
-export interface TextChannels {
-  /** Whether the channel is a text or announcement channel of this guild. */
-  isTextChannelOf(guildId: string, channelId: string): Promise<boolean>;
-}
+export type { TextChannels } from "@dzajcarz/core";
 
 export interface DzajcoModuleDeps {
   settings: DzajcoSettingsStore;
@@ -63,9 +62,6 @@ export interface DzajcoMessage {
   webhookId: string | null;
   client?: { user?: { id: string } | null };
 }
-
-/** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
-const MANAGE_GUILD = 1n << 5n;
 
 const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -159,11 +155,6 @@ export function createDzajcoModule({
     run: handle,
   });
 
-  const guildOf = (guildId: string | null): string => {
-    if (guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
-    return guildId;
-  };
-
   /** The explicit channel must belong to this guild; without one the current channel is used. */
   async function targetChannel(guildId: string, explicit: string | undefined, current: string) {
     if (explicit === undefined) return current;
@@ -190,7 +181,7 @@ export function createDzajcoModule({
         description: "Pokazuje ustawienia Dżajco kanału",
         options: { channel: channelOption },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           const channelId = await targetChannel(guildId, ctx.args.channel, ctx.channelId);
           const stored = await settings.get(guildId, channelId);
           await ctx.reply({
@@ -217,7 +208,7 @@ export function createDzajcoModule({
           },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           const { chance, cooldown } = ctx.args;
           if (chance === undefined && cooldown === undefined) {
             throw new UserError("Podaj szansę albo przerwę.");
@@ -240,7 +231,7 @@ export function createDzajcoModule({
         description: "Przywraca domyślne ustawienia Dżajco w kanale",
         options: { channel: channelOption },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           const channelId = await targetChannel(guildId, ctx.args.channel, ctx.channelId);
           const removed = await settings.clear(guildId, channelId);
           await refresh(guildId, channelId);

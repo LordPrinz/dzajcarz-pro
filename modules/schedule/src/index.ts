@@ -4,6 +4,8 @@ import {
   defineCommand,
   defineSubcommand,
   type Logger,
+  MANAGE_GUILD,
+  requireGuild,
   UserError,
 } from "@dzajcarz/core";
 
@@ -82,9 +84,6 @@ export interface ScheduleModuleDeps {
   timeZone: string;
 }
 
-/** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
-const MANAGE_GUILD = 1n << 5n;
-
 const MODULE_NAME = "schedule";
 /** The `/schedule song` value that goes back to the default song; no listed song may use it. */
 const RESET = "reset";
@@ -123,11 +122,6 @@ export function createScheduleModule({
   const songByName = new Map(songs.map((song) => [song.name, song]));
   /** Servers whose song is on right now, so an overlapping run cannot start a second one. */
   const running = new Set<string>();
-
-  const guildOf = (guildId: string | null): string => {
-    if (guildId === null) throw new UserError("Ta komenda działa tylko na serwerze.");
-    return guildId;
-  };
 
   async function chosenSong(guildId: string): Promise<ScheduledSong> {
     const name = await settings.getSong(guildId);
@@ -205,7 +199,7 @@ export function createScheduleModule({
       list: defineSubcommand({
         description: "Pokazuje piosenkę, godziny i wykluczone kanały",
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           const [song, excluded] = await Promise.all([
             chosenSong(guildId),
             settings.listExcluded(guildId),
@@ -226,7 +220,7 @@ export function createScheduleModule({
           channel: { type: "channel", description: "Kanał głosowy", required: true },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           const { channel } = ctx.args;
           if (!(await voice.isVoiceChannelOf(guildId, channel))) {
             throw new UserError("Wybierz kanał głosowy z tego serwera.");
@@ -246,7 +240,7 @@ export function createScheduleModule({
           channel: { type: "channel", description: "Kanał głosowy", required: true },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           const { channel } = ctx.args;
           // No channel-type check: a deleted channel must still be removable from the list.
           const removed = await settings.removeExcluded(guildId, channel);
@@ -272,7 +266,7 @@ export function createScheduleModule({
           },
         },
         run: async (ctx) => {
-          const guildId = guildOf(ctx.guildId);
+          const guildId = requireGuild(ctx.guildId);
           const name = ctx.args.name?.trim();
           if (!name) {
             const current = await chosenSong(guildId);
