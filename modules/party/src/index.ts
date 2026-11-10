@@ -17,7 +17,7 @@ import {
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
-import type { Channel, Client, VoiceState } from "discord.js";
+import type { Channel, Client, Guild, VoiceState } from "discord.js";
 
 export interface PartyArea {
   guildId: string;
@@ -83,8 +83,11 @@ export interface PartyChannels {
   moveMember(guildId: string, userId: string, channelId: string): Promise<void>;
   /** A channel that is already gone counts as deleted. */
   deleteChannel(channelId: string): Promise<void>;
-  /** Ids of the people (bots excluded) in the voice channel; null when the channel no longer exists. */
-  members(channelId: string): Promise<string[] | null>;
+  /**
+   * Ids of the people (bots excluded) in the voice channel; null when the channel no longer exists, undefined
+   * when nobody can tell yet because Discord has not sent the guild's voice states (guild unavailable).
+   */
+  members(channelId: string): Promise<string[] | null | undefined>;
   /** Whether the channel still exists on Discord. */
   exists(channelId: string): Promise<boolean>;
   /** Creates a category and the voice channel inside it that members join. Leaves nothing behind on failure. */
@@ -1734,6 +1737,7 @@ export function createPartyModule({
     const owned = await repository.findChannel(leftChannelId);
     if (!owned) return;
     const members = await channels.members(leftChannelId);
+    if (members === undefined) return;
     if (members === null || members.length === 0) {
       await removeChannel(leftChannelId);
       return;
@@ -1857,16 +1861,31 @@ export function createPartyModule({
     run: (_client: Client<true>) => reconcileChannels(),
   });
 
-  /** Catches up with what happened while the bot was offline; never throws. */
-  async function reconcileChannels(): Promise<void> {
+  // A guild that was still unavailable at startup has no voice states yet, so its channels wait for this.
+  const reconcileLate = defineEvent({
+    name: "party-reconcile-late",
+    event: "guildAvailable",
+    alwaysRun: true,
+    run: (guild: Guild) => reconcileChannels(guild.id),
+  });
+
+  /** Catches up with what happened while the bot was offline; never throws. Without a guild id checks all. */
+  async function reconcileChannels(guildId?: string): Promise<void> {
     try {
-      const droppedAreas = await reconcileAreas();
-      const stored = await repository.listChannels();
+      const droppedAreas = guildId === undefined ? await reconcileAreas() : 0;
+      const stored = (await repository.listChannels()).filter(
+        (channel) => guildId === undefined || channel.guildId === guildId,
+      );
       let removedCount = 0;
+      let unknownCount = 0;
       for (const { channelId, createdAt } of stored) {
         if (Date.now() - createdAt.getTime() < RECONCILE_GRACE_MS) continue;
         try {
           const members = await channels.members(channelId);
+          if (members === undefined) {
+            unknownCount++;
+            continue;
+          }
           if (members !== null && members.length > 0) continue;
           await removeChannel(channelId);
           removedCount++;
@@ -1875,12 +1894,14 @@ export function createPartyModule({
         }
       }
       logger.info("Party channels reconciled", {
+        guildId,
         checked: stored.length,
         removed: removedCount,
+        waitingForGuild: unknownCount,
         droppedAreas,
       });
     } catch (error) {
-      logger.error("Party reconciliation failed", { error });
+      logger.error("Party reconciliation failed", { guildId, error });
     }
   }
 
@@ -1908,7 +1929,17 @@ export function createPartyModule({
     commands: [party],
     components: [panelButton, panelUserSelect],
     modals: [areaModal, limitModal, renameModal, specialInviteModal],
-    events: [leave, join, removed, reconcile, chatMessage, panelDeleted, panelBulkDeleted, panels],
+    events: [
+      leave,
+      join,
+      removed,
+      reconcile,
+      reconcileLate,
+      chatMessage,
+      panelDeleted,
+      panelBulkDeleted,
+      panels,
+    ],
     dispose() {
       for (const cancel of cleanups) cancel();
       cleanups.clear();

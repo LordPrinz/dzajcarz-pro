@@ -119,6 +119,8 @@ function setup({
 
   /** channel id -> member ids; absent = deleted on Discord. */
   const discord = new Map<string, Set<string>>();
+  /** Channels whose guild Discord has not made available yet, so their members are unknown. */
+  const unavailable = new Set<string>();
   const moves: { userId: string; channelId: string }[] = [];
   const created: { name: string; categoryId: string; ownerId: string }[] = [];
   const categories: { categoryName: string; joinChannelName: string }[] = [];
@@ -144,6 +146,7 @@ function setup({
     },
     async members(channelId) {
       if (memberGone) return null;
+      if (unavailable.has(channelId)) return undefined;
       const members = discord.get(channelId);
       return members ? [...members] : null;
     },
@@ -380,6 +383,7 @@ function setup({
     areas,
     owned,
     discord,
+    unavailable,
     moves,
     created,
     categories,
@@ -1029,6 +1033,7 @@ describe("leaving a party channel", () => {
       "party-panel-deleted",
       "party-panels",
       "party-reconcile",
+      "party-reconcile-late",
     ]);
     expect(module.events?.find((e) => e.name === "party-join")?.alwaysRun).toBeUndefined();
   });
@@ -1125,6 +1130,47 @@ describe("startup reconciliation", () => {
     t.discord.set("1", new Set());
     await t.eventFor("clientReady").run(ready);
     expect(t.owned.has("1")).toBe(true);
+  });
+
+  test("keeps channels of a guild that is still unavailable, then checks them when it comes back", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.discord.set("400", new Set());
+    t.discord.set("300", new Set());
+    t.owned.set("1", row("1", "a"));
+    t.owned.set("2", { ...row("2", "b"), guildId: "other-guild" });
+    t.discord.set("1", new Set());
+    t.discord.set("2", new Set());
+    t.unavailable.add("1");
+    await t.eventFor("clientReady").run(ready);
+    expect(t.owned.has("1")).toBe(true);
+    expect(t.discord.has("1")).toBe(true);
+    expect(t.owned.has("2")).toBe(false);
+
+    t.unavailable.delete("1");
+    await t.eventFor("guildAvailable").run({ id: guildId } as never);
+    expect(t.owned.has("1")).toBe(false);
+    expect(t.discord.has("1")).toBe(false);
+  });
+
+  test("a late guild only checks its own channels", async () => {
+    const t = setup();
+    t.owned.set("1", row("1", "a"));
+    t.owned.set("2", { ...row("2", "b"), guildId: "other-guild" });
+    t.discord.set("1", new Set());
+    t.discord.set("2", new Set());
+    await t.eventFor("guildAvailable").run({ id: "other-guild" } as never);
+    expect([...t.owned.keys()]).toEqual(["1"]);
+  });
+
+  test("a leave in a guild with unknown voice states deletes nothing", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    t.unavailable.add("1000");
+    await t.voice("1000", null);
+    expect(t.owned.has("1000")).toBe(true);
+    expect(t.discord.has("1000")).toBe(true);
   });
 
   test("drops an area whose join channel or category is gone", async () => {
