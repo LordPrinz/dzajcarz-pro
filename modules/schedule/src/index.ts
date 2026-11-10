@@ -205,12 +205,14 @@ export function createScheduleModule({
       logger.warn("Skipping the scheduled song: the audio node is unavailable");
       return;
     }
-    const results = await Promise.allSettled(due.map((guildId) => playIn(guildId)));
-    results.forEach((result, index) => {
-      if (result.status === "rejected") {
-        logger.warn("The scheduled song failed", { guildId: due[index], error: result.reason });
-      }
-    });
+    // Not awaited: `play` resolves only when the song is over (never, while it is paused), and the cron
+    // schedules the next tick only after this one settles, so waiting would hold up every server. `running`
+    // keeps a later tick from starting a second song in a server that is still playing.
+    for (const guildId of due) {
+      playIn(guildId).catch((error) => {
+        logger.warn("The scheduled song failed", { guildId, error });
+      });
+    }
   }
 
   async function safeTick(): Promise<void> {

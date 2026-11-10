@@ -400,6 +400,7 @@ describe("the schedule", () => {
     await s.settle();
     s.finishers.get(GUILD)?.(false);
     await done;
+    await s.settle();
     expect(s.leaves).toEqual([GUILD]);
   });
 
@@ -409,6 +410,7 @@ describe("the schedule", () => {
     await s.settle();
     s.finishers.get(GUILD)?.(true);
     await done;
+    await s.settle();
     expect(s.leaves).toEqual([]);
   });
 
@@ -442,6 +444,7 @@ describe("the schedule", () => {
   test("skips the song without leaving when members' music got there first", async () => {
     const s = setup({ crowds: { [GUILD]: [{ channelId: LOUNGE, humans: 1 }] }, busy: [GUILD] });
     await s.fire();
+    await s.settle();
     expect(s.playCalls).toHaveLength(1);
     expect(s.leaves).toEqual([]);
     expect(s.warnings).toEqual([]);
@@ -470,6 +473,33 @@ describe("the schedule", () => {
     expect(s.playCalls).toHaveLength(1);
     s.finishers.get(GUILD)?.(false);
     await first;
+  });
+  test("a song that never ends does not hold the tick back", async () => {
+    const s = setup({
+      crowds: {
+        [GUILD]: [{ channelId: LOUNGE, humans: 1 }],
+        [OTHER_GUILD]: [{ channelId: GAMES, humans: 1 }],
+      },
+      zones: { [OTHER_GUILD]: "Europe/London" },
+    });
+    // The first server's song never resolves (a paused track); the tick must still return.
+    await s.fire();
+    await s.settle();
+    expect(s.playCalls.map((call) => call.guildId)).toEqual([GUILD]);
+    // An hour later the next tick plays on the other server while the first song is still stuck.
+    s.setNow(new Date(NINE_WARSAW.getTime() + 3_600_000));
+    await s.fire();
+    await s.settle();
+    expect(s.playCalls.map((call) => call.guildId)).toEqual([GUILD, OTHER_GUILD]);
+  });
+
+  test("a server whose song is stuck is not started twice by later ticks", async () => {
+    const s = setup({ crowds: { [GUILD]: [{ channelId: LOUNGE, humans: 1 }] } });
+    await s.fire();
+    await s.settle();
+    await s.fire();
+    await s.settle();
+    expect(s.playCalls).toHaveLength(1);
   });
 });
 
