@@ -283,27 +283,42 @@ if (env.HEALTH_PORT !== 0) {
   }
 }
 
+const SHUTDOWN_DEADLINE_MS = 20_000;
 let stopping = false;
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
   logger.info("Shutting down", { signal });
-  await healthServer?.stop(true);
-  for (const module of modules) {
-    try {
-      await module.dispose?.();
-    } catch (error) {
-      logger.error("Module dispose failed", { module: module.name, error });
+  // A step that hangs (a gateway that never closes) must not hold the container until it is killed.
+  setTimeout(() => {
+    logger.error("Shutdown timed out");
+    process.exit(1);
+  }, SHUTDOWN_DEADLINE_MS).unref();
+  let exitCode = 0;
+  try {
+    await healthServer?.stop(true);
+    for (const module of modules) {
+      try {
+        await module.dispose?.();
+      } catch (error) {
+        exitCode = 1;
+        logger.error("Module dispose failed", { module: module.name, error });
+      }
     }
+    // After the music module removed its panels: leave voice and close the node connection.
+    await musicPlayer.destroy().catch((error: unknown) => {
+      exitCode = 1;
+      logger.error("Music player shutdown failed", { error });
+    });
+    await client.destroy();
+    redis.close();
+    await sql.close();
+  } catch (error) {
+    exitCode = 1;
+    logger.error("Shutdown failed", { error });
+  } finally {
+    process.exit(exitCode);
   }
-  // After the music module removed its panels: leave voice and close the node connection.
-  await musicPlayer
-    .destroy()
-    .catch((error: unknown) => logger.error("Music player shutdown failed", { error }));
-  await client.destroy();
-  redis.close();
-  await sql.close();
-  process.exit(0);
 }
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

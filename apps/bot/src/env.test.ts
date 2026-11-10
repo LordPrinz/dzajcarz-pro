@@ -95,6 +95,11 @@ describe("health endpoint", () => {
   test("port 0 disables the endpoint", () => {
     expect(loadEnv({ ...REQUIRED, HEALTH_PORT: "0" }).HEALTH_PORT).toBe(0);
   });
+
+  test("an empty port means the default, like the Docker healthcheck reads it", () => {
+    expect(loadEnv({ ...REQUIRED, HEALTH_PORT: "" }).HEALTH_PORT).toBe(8080);
+    expect(loadEnv({ ...REQUIRED, HEALTH_PORT: "  " }).HEALTH_PORT).toBe(8080);
+  });
 });
 
 describe("connection URLs", () => {

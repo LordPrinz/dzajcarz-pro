@@ -289,10 +289,11 @@ export function matchInvocation(
   prefix: string,
   botUserId: string | undefined,
 ): PrefixInvocation | null {
-  const byPrefix = matchPrefix(content, prefix);
-  if (byPrefix) return byPrefix;
-  if (!botUserId) return null;
-  const mention = [`<@${botUserId}>`, `<@!${botUserId}>`].find((m) => content.startsWith(m));
-  if (!mention) return null;
-  return splitInvocation(content.slice(mention.length).trimStart());
+  // The mention goes first: with a guild prefix of `<` or `<@`, `<@BOT> ping` would otherwise parse as a
+  // prefix command named `@BOT>`.
+  const mention = botUserId
+    ? [`<@${botUserId}>`, `<@!${botUserId}>`].find((m) => content.startsWith(m))
+    : undefined;
+  if (mention) return splitInvocation(content.slice(mention.length).trimStart());
+  return matchPrefix(content, prefix);
 }

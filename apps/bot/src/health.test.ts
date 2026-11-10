@@ -52,6 +52,18 @@ describe("checkHealth", () => {
 });
 
 describe("health server", () => {
+  test("a probe that never settles does not block the checks after its timeout", async () => {
+    let calls = 0;
+    const base = start({
+      ...allUp,
+      redis: () => (++calls === 1 ? new Promise<boolean>(() => {}) : Promise.resolve(true)),
+    });
+    expect((await fetch(`${base}/health`)).status).toBe(503);
+    const second = await fetch(`${base}/health`);
+    expect(second.status).toBe(200);
+    expect(calls).toBe(2);
+  });
+
   test("answers 200 with the report when everything is up", async () => {
     const response = await fetch(`${start(allUp)}/health`);
     expect(response.status).toBe(200);
@@ -110,7 +122,7 @@ describe("runHealthcheck", () => {
 });
 
 describe("a hung probe", () => {
-  test("is not started again while the earlier run is still pending", async () => {
+  test("is started again only after the timeout of the earlier run has passed", async () => {
     let calls = 0;
     const hang = () => {
       calls++;
@@ -119,7 +131,7 @@ describe("a hung probe", () => {
     const base = start({ ...allUp, postgres: hang });
     expect((await fetch(`${base}/health`)).status).toBe(503);
     expect((await fetch(`${base}/health`)).status).toBe(503);
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
   });
 });
 

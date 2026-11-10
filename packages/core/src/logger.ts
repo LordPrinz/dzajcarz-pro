@@ -33,12 +33,21 @@ export function createJsonLogger(
     (lvl: LogLevel) =>
     (message: string, fields: LogFields = {}) => {
       if (LEVELS[lvl] < min) return;
-      write(
-        JSON.stringify(
-          { time: now().toISOString(), level: lvl, msg: message, ...base, ...fields },
-          errorReplacer,
-        ),
-      );
+      // A logger never throws: a cyclic object in `fields` or a closed stdout must not crash the caller.
+      try {
+        const time = now().toISOString();
+        const line = { time, level: lvl, msg: message };
+        try {
+          write(JSON.stringify({ ...line, ...base, ...fields }, errorReplacer));
+        } catch (error) {
+          const logError = String(error);
+          try {
+            write(JSON.stringify({ ...line, ...base, logError }, errorReplacer));
+          } catch {
+            write(JSON.stringify({ ...line, logError }));
+          }
+        }
+      } catch {}
     };
   return {
     debug: log("debug"),
