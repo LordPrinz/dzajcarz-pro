@@ -111,18 +111,24 @@ services:
     logging: *logging
 
   # Music is always on in production (no profile): the scheduled songs need it too.
-  # Docker creates the plugins volume owned by root and Lavalink (uid 322) cannot download the YouTube
-  # plugin into it, so this one-shot step fixes the ownership first.
+  # One-shot step: downloads the YouTube plugin, checks it against lavalink/youtube-plugin.sha256 and stops
+  # the start on a mismatch, so Lavalink never fetches the jar itself. It also hands the volume (created by
+  # Docker as root) to Lavalink's uid 322. Needs the music network to reach maven.lavalink.dev.
   lavalink-plugins-init:
     image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine@sha256:96be2be7ee50d35a9bd42c8c7b99e2a4b741f09123066c1ebb9e014dd7db204d
     user: "0"
-    entrypoint: ["chown", "322", "/opt/Lavalink/plugins"]
-    network_mode: none
+    entrypoint: ["sh", "/fetch-plugin.sh"]
+    networks: [music]
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700,size=1m
     cap_drop: ["ALL"]
     cap_add: ["CHOWN"]
     security_opt: ["no-new-privileges:true"]
     volumes:
       - lavalink-plugins:/opt/Lavalink/plugins
+      - ./lavalink/fetch-plugin.sh:/fetch-plugin.sh:ro
+      - ./lavalink/youtube-plugin.sha256:/youtube-plugin.sha256:ro
     logging: *logging
 
   # Deciphers YouTube stream signatures for the youtube-plugin (ADR 0004). Pinned by digest: upstream only
@@ -142,8 +148,7 @@ services:
       OVERRIDE_PLAYER_VARIANT: IAS
     logging: *logging
 
-  # The YouTube plugin is downloaded at runtime into the plugins volume; its sha256 is recorded in ADR 0004
-  # (docs/DEPLOYMENT.md shows how to compare it).
+  # Loads the YouTube plugin that lavalink-plugins-init verified (ADR 0004).
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine@sha256:96be2be7ee50d35a9bd42c8c7b99e2a4b741f09123066c1ebb9e014dd7db204d
     restart: unless-stopped
