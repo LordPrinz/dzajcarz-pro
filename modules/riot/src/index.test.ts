@@ -314,7 +314,7 @@ describe("riot module", () => {
       const { run, store } = setup({ stats });
       const ctx = await run("valorant", { riot_id: "Dzajcarz#EUNE" });
       expect(textOf(ctx.replies[0])).toBe("Riot API prosi o przerwę. Spróbuj za 1 s.");
-      expect(await store.get("riot:retry-after")).toBe(String(1_000_000 + 1000));
+      expect(await store.get("riot:retry-after:valorant")).toBe(String(1_000_000 + 1000));
     });
 
     test("a huge Retry-After is capped at two minutes", async () => {
@@ -351,12 +351,23 @@ describe("riot module", () => {
 
       const first = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "1" });
       expect(textOf(first.replies[0])).toBe("Riot API prosi o przerwę. Spróbuj za 7 s.");
-      expect(await store.get("riot:retry-after")).toBe(String(1_000_000 + 7000));
+      expect(await store.get("riot:retry-after:valorant")).toBe(String(1_000_000 + 7000));
 
       advance(3000);
-      const second = await run("lol", { riot_id: "Dzajcarz#EUNE" }, { userId: "2" });
+      const second = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "2" });
       expect(textOf(second.replies[0])).toBe("Riot API prosi o przerwę. Spróbuj za 4 s.");
       expect(stats.calls).toHaveLength(1);
+    });
+
+    test("a pause on one game's key leaves the other game running", async () => {
+      const stats = fakeStats();
+      stats.failWith = new RiotLookupError("rate-limited", 7000);
+      const { run } = setup({ stats });
+      await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "1" });
+
+      stats.failWith = undefined;
+      const lol = await run("lol", { riot_id: "Dzajcarz#EUNE" }, { userId: "2" });
+      expect(embedOf(lol.replies[0])).toBeDefined();
     });
 
     test("lookups resume once the deadline has passed", async () => {

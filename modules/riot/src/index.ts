@@ -37,8 +37,10 @@ const EVERYWHERE: CommandContexts = {
   installs: ["guild", "user"],
 };
 
-/** Shared by every lookup: while it is set, Riot asked us to stop. The value is the deadline in ms. */
-const RETRY_AFTER_KEY = "riot:retry-after";
+type Game = "valorant" | "lol";
+
+/** Riot limits each key on its own: while a game's pause is set, Riot asked us to stop. The value is the deadline in ms. */
+const retryAfterKey = (game: Game) => `riot:retry-after:${game}`;
 const DEFAULT_RETRY_AFTER_MS = 10_000;
 const USER_COOLDOWN_MS = 10_000;
 /** All users together: a fixed window that starts with the first lookup. */
@@ -64,7 +66,6 @@ const pauseMessage = (seconds: number) => `Riot API prosi o przerwę. Spróbuj z
 const secondsUntil = (deadline: number, now: number) =>
   Math.max(1, Math.ceil((deadline - now) / 1000));
 
-type Game = "valorant" | "lol";
 const GAME_NAMES: Record<Game, string> = { valorant: "Valorant", lol: "League of Legends" };
 
 export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps): BotModule {
@@ -92,7 +93,9 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     }
     const id = parseRiotId(input);
 
-    const deadline = Number(await guarded("pause read", null, () => store.get(RETRY_AFTER_KEY)));
+    const deadline = Number(
+      await guarded("pause read", null, () => store.get(retryAfterKey(game))),
+    );
     if (deadline > now()) throw new UserError(pauseMessage(secondsUntil(deadline, now())));
     const free = await guarded("cooldown", true, () =>
       store.setIfAbsent(`riot:user:${ctx.user.id}`, "1", USER_COOLDOWN_MS),
@@ -139,7 +142,7 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
         );
         logger.warn("Riot API rate limit hit", { waitMs });
         await guarded("pause write", undefined, () =>
-          store.set(RETRY_AFTER_KEY, String(now() + waitMs), waitMs),
+          store.set(retryAfterKey(game), String(now() + waitMs), waitMs),
         );
         return new UserError(pauseMessage(secondsUntil(now() + waitMs, now())));
       }
