@@ -573,14 +573,16 @@ Messages is a channel permission, so purge relies on the dispatcher alone.
 
 Before acting, the module applies Discord's hierarchy rules itself and answers with the reason, in this
 order: not yourself, not the bot, not the server owner, not a member whose highest role is equal to or above
-the caller's (the owner as caller skips this one), and not one at or above the bot's highest role. Another
-bot that ranks lower is fair game. Kick, timeout, untimeout and warn need a member. A ban also takes
-the id of someone who already left; only the id rules apply then. For ban, kick, timeout and untimeout the
-bot's own role permissions must hold the bit (or Administrator), and an administrator cannot be timed out.
-These checks, the reason length (at most 512 characters, Discord's audit log limit) and the duration
-(`parseDuration`, more than 0 and at most 28 days) all run before `defer()`, so a refusal stays ephemeral
-and no DM goes out for an action that cannot happen. A refusal Discord still sends (Missing Permissions or
-Missing Access) becomes a Polish `UserError` in the adapter.
+the caller's (the owner as caller skips this one), and, when the bot itself acts, not one at or above the
+bot's highest role (a warning is only a record, so that one is skipped for it). Another bot that ranks lower
+is fair game. Kick, timeout, untimeout and warn need a member. A ban also takes the id of someone who already
+left; only the id rules apply then. For ban, kick, timeout and untimeout the bot's own role permissions must
+hold the bit (or Administrator), and an administrator cannot be timed out. These checks, the reason length
+(at most 512 characters, Discord's audit log limit) and the duration (`parseDuration`, more than 0 and at
+most 28 days) all run before `defer()`, so a refusal stays ephemeral and no DM goes out for an action that
+cannot happen. The adapter sends a full 28 days as a minute less, because Discord checks the end time against
+its own clock and refuses it when the host clock runs ahead. A refusal Discord still sends (Missing
+Permissions or Missing Access) becomes a Polish `UserError` in the adapter.
 
 The action comes first, then the record in `moderation_action` (guild, action, moderator, target, reason,
 duration for a timeout, channel and count for a purge, time). If the insert fails, the error is logged
@@ -606,11 +608,9 @@ channel, or tells them to use `/warnings` when the DM fails.
 `/purge` fetches the newest messages of the channel (at most 100), deletes up to `count` of them through
 `bulkDelete` (a single message too) and leaves pinned messages and those older than 14 days minus a minute,
 which bulk delete cannot remove. The reply says how many of each were skipped. A purge that deleted nothing
-is not recorded. The slash form answers ephemerally. The prefix form skips the newest message, its own
-command, so the reply has something to answer. A message that arrives between the command and the fetch is
-the one skipped instead, and the command message is deleted; that race is accepted, and prefix replies use
-`failIfNotExists: false` so the answer still goes out without the reference. For the same reason
-`!purge 100` deletes at most 99.
+is not recorded. The slash form answers ephemerally. The prefix form fetches only messages before its own
+command (`before` that message id), so the command stays for the reply to answer and a message that arrives
+meanwhile is never touched; `!purge 100` deletes a full 100.
 
 The guild install asks for Ban Members, Kick Members and Moderate Members for this module, and for Add
 Reactions, which Dżajco and the fun commands use; see CONTRIBUTING.

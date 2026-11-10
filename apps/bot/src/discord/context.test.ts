@@ -83,14 +83,17 @@ describe("place", () => {
     const interaction = fakeInteraction([], null);
     Object.assign(interaction, { context: InteractionContextType.PrivateChannel });
     expect(contextFromInteraction(interaction).place).toBe("private-channel");
+    expect(contextFromInteraction(interaction).messageId).toBeUndefined();
     const message = (guildId: string | null) =>
       ({
+        id: "77",
         guildId,
         channelId: "2",
         author: { id: "1", displayName: "t" },
         member: null,
         channel: { isDMBased: () => guildId === null },
       }) as unknown as Message;
+    expect(contextFromMessage(message("5"), {}).messageId).toBe("77");
     expect(contextFromMessage(message("5"), {}).place).toBe("guild");
     expect(contextFromMessage(message(null), {}).place).toBe("bot-dm");
   });

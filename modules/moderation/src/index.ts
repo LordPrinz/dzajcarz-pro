@@ -31,10 +31,11 @@ export interface ModerationGuild {
   timeout(guildId: string, userId: string, durationMs: number, auditReason: string): Promise<void>;
   untimeout(guildId: string, userId: string, auditReason: string): Promise<void>;
   /**
-   * Deletes up to `count` of the newest messages of the channel after skipping the `skipNewest` newest.
+   * Deletes up to `count` of the newest messages of the channel, only those older than `beforeMessageId`
+   * when given (a prefix call passes its own message, which stays).
    * Pinned messages and messages older than 14 days are left and counted in `pinned` and `tooOld`.
    */
-  purge(channelId: string, count: number, skipNewest: number): Promise<PurgeResult>;
+  purge(channelId: string, count: number, beforeMessageId: string | null): Promise<PurgeResult>;
   /** A direct message that pings nobody; false when the user does not accept DMs from the bot. */
   sendDirect(userId: string, text: string): Promise<boolean>;
 }
@@ -210,7 +211,7 @@ export function createModerationModule({
     if (!actor) throw new Error(`The caller ${ctx.user.id} is not a member of ${guildId}`);
     requireGuildPermission(actor, permission);
     if (memberOnly && !target) throw new UserError(NOT_A_MEMBER);
-    const refused = checkHierarchy({ actor, bot, targetId, target });
+    const refused = checkHierarchy({ actor, bot, targetId, target, botActs });
     if (refused) throw new UserError(refused);
     if (botActs && !hasPermission(bot.permissions, permission)) {
       throw new UserError(BOT_LACKS_PERMISSION);
@@ -550,9 +551,13 @@ export function createModerationModule({
         throw new UserError(`Podaj liczbę od 1 do ${MAX_PURGE}.`);
       }
       await ctx.defer({ ephemeral: true });
-      // The prefix command's own message is the newest one; it stays, so the reply has something to answer.
-      const skipNewest = ctx.invocation === "prefix" ? 1 : 0;
-      const { deleted, tooOld, pinned } = await guild.purge(ctx.channelId, count, skipNewest);
+      // The prefix command's own message stays, so the reply has something to answer; messages that arrived
+      // after it are not touched either.
+      const { deleted, tooOld, pinned } = await guild.purge(
+        ctx.channelId,
+        count,
+        ctx.messageId ?? null,
+      );
       const saved =
         deleted === 0 ||
         (await save({

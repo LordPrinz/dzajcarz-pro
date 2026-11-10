@@ -27,17 +27,20 @@ export function checkHierarchy({
   bot,
   targetId,
   target,
+  botActs = true,
 }: {
   actor: MemberInfo;
   bot: MemberInfo;
   targetId: string;
   target: MemberInfo | null;
+  /** False when only the caller acts (a warning): the bot's own role position then does not matter. */
+  botActs?: boolean;
 }): string | null {
   if (targetId === actor.id) return SELF_TARGET;
   if (targetId === bot.id) return BOT_TARGET;
   if (!target) return null;
   if (target.isOwner) return OWNER_TARGET;
   if (!actor.isOwner && target.topRole >= actor.topRole) return HIGHER_THAN_ACTOR;
-  if (target.topRole >= bot.topRole) return HIGHER_THAN_BOT;
+  if (botActs && target.topRole >= bot.topRole) return HIGHER_THAN_BOT;
   return null;
 }

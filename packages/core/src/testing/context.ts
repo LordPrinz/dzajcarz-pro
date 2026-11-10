@@ -31,6 +31,7 @@ export interface FakeContextOptions<A> {
   place?: CommandPlace;
   memberPermissions?: bigint | null;
   userId?: string;
+  messageId?: string;
 }
 
 /** An in-memory CommandContext for testing commands without Discord. */
@@ -42,6 +43,7 @@ export function createFakeContext<A = Record<string, unknown>>({
   place = guildId === null ? "bot-dm" : "guild",
   memberPermissions = 0n,
   userId = "200000000000000002",
+  messageId,
 }: FakeContextOptions<A> = {}): FakeContext<A> {
   const ctx: FakeContext<A> = {
     args,
@@ -50,6 +52,7 @@ export function createFakeContext<A = Record<string, unknown>>({
     guildId,
     place,
     channelId: "300000000000000003",
+    messageId,
     memberPermissions: guildId === null ? null : memberPermissions,
     user: { id: userId, displayName: "tester" },
     replies: [],
