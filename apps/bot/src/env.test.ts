@@ -156,3 +156,17 @@ describe("BOT_PREFIX", () => {
     expect(Env.safeParse({ ...REQUIRED, BOT_PREFIX: prefix }).success).toBe(false);
   });
 });
+
+describe("SCHEDULED_SONG_CRON", () => {
+  test("accepts a five-field expression", () => {
+    expect(loadEnv({ ...REQUIRED, SCHEDULED_SONG_CRON: "0 9 * * *" }).SCHEDULED_SONG_CRON).toBe(
+      "0 9 * * *",
+    );
+  });
+
+  test("text that is not cron is a validation error, not a crash", () => {
+    const parsed = Env.safeParse({ ...REQUIRED, SCHEDULED_SONG_CRON: "garbage" });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(["SCHEDULED_SONG_CRON"]);
+  });
+});
