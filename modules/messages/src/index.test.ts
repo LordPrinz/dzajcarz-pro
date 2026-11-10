@@ -350,6 +350,35 @@ describe("sending", () => {
     expect(s.channelSends).toHaveLength(1);
   });
 
+  test("a tick delayed past half a minute still sends that minute, not the next one", async () => {
+    const s = setup();
+    await s.schedule({
+      time: "19:00",
+      content: "Teraz",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    await s.schedule({
+      time: "19:01",
+      content: "Za chwilę",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    s.setNow(new Date(SEVEN_PM.getTime() + 31_000));
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["Teraz"]);
+  });
+
+  test("a tick a couple of seconds early belongs to the coming minute", async () => {
+    const s = setup();
+    await s.schedule({
+      time: "19:00",
+      content: "Teraz",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    s.setNow(new Date(SEVEN_PM.getTime() - 2_000));
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["Teraz"]);
+  });
+
   test("a second fire in the same minute sends nothing", async () => {
     const s = setup();
     await s.schedule({
