@@ -85,8 +85,8 @@ services:
     image: redis:8-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
     restart: unless-stopped
     networks: [data]
-    # The password goes into a config file on a tmpfs, not onto the command line, where `ps` and
-    # `docker inspect` would show it. The image's entrypoint then starts redis-server as the redis user.
+    # The password goes into a config file on a tmpfs, not onto the command line, where `ps` would show
+    # it (it is still in the container's environment for redis-cli). The image's entrypoint then starts redis-server as the redis user.
     command:
       - sh
       - -c
@@ -112,8 +112,8 @@ services:
 
   # Music is always on in production (no profile): the scheduled songs need it too.
   # One-shot step: downloads the YouTube plugin, checks it against lavalink/youtube-plugin.sha256 and stops
-  # the start on a mismatch, so Lavalink never fetches the jar itself. It also hands the volume (created by
-  # Docker as root) to Lavalink's uid 322. Needs the music network to reach maven.lavalink.dev.
+  # the start on a mismatch, so Lavalink never fetches the jar itself. Lavalink mounts the volume
+  # read-only. Needs the music network to reach maven.lavalink.dev.
   lavalink-plugins-init:
     image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine@sha256:96be2be7ee50d35a9bd42c8c7b99e2a4b741f09123066c1ebb9e014dd7db204d
     user: "0"
@@ -173,7 +173,8 @@ services:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
       # The scheduled songs (ADR 0004), played by a fixed name, never by member input.
       - ./lavalink/music:/opt/Lavalink/music:ro
-      - lavalink-plugins:/opt/Lavalink/plugins
+      # Read-only: the init step owns what is in here.
+      - lavalink-plugins:/opt/Lavalink/plugins:ro
     logging: *logging
 
 networks:

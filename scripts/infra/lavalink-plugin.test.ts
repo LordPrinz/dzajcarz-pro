@@ -16,4 +16,12 @@ describe("YouTube plugin pin", () => {
     expect(checksum).toMatch(new RegExp(`^[0-9a-f]{64}  youtube-plugin-${version}\\.jar$`));
     expect(adr).toContain(checksum);
   });
+
+  test("the init script downloads from the repository application.yml points at", async () => {
+    const config = await read("infra/lavalink/application.yml");
+    const script = await read("infra/lavalink/fetch-plugin.sh");
+    const snapshot = /youtube-plugin:[^\n]*\n\s*snapshot: true/.test(config);
+    const repository = script.match(/^REPOSITORY=https:\/\/maven\.lavalink\.dev\/(\w+)\//m)?.[1];
+    expect(repository).toBe(snapshot ? "snapshots" : "releases");
+  });
 });
