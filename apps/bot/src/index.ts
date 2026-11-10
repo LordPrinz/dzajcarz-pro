@@ -53,6 +53,7 @@ import { createUnavailableMusicPlayer } from "./music/unavailable.ts";
 import { createPrefixResolver } from "./prefix-resolver.ts";
 import { createPrefixSettings } from "./prefix-settings.ts";
 import { createRiotStats } from "./riot/stats.ts";
+import { createTimeZones } from "./time-zones.ts";
 
 // `bot healthcheck` is the container HEALTHCHECK: it needs no token or database, so it runs before loadEnv.
 if (process.argv[2] === "healthcheck") process.exit(await runHealthcheck(Bun.env));
@@ -79,6 +80,12 @@ const prefixes = createPrefixResolver({
   cache: createRedisStore(redis),
   defaultPrefix: env.BOT_PREFIX,
   logger: logger.child({ component: "prefix" }),
+});
+const timeZones = createTimeZones({
+  settings: guildSettings,
+  cache: createRedisStore(redis),
+  defaultTimeZone: env.DEFAULT_TIME_ZONE,
+  logger: logger.child({ component: "time-zone" }),
 });
 
 const moduleToggleRepository = createModuleToggleRepository(sql);
@@ -168,7 +175,9 @@ const modules = createModules({
   scheduleVoice: createScheduleVoice(client),
   scheduledSongPlayer: createScheduledSongPlayer(musicPlayer),
   scheduledSongs: SCHEDULED_SONGS,
-  scheduledSongCron: { expression: env.SCHEDULED_SONG_CRON, timeZone: env.SCHEDULED_SONG_TIMEZONE },
+  scheduledSongCron: env.SCHEDULED_SONG_CRON,
+  timeZones,
+  defaultTimeZone: env.DEFAULT_TIME_ZONE,
   dzajcoSettings: createDzajcoRepository(sql),
   dzajcoResponder: createDzajcoResponder(client, logger.child({ component: "dzajco" }), DZAJCO_GIF),
   dzajcoStore: createRedisStore(redis),
@@ -177,7 +186,9 @@ const modules = createModules({
   moderationDmLimit: createRedisStore(redis),
   riotStats,
   riotStore,
-  scheduledMessages: createScheduledMessageRepository(sql),
+  scheduledMessages: createScheduledMessageRepository(sql, {
+    defaultTimeZone: env.DEFAULT_TIME_ZONE,
+  }),
   scheduledMessageSender: createScheduledMessageSender(client),
   guildModuleEnabled: (guildId, module) => gate.isEnabled(guildId, null, module),
   messageLock: createRedisStore(redis),

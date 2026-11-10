@@ -1,4 +1,10 @@
-import { type CommandRegistry, createRegistry, type Logger, silentLogger } from "@dzajcarz/core";
+import {
+  type CommandRegistry,
+  createRegistry,
+  DEFAULT_TIME_ZONE,
+  type Logger,
+  silentLogger,
+} from "@dzajcarz/core";
 import { type RESTPostAPIChatInputApplicationCommandsJSONBody, Routes } from "discord.js";
 import { toSlashCommand } from "./discord/slash.ts";
 import type { DeployEnv } from "./env.ts";
@@ -306,7 +312,9 @@ export const createDeployRegistry = () =>
       scheduleVoice: unusedServices(),
       scheduledSongPlayer: unusedServices(),
       scheduledSongs: SCHEDULED_SONGS,
-      scheduledSongCron: { expression: "0 9,21 * * *", timeZone: "Europe/Warsaw" },
+      scheduledSongCron: "0 9,21 * * *",
+      timeZones: unusedServices(),
+      defaultTimeZone: DEFAULT_TIME_ZONE,
       dzajcoSettings: unusedServices(),
       dzajcoResponder: unusedServices(),
       dzajcoStore: unusedServices(),

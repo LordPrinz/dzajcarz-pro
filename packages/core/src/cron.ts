@@ -30,3 +30,13 @@ export function createCronScheduler(start: StartCronJob = Bun.cron): CronSchedul
     },
   };
 }
+
+/**
+ * Whether a five-field cron `expression` fires at the minute starting at `minute` (seconds dropped) on the
+ * wall clock of `timeZone`. Lets one ticking job serve servers in different zones.
+ */
+export function firesAt(expression: string, minute: Date, timeZone: string): boolean {
+  const start = Math.floor(minute.getTime() / 60_000) * 60_000;
+  const next = Bun.cron.parse(expression, start - 1, { tz: timeZone });
+  return next !== null && next.getTime() === start;
+}

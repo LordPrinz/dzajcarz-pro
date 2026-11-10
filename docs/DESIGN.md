@@ -181,6 +181,16 @@ The prefix is stored in `guild_settings.prefix` (null means the default from `BO
 Redis for 10 minutes, because every message in every guild needs it. If Redis is down the bot reads
 Postgres; if Postgres is down too it uses the default. Mentioning the bot always works as a prefix.
 
+### Time zone per guild
+
+Every time of day the bot works with is read on the server's own clock: scheduled messages, scheduled
+songs, `/time` and the dates in `/warnings`. `/timezone set <zone>` (Manage Server) takes an IANA name in
+any case and stores its canonical spelling in `guild_settings.time_zone`; offsets (`+01:00`) and
+abbreviations (`CET`) are refused, since Postgres reads a bare offset with the opposite sign. `show` prints
+the zone and what its clock reads now, `reset` goes back to `DEFAULT_TIME_ZONE` (`Europe/Warsaw`), which is
+also the zone outside servers. Modules get the zone through the `GuildTimeZones` port from core; apps/bot
+caches it in Redis like the prefix (`createGuildSettingCache`).
+
 ### Module toggles
 
 A server can switch a module off entirely or in chosen channels (`/modules disable <module> [channel]`).
@@ -398,7 +408,7 @@ until a delete works again, not once per message.
 
 ### Scheduled songs
 
-`modules/schedule` keeps the old bot's tradition: at 9:00 and 21:00 Warsaw time it plays "Lato z Radiem" in
+`modules/schedule` keeps the old bot's tradition: at 9:00 and 21:00 on each server's clock it plays "Lato z Radiem" in
 the most crowded voice channel of every server. It is a module of its own, not part of `modules/music`: it
 shares no code with the player's commands, and ADR 5 forbids modules importing each other, so it depends on
 narrow ports only.
@@ -441,16 +451,18 @@ the track is all they share.
 Settings (`scheduled_song_config`, `scheduled_song_exclusion`) belong to the server and need Manage Server:
 `/schedule list`, `exclude <channel>` (voice channels of the server only), `include <channel>` (also accepts a
 deleted channel) and `song [name]` (the fixed list; `song reset` goes back to the default song). The module toggle (`/modules disable schedule`) switches
-the song off per server or channel. The schedule defaults to `0 9,21 * * *` in `Europe/Warsaw`; set
-`SCHEDULED_SONG_CRON` and `SCHEDULED_SONG_TIMEZONE` to change it. Both are checked at startup.
+the song off per server or channel. The schedule defaults to `0 9,21 * * *`; `SCHEDULED_SONG_CRON` changes
+it and is checked at startup. One job ticks every minute in UTC; each tick rounds down to its minute (up to
+5 s early still counts as the coming one) and plays in every server whose own zone (`/timezone`) makes the
+expression fire then (`firesAt` in core).
 
 The old bot's other scheduled entries (messages at fixed times, birthdays) are not part of this module.
 
 ### Scheduled messages
 
 `modules/messages` posts a server's own text every day at a set time: in a text or announcement channel of
-the server, or as a DM to one of its members. Rows live in `scheduled_message` (time of day as `HH:MM` in
-`Europe/Warsaw`, 1 to 1900 characters, exactly one of `channel_id` and `user_id`). `/messages add` (Manage
+the server, or as a DM to one of its members. Rows live in `scheduled_message` (time of day as `HH:MM` on
+the server's clock, see /timezone, 1 to 1900 characters, exactly one of `channel_id` and `user_id`). `/messages add` (Manage
 Server) opens a form with the time, a channel or a member, and the text; the prefix form is
 `messages add <HH:MM> <#kanał|@osoba> <tekst...>`. Both go through the same checks: a real time, one target,
 a channel of this server that the bot can see and send messages in, or a member who is not a bot. When the
@@ -467,10 +479,11 @@ as typed; backticks become `ˋ` so they cannot end the span), cut to fit 2000 ch
 `remove <id>` only finds messages of the server it runs in. When the bot leaves a server (`guildDelete`, which
 runs whatever the toggles say), that server's messages are deleted.
 
-Sending is a `CronScheduler` job at `* * * * *` in `Europe/Warsaw`. Each tick rounds the clock to the
-nearest minute (a job a few milliseconds early still counts for its minute), reads the Warsaw minute
-(`warsawMinute`, `Intl.DateTimeFormat`) and at most 500 rows due at that time across all servers (a warning
-when that is hit), and sends them five at a time. Each row is handled on its own: a failure is a warning
+Sending is a `CronScheduler` job at `* * * * *` in UTC. Each tick rounds down to its minute (up to 5 s
+early still counts as the coming one) and reads at most 500 rows due then across all servers (a warning
+when that is hit): Postgres turns the instant into each server's wall clock (`guild_settings.time_zone`,
+else `DEFAULT_TIME_ZONE`) and compares it with `time_of_day`, so one query serves every zone. It sends them
+five at a time. Each row is handled on its own: a failure is a warning
 with the row id, and the whole tick is wrapped too.
 
 - skip a server the bot is no longer in;
@@ -510,7 +523,8 @@ logged and the next tick tries again. The handler is `alwaysRun`: the status bel
 ### Fun commands
 
 `modules/fun` holds `/czy_wiedziałeś` (a coin flip: "Wiedział!" with a 🙋‍♂️ reaction, or "Nie wiedział sadge
-bruh") and `/time` (the time in Europe/Warsaw as `HH:MM:SS`, midnight is `00`). The random source, the clock and
+bruh") and `/time` (the time on the server's clock as `HH:MM:SS`, midnight is `00`; outside servers the
+default zone). The random source, the clock and
 the zone are injected, so tests pin both answers and the DST changes. `/time` does not mention the caller.
 A reply may carry `reactions`, unicode emoji the adapter adds to the sent message. Adding them is best effort:
 on a user install or in a group DM the bot cannot react, so a failed reaction is logged at `warn` and never fails the
@@ -557,7 +571,7 @@ did not happen. For a warn or timeout it follows the action. Untimeout sends non
 one per member and server every 10 minutes (a `KeyValueStore` key taken with `setIfAbsent`), so a burst of
 `/warn` cannot flood an inbox; every warning is still recorded, and if Redis fails the DM goes out anyway.
 
-`/warnings` shows the count and the 10 newest warnings in Warsaw time. Each reason is cut to 120
+`/warnings` shows the count and the 10 newest warnings on the server's clock. Each reason is cut to 120
 characters, and whole lines are dropped if the text would still pass Discord's 2000 characters; the header
 is written after that, so "N najnowszych" matches the lines shown. The slash form answers ephemerally. A
 prefix reply would be public, so `!warnings` sends the list to the moderator by DM and only says so in the

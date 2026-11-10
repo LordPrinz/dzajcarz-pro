@@ -13,11 +13,23 @@ function setup() {
     async find(): Promise<GuildSettingsRow | null> {
       return prefix === null
         ? null
-        : { guild_id: GUILD, prefix, created_at: new Date(), updated_at: new Date() };
+        : {
+            guild_id: GUILD,
+            prefix,
+            time_zone: null,
+            created_at: new Date(),
+            updated_at: new Date(),
+          };
     },
     async setPrefix(_guildId: string, next: string | null): Promise<GuildSettingsRow> {
       prefix = next;
-      return { guild_id: GUILD, prefix, created_at: new Date(), updated_at: new Date() };
+      return {
+        guild_id: GUILD,
+        prefix,
+        time_zone: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
     },
   };
   const resolver = createPrefixResolver({

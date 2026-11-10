@@ -36,7 +36,7 @@ packages/
 modules/
   general/          ping, help (interactive menu: categories, pages, install links)
   dzajco/           answers "what" in any language with the DŻAJCO gif (dzajco show, set, reset)
-  settings/         prefix (set, reset, show), modules (list, disable, enable)
+  settings/         prefix (set, reset, show), timezone (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set through a form, off, test), greets new members
   fun/              czy_wiedziałeś, time
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, special invite with a message and attachment, block, hide, show), a voice channel per member who joins the party area
@@ -85,9 +85,10 @@ music was started (the now playing panel).
 The schedule module plays the songs in `infra/lavalink/music` through Lavalink's `local` source (ADR 4), so
 Lavalink needs that directory mounted: after pulling this change recreate it with
 `docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d --force-recreate lavalink`.
-At 9:00 and 21:00 Warsaw time the bot joins the voice channel with the most people in each server, unless
-music is already playing there. Servers manage it with `/schedule` (Manage Server) or switch it off with
-`/modules disable schedule`. `SCHEDULED_SONG_CRON` and `SCHEDULED_SONG_TIMEZONE` change the time.
+At 9:00 and 21:00 on each server's clock the bot joins the voice channel with the most people there, unless
+music is already playing. Servers manage it with `/schedule` (Manage Server) or switch it off with
+`/modules disable schedule`. `/timezone` sets a server's clock (default `DEFAULT_TIME_ZONE`, Europe/Warsaw);
+`SCHEDULED_SONG_CRON` changes the times.
 
 `RIOT_VALORANT_API_KEY` and `RIOT_LOL_API_KEY` are optional and independent: Riot issues a key per game. Without a key
 its command (`/valorant` or `/lol`) answers that stats are off while the other keeps working. A development

@@ -7,7 +7,13 @@ import { createPrefixResolver } from "./prefix-resolver.ts";
 const GUILD = "123456789012345678";
 
 function row(prefix: string | null): GuildSettingsRow {
-  return { guild_id: GUILD, prefix, created_at: new Date(), updated_at: new Date() };
+  return {
+    guild_id: GUILD,
+    prefix,
+    time_zone: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  };
 }
 
 function setup(prefix: string | null, cache: KeyValueStore = createMemoryStore()) {

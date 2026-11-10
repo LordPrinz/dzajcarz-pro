@@ -23,6 +23,7 @@ import {
   type ScheduledMessageSender,
   type ScheduledMessageStore,
 } from "./index.ts";
+import { localMinute } from "./time.ts";
 
 const MANAGE_GUILD = 1n << 5n;
 const GUILD = "100000000000000001";
@@ -51,7 +52,10 @@ const sameTarget = (a: MessageTarget, b: MessageTarget) =>
     ? b.kind === "channel" && a.channelId === b.channelId
     : b.kind === "dm" && a.userId === b.userId;
 
-function createStore(): ScheduledMessageStore & {
+/** Server zones for the fake store and the module; servers not listed use Warsaw time. */
+type Zones = Record<string, string>;
+
+function createStore(zones: Zones = {}): ScheduledMessageStore & {
   rows: ScheduledMessage[];
   optOuts: Set<string>;
   /** Stores a row without the caps, to set up a test. */
@@ -106,9 +110,13 @@ function createStore(): ScheduledMessageStore & {
       rows.splice(index, 1);
       return true;
     },
-    async due(time, limit) {
+    async due(at, limit) {
       dueLimits.push(limit);
-      return rows.filter((row) => row.time === time).slice(0, limit);
+      return rows
+        .map((row) => ({ row, minute: localMinute(at, zones[row.guildId] ?? ZONE) }))
+        .filter(({ row, minute }) => row.time === minute.time)
+        .map(({ row, minute }) => ({ ...row, date: minute.date }))
+        .slice(0, limit);
     },
     async optOut(userId, guildId) {
       const had = optOuts.has(key(userId, guildId));
@@ -136,9 +144,12 @@ function setup(
     mutedChannels?: string[];
     /** Called when a message is sent, before it is recorded; a test can hold it there. */
     onSend?: () => Promise<void>;
+    /** Server time zones (`/timezone`); others use Warsaw time. */
+    zones?: Zones;
   } = {},
 ) {
-  const store = createStore();
+  const zones = options.zones ?? {};
+  const store = createStore(zones);
   if (options.failDue) {
     store.due = async () => {
       throw new Error("database is down");
@@ -216,7 +227,7 @@ function setup(
     moduleEnabled: async (_guildId, channelId) => !options.disabledChannels?.includes(channelId),
     guildModuleEnabled: async (guildId) => !options.disabledGuilds?.includes(guildId),
     now: () => current,
-    timeZone: ZONE,
+    timeZones: { of: async (guildId) => (guildId !== null ? zones[guildId] : undefined) ?? ZONE },
     logger,
   });
   const registry = createRegistry([module]);
@@ -312,9 +323,9 @@ function optOutButtonOf(call: DmCall | undefined): ButtonSpec {
 }
 
 describe("sending", () => {
-  test("runs every minute in Europe/Warsaw and stops on dispose", async () => {
+  test("ticks every minute and stops on dispose", async () => {
     const s = setup();
-    expect(s.cronCalls).toEqual([{ expression: "* * * * *", timeZone: ZONE }]);
+    expect(s.cronCalls).toEqual([{ expression: "* * * * *", timeZone: "UTC" }]);
     await s.module.dispose?.();
     expect(s.isStopped()).toBe(true);
   });
@@ -332,6 +343,26 @@ describe("sending", () => {
     s.setNow(SEVEN_PM);
     await s.fire();
     expect(s.channelSends).toEqual([{ guildId: GUILD, channelId: GENERAL, content: "Bonżur!" }]);
+  });
+
+  test("each server's messages follow its own time zone", async () => {
+    const s = setup({ zones: { [OTHER_GUILD]: "Europe/London" } });
+    await s.schedule({
+      time: "19:00",
+      content: "Warszawa",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    await s.schedule({
+      guildId: OTHER_GUILD,
+      time: "19:00",
+      content: "Londyn",
+      target: { kind: "channel", channelId: NEWS },
+    });
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["Warszawa"]);
+    s.setNow(new Date(SEVEN_PM.getTime() + 3_600_000));
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["Warszawa", "Londyn"]);
   });
 
   test("19:00 is 18:00 UTC in winter", async () => {
@@ -605,7 +636,7 @@ describe("messages add", () => {
   test("the modal schedules a channel message", async () => {
     const s = setup();
     const replies = await s.submitForm({ time: "7:05", channel: GENERAL, text: "Dzień dobry" });
-    expect(replies).toEqual([`Zaplanowano wiadomość #1 na 07:05 → <#${GENERAL}>.`]);
+    expect(replies).toEqual([`Zaplanowano wiadomość #1 na 07:05 (Europe/Warsaw) → <#${GENERAL}>.`]);
     expect(s.store.rows).toEqual([
       {
         id: 1,
@@ -621,7 +652,9 @@ describe("messages add", () => {
   test("the modal schedules a DM", async () => {
     const s = setup();
     const replies = await s.submitForm({ time: "19:00", user: MEMBER, text: "Hej {user}" });
-    expect(replies).toEqual([`Zaplanowano wiadomość #1 na 19:00 → DM do <@${MEMBER}>.`]);
+    expect(replies).toEqual([
+      `Zaplanowano wiadomość #1 na 19:00 (Europe/Warsaw) → DM do <@${MEMBER}>.`,
+    ]);
     expect(s.store.rows[0]?.target).toEqual({ kind: "dm", userId: MEMBER });
   });
 
@@ -629,7 +662,9 @@ describe("messages add", () => {
     const s = setup();
     await s.store.optOut(MEMBER, null);
     const replies = await s.submitForm({ time: "19:00", user: MEMBER, text: "Hej" });
-    expect(replies).toEqual([`Zaplanowano wiadomość #1 na 19:00 → DM do <@${MEMBER}>.`]);
+    expect(replies).toEqual([
+      `Zaplanowano wiadomość #1 na 19:00 (Europe/Warsaw) → DM do <@${MEMBER}>.`,
+    ]);
   });
 
   test("every validation error, with the text handed back from the form", async () => {
@@ -679,7 +714,7 @@ describe("messages add", () => {
     const growth = `<@${MEMBER}>`.length - "{user}".length;
     const fits = "a".repeat(2000 - footer);
     expect(await s.prefixAdd("19:00", `<@${MEMBER}>`, fits)).toEqual([
-      `Zaplanowano wiadomość #1 na 19:00 → DM do <@${MEMBER}>.`,
+      `Zaplanowano wiadomość #1 na 19:00 (Europe/Warsaw) → DM do <@${MEMBER}>.`,
     ]);
     const tooLong = `{user}${"a".repeat(2000 - footer - "{user}".length)}`;
     expect(await s.prefixAdd("19:00", `<@${MEMBER}>`, tooLong)).toEqual([
@@ -687,7 +722,7 @@ describe("messages add", () => {
     ]);
     // The same text is fine in a channel, where {user} stays as written, and the reply says so.
     expect(await s.prefixAdd("19:00", `<#${GENERAL}>`, tooLong)).toEqual([
-      `Zaplanowano wiadomość #2 na 19:00 → <#${GENERAL}>. \`{user}\` działa tylko w wiadomościach prywatnych, na kanale zostanie wpisane dosłownie.`,
+      `Zaplanowano wiadomość #2 na 19:00 (Europe/Warsaw) → <#${GENERAL}>. \`{user}\` działa tylko w wiadomościach prywatnych, na kanale zostanie wpisane dosłownie.`,
     ]);
   });
 
@@ -718,10 +753,10 @@ describe("messages add", () => {
     ]);
     // Another member, and a channel, are not affected.
     expect(await s.prefixAdd("13:00", `<@${SECOND_MEMBER}>`, "Hej")).toEqual([
-      `Zaplanowano wiadomość #4 na 13:00 → DM do <@${SECOND_MEMBER}>.`,
+      `Zaplanowano wiadomość #4 na 13:00 (Europe/Warsaw) → DM do <@${SECOND_MEMBER}>.`,
     ]);
     expect(await s.prefixAdd("13:00", `<#${GENERAL}>`, "Hej")).toEqual([
-      `Zaplanowano wiadomość #5 na 13:00 → <#${GENERAL}>.`,
+      `Zaplanowano wiadomość #5 na 13:00 (Europe/Warsaw) → <#${GENERAL}>.`,
     ]);
   });
 
@@ -762,23 +797,23 @@ describe("messages add", () => {
   test("{user} in a channel message gets a note in the reply; without it there is none", async () => {
     const s = setup();
     expect(await s.submitForm({ time: "19:00", channel: GENERAL, text: "Hej {user}" })).toEqual([
-      `Zaplanowano wiadomość #1 na 19:00 → <#${GENERAL}>. \`{user}\` działa tylko w wiadomościach prywatnych, na kanale zostanie wpisane dosłownie.`,
+      `Zaplanowano wiadomość #1 na 19:00 (Europe/Warsaw) → <#${GENERAL}>. \`{user}\` działa tylko w wiadomościach prywatnych, na kanale zostanie wpisane dosłownie.`,
     ]);
     expect(await s.submitForm({ time: "20:00", user: MEMBER, text: "Hej {user}" })).toEqual([
-      `Zaplanowano wiadomość #2 na 20:00 → DM do <@${MEMBER}>.`,
+      `Zaplanowano wiadomość #2 na 20:00 (Europe/Warsaw) → DM do <@${MEMBER}>.`,
     ]);
   });
 
   test("the prefix form takes <#channel>, <@user> and <@!user>", async () => {
     const s = setup();
     expect(await s.prefixAdd("9:00", `<#${GENERAL}>`, "Kanał")).toEqual([
-      `Zaplanowano wiadomość #1 na 09:00 → <#${GENERAL}>.`,
+      `Zaplanowano wiadomość #1 na 09:00 (Europe/Warsaw) → <#${GENERAL}>.`,
     ]);
     expect(await s.prefixAdd("9:00", `<@${MEMBER}>`, "Osoba")).toEqual([
-      `Zaplanowano wiadomość #2 na 09:00 → DM do <@${MEMBER}>.`,
+      `Zaplanowano wiadomość #2 na 09:00 (Europe/Warsaw) → DM do <@${MEMBER}>.`,
     ]);
     expect(await s.prefixAdd("9:00", `<@!${SECOND_MEMBER}>`, "Nick")).toEqual([
-      `Zaplanowano wiadomość #3 na 09:00 → DM do <@${SECOND_MEMBER}>.`,
+      `Zaplanowano wiadomość #3 na 09:00 (Europe/Warsaw) → DM do <@${SECOND_MEMBER}>.`,
     ]);
     expect(s.store.rows.map((row) => row.target)).toEqual([
       { kind: "channel", channelId: GENERAL },
@@ -828,6 +863,7 @@ describe("messages list", () => {
     expect(ctx.replies).toEqual([
       {
         content: [
+          "Godziny w strefie Europe/Warsaw:",
           `#2 09:00 → <#${GENERAL}>: \`Pierwsza linia druga linia xxxxxxxxxxxxx…\``,
           `#1 21:00 → DM <@${MEMBER}>: \`Dobranoc\``,
         ].join("\n"),
@@ -844,7 +880,9 @@ describe("messages list", () => {
       target: { kind: "channel", channelId: GENERAL },
     });
     const content = replyText((await s.run("messages", "list")).replies[0]);
-    expect(content).toBe(`#1 09:00 → <#${GENERAL}>: \`**gruby** @everyone \u02cbkod\u02cb <@1>\``);
+    expect(content?.split("\n")[1]).toBe(
+      `#1 09:00 → <#${GENERAL}>: \`**gruby** @everyone \u02cbkod\u02cb <@1>\``,
+    );
   });
 
   test("list and remove need Manage Server", async () => {
@@ -879,7 +917,8 @@ describe("messages list", () => {
     const lines = content.split("\n");
     const more = lines.at(-1)?.match(/^… i jeszcze (\d+)$/);
     expect(more).not.toBeNull();
-    expect(lines.length - 1 + Number(more?.[1])).toBe(MAX_MESSAGES_PER_GUILD);
+    // The first line names the time zone; the last one counts what did not fit.
+    expect(lines.length - 2 + Number(more?.[1])).toBe(MAX_MESSAGES_PER_GUILD);
   });
 });
 
@@ -1068,7 +1107,7 @@ describe("sending, under load and at the edges", () => {
     expect(s.warnings).toEqual([
       {
         message: "Too many scheduled messages in one minute; the rest are skipped",
-        fields: { time: "19:00", limit: MAX_DUE_PER_TICK },
+        fields: { at: SEVEN_PM.toISOString(), limit: MAX_DUE_PER_TICK },
       },
     ]);
   });

@@ -3,6 +3,8 @@ import {
   type CommandContext,
   characterCount,
   defineCommand,
+  formatDateTime,
+  type GuildTimeZones,
   type Logger,
   plural,
   requireGuild,
@@ -83,6 +85,8 @@ export interface ModerationModuleDeps {
   log: ModerationLog;
   /** Remembers recent warning DMs, so a burst of /warn does not flood one member's inbox. */
   dmLimit: Pick<KeyValueStore, "setIfAbsent">;
+  /** Dates in /warnings are shown on the server's clock. */
+  timeZones: GuildTimeZones;
   logger: Logger;
 }
 
@@ -129,23 +133,6 @@ function hasPermission(granted: bigint, permission: bigint): boolean {
   return (granted & ADMINISTRATOR) !== 0n || (granted & permission) === permission;
 }
 
-const WARSAW_TIME = new Intl.DateTimeFormat("pl-PL", {
-  timeZone: "Europe/Warsaw",
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
-
-/** `dd.MM.yyyy HH:mm` in Warsaw time. */
-function formatWarsaw(date: Date): string {
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    WARSAW_TIME.formatToParts(date).find((piece) => piece.type === type)?.value ?? "";
-  return `${part("day")}.${part("month")}.${part("year")} ${part("hour")}:${part("minute")}`;
-}
-
 /** One line of the list: no line breaks, and a long reason cut so the list stays in one message. */
 function listedReason(reason: string | null): string {
   const flat = (reason ?? NO_REASON).replace(/\s+/g, " ");
@@ -176,6 +163,7 @@ export function createModerationModule({
   guild,
   log,
   dmLimit,
+  timeZones,
   logger,
 }: ModerationModuleDeps): BotModule {
   /** The typed reason, or null when none was given. Longer than Discord's audit limit is refused. */
@@ -512,7 +500,10 @@ export function createModerationModule({
       requireGuildPermission(await guild.member(guildId, ctx.user.id), MODERATE_MEMBERS);
       await ctx.defer({ ephemeral: true });
       const targetId = ctx.args.user;
-      const { total, recent } = await log.warnings(guildId, targetId, LISTED_WARNINGS);
+      const [{ total, recent }, zone] = await Promise.all([
+        log.warnings(guildId, targetId, LISTED_WARNINGS),
+        timeZones.of(guildId),
+      ]);
       const content =
         total === 0
           ? `<@${targetId}> nie ma ostrzeżeń.`
@@ -521,7 +512,7 @@ export function createModerationModule({
               total,
               recent.map(
                 (warning) =>
-                  `\`#${warning.id}\` ${formatWarsaw(warning.createdAt)} od <@${warning.moderatorId}>: ${listedReason(warning.reason)}`,
+                  `\`#${warning.id}\` ${formatDateTime(warning.createdAt, zone)} od <@${warning.moderatorId}>: ${listedReason(warning.reason)}`,
               ),
             );
       if (ctx.invocation === "slash") {

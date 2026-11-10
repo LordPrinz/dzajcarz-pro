@@ -5,6 +5,8 @@ export interface GuildSettingsRow {
   guild_id: string;
   /** null: the guild uses the bot's default prefix. */
   prefix: string | null;
+  /** IANA zone; null: the bot's default zone. */
+  time_zone: string | null;
   created_at: Date;
   updated_at: Date;
 }

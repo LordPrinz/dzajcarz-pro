@@ -1,5 +1,6 @@
 import {
   type BotModule,
+  canonicalTimeZone,
   defineCommand,
   defineSubcommand,
   fitLines,
@@ -16,6 +17,15 @@ export interface PrefixSettings {
   get(guildId: string): Promise<string | null>;
   set(guildId: string, prefix: string): Promise<void>;
   /** Back to the default prefix. */
+  reset(guildId: string): Promise<void>;
+}
+
+/** Where a guild's time zone lives; cache refresh is the implementation's job. */
+export interface TimeZoneSettings {
+  /** The guild's own zone, or null when it uses the default. */
+  get(guildId: string): Promise<string | null>;
+  set(guildId: string, timeZone: string): Promise<void>;
+  /** Back to the default zone. */
   reset(guildId: string): Promise<void>;
 }
 
@@ -47,8 +57,13 @@ export interface GuildChannels {
 export interface SettingsModuleDeps {
   prefixes: PrefixSettings;
   defaultPrefix: string;
+  timeZones: TimeZoneSettings;
+  /** The zone of servers that did not choose one. */
+  defaultTimeZone: string;
   modules: ModuleToggles;
   channels: GuildChannels;
+  /** For the clock shown next to a zone; the real time unless a test pins it. */
+  now?: () => Date;
 }
 
 /** Modules that stay on: without them nobody could turn anything back on or ask for help. `status` has no per-server behaviour, so a toggle would do nothing. */
@@ -74,8 +89,11 @@ function validatePrefix(prefix: string): void {
 export function createSettingsModule({
   prefixes,
   defaultPrefix,
+  timeZones,
+  defaultTimeZone,
   modules,
   channels,
+  now = () => new Date(),
 }: SettingsModuleDeps): BotModule {
   // These commands keep the default `contexts` (servers only), so guildId is set when they run; the check
   // below narrows the type and guards a future change of contexts.
@@ -111,6 +129,69 @@ export function createSettingsModule({
           const current = (await prefixes.get(requireGuild(ctx.guildId))) ?? defaultPrefix;
           await ctx.reply({
             content: `Prefiks na tym serwerze to \`${current}\`. Możesz też wspomnieć bota.`,
+            ephemeral: true,
+          });
+        },
+      }),
+    },
+  });
+
+  /** `Europe/Warsaw (teraz 14:05)`: the name and what its clock reads, so a wrong pick shows at once. */
+  const describeZone = (zone: string) => {
+    const clock = new Intl.DateTimeFormat("pl-PL", {
+      timeZone: zone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(now());
+    return `\`${zone}\` (teraz ${clock})`;
+  };
+
+  const timezone = defineCommand({
+    name: "timezone",
+    description: "Strefa czasowa serwera: zaplanowane wiadomości i piosenki, /time, daty",
+    permissions: MANAGE_GUILD,
+    subcommands: {
+      set: defineSubcommand({
+        description: "Ustawia strefę czasową serwera",
+        options: {
+          zone: {
+            type: "string",
+            description: "Nazwa strefy IANA, np. Europe/Warsaw, Europe/London, America/New_York",
+            required: true,
+          },
+        },
+        run: async (ctx) => {
+          const zone = canonicalTimeZone(ctx.args.zone);
+          if (zone === null) {
+            const shown = ctx.args.zone.replaceAll("`", "").slice(0, 64);
+            throw new UserError(
+              `Nie znam strefy \`${shown}\`. Podaj nazwę IANA, np. \`Europe/Warsaw\`, \`Europe/London\` albo \`America/New_York\`.`,
+            );
+          }
+          await timeZones.set(requireGuild(ctx.guildId), zone);
+          await ctx.reply({
+            content: `Strefa czasowa serwera to teraz ${describeZone(zone)}. Zaplanowane wiadomości i piosenki idą według niej.`,
+            ephemeral: true,
+          });
+        },
+      }),
+      reset: defineSubcommand({
+        description: "Przywraca domyślną strefę czasową",
+        run: async (ctx) => {
+          await timeZones.reset(requireGuild(ctx.guildId));
+          await ctx.reply({
+            content: `Przywrócono domyślną strefę ${describeZone(defaultTimeZone)}.`,
+            ephemeral: true,
+          });
+        },
+      }),
+      show: defineSubcommand({
+        description: "Pokazuje strefę czasową serwera",
+        run: async (ctx) => {
+          const own = await timeZones.get(requireGuild(ctx.guildId));
+          await ctx.reply({
+            content: `Strefa czasowa serwera: ${describeZone(own ?? defaultTimeZone)}${own === null ? " (domyślna)" : ""}.`,
             ephemeral: true,
           });
         },
@@ -217,5 +298,5 @@ export function createSettingsModule({
     },
   });
 
-  return { name: "settings", commands: [prefix, modulesCommand] };
+  return { name: "settings", commands: [prefix, timezone, modulesCommand] };
 }

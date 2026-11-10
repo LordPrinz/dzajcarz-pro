@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
+import { createGuildSettingsRepository } from "./guild-settings.ts";
 import {
   createScheduledMessageRepository,
   type ScheduledMessageRecord,
@@ -20,11 +21,12 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  if (sql) await sql`TRUNCATE scheduled_message, scheduled_message_opt_out`;
+  if (sql) await sql`TRUNCATE scheduled_message, scheduled_message_opt_out, guild_settings`;
 });
 
 describe.skipIf(!sql)("scheduled message repository", () => {
-  const repo = () => createScheduledMessageRepository(sql as SQL);
+  const repo = () =>
+    createScheduledMessageRepository(sql as SQL, { defaultTimeZone: "Europe/Warsaw" });
   const guild = "1234567890123456789";
   const otherGuild = "1234567890123456790";
   const channel = { kind: "channel", channelId: "400000000000000004" } as const;
@@ -65,13 +67,32 @@ describe.skipIf(!sql)("scheduled message repository", () => {
     expect(await count("999")).toBe(0);
   });
 
+  // 17:00 UTC on 1 July is 19:00 in Warsaw (summer time) and 18:00 in London.
+  const SEVEN_PM_WARSAW = new Date("2026-07-01T17:00:00Z");
+
   test("due returns the messages of every guild at that time, up to the limit", async () => {
     await add(guild, "19:00", "A");
     await add(otherGuild, "19:00", "B");
     await add(guild, "19:01", "C");
-    expect((await repo().due("19:00", 500)).map((m) => m.content)).toEqual(["A", "B"]);
-    expect((await repo().due("19:00", 1)).map((m) => m.content)).toEqual(["A"]);
-    expect(await repo().due("00:00", 500)).toEqual([]);
+    expect((await repo().due(SEVEN_PM_WARSAW, 500)).map((m) => m.content)).toEqual(["A", "B"]);
+    expect((await repo().due(SEVEN_PM_WARSAW, 1)).map((m) => m.content)).toEqual(["A"]);
+    expect(await repo().due(new Date("2026-07-01T22:00:00Z"), 500)).toEqual([]);
+  });
+
+  test("due reads each guild's own time zone and gives the date on its clock", async () => {
+    await add(guild, "19:00", "Warszawa");
+    await add(otherGuild, "18:00", "Londyn");
+    await add(otherGuild, "19:00", "Nie teraz");
+    await createGuildSettingsRepository(sql as SQL).setTimeZone(otherGuild, "Europe/London");
+    const due = await repo().due(SEVEN_PM_WARSAW, 500);
+    expect(due.map((m) => [m.content, m.date])).toEqual([
+      ["Warszawa", "2026-07-01"],
+      ["Londyn", "2026-07-01"],
+    ]);
+    // 23:30 UTC is already the next day in Warsaw.
+    await add(guild, "01:30", "Po północy");
+    const late = await repo().due(new Date("2026-07-01T23:30:00Z"), 500);
+    expect(late.map((m) => [m.content, m.date])).toEqual([["Po północy", "2026-07-02"]]);
   });
 
   test("remove only takes a message of the given guild", async () => {
