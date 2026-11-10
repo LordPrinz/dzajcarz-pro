@@ -15,16 +15,10 @@ import {
   requireGuild,
   type Scheduler,
   type StateStorage,
+  truncate,
   UserError,
 } from "@dzajcarz/core";
-import {
-  escapeMarkdown,
-  formatDuration,
-  httpUrl,
-  parseQuery,
-  parseTime,
-  truncate,
-} from "./format.ts";
+import { escapeMarkdown, formatDuration, httpUrl, parseQuery, parseTime } from "./format.ts";
 import {
   FILTER_LABELS,
   LOOP_LABELS,

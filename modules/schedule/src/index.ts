@@ -8,6 +8,7 @@ import {
   type Logger,
   MANAGE_GUILD,
   requireGuild,
+  tickMinute,
   UserError,
 } from "@dzajcarz/core";
 
@@ -86,9 +87,6 @@ export interface ScheduleModuleDeps {
   timeZones: GuildTimeZones;
   now: () => Date;
 }
-
-/** How early the minute tick may fire and still count as the coming minute. */
-const EARLY_TICK_MS = 5_000;
 
 const MODULE_NAME = "schedule";
 /** The `/schedule song` value that goes back to the default song; no listed song may use it. */
@@ -178,8 +176,7 @@ export function createScheduleModule({
 
   /** Every minute: plays in each server whose own clock reads a time the expression fires at. */
   async function tick(): Promise<void> {
-    // A tick up to 5 s early belongs to the coming minute; a late one keeps its own.
-    const minute = new Date(Math.floor((now().getTime() + EARLY_TICK_MS) / 60_000) * 60_000);
+    const minute = tickMinute(now());
     // Most minutes nobody sits in voice anywhere, so the voice cache (no I/O) filters first and only those
     // servers have their zone looked up; a minute the cron does not fire on then costs nothing further.
     const occupied: string[] = [];

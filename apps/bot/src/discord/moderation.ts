@@ -7,8 +7,8 @@ import {
   RESTJSONErrorCodes,
   SnowflakeUtil,
 } from "discord.js";
+import { sendDirectMessage } from "./direct.ts";
 import { hasCode } from "./errors.ts";
-import { NO_MENTIONS } from "./reply.ts";
 
 export const BOT_MISSING_PERMISSIONS =
   "Nie mam uprawnień, żeby to zrobić. Sprawdź moje uprawnienia i czy moja rola jest wyżej.";
@@ -140,15 +140,6 @@ export function createModerationGuild(
       return { deleted: deleted.size, tooOld, pinned };
     },
 
-    async sendDirect(userId, text) {
-      try {
-        const user = await client.users.fetch(userId);
-        await user.send({ content: text, allowedMentions: NO_MENTIONS });
-        return true;
-      } catch (error) {
-        if (hasCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
-        throw error;
-      }
-    },
+    sendDirect: (userId, text) => sendDirectMessage(client, userId, { content: text }),
   };
 }

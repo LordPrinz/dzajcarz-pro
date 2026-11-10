@@ -21,7 +21,7 @@ This is v5, a rewrite on Bun. The history of the earlier versions (v3 and v4) si
 | Music             | Lavalink 4 with the YouTube source plugin                                          |
 | Database          | PostgreSQL 18 via `Bun.SQL`, plain SQL migrations                                  |
 | Cache / cooldowns | Redis 8 via Bun `RedisClient`                                                      |
-| Validation        | zod (environment, later command input from the dashboard)                          |
+| Validation        | zod (environment and Riot API responses)                                           |
 | Quality           | Biome, TypeScript strict, Husky git hooks, GitHub Actions                          |
 
 ## Repository layout
@@ -83,7 +83,7 @@ the bot needs **Connect** and **Speak**, and **Send Messages** and **Embed Links
 music was started (the now playing panel).
 
 The schedule module plays the songs in `infra/lavalink/music` through Lavalink's `local` source (ADR 4), so
-Lavalink needs that directory mounted: after pulling this change recreate it with
+Lavalink needs that directory mounted; a Lavalink container created without it is recreated with
 `docker compose --env-file .env -f infra/docker-compose.yml --profile music up -d --force-recreate lavalink`.
 At 9:00 and 21:00 on each server's clock the bot joins the voice channel with the most people there, unless
 music is already playing. Servers manage it with `/schedule` (Manage Server) or switch it off with

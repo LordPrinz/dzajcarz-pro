@@ -8,6 +8,7 @@ import {
   type Logger,
   plural,
   requireGuild,
+  truncate,
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
@@ -137,10 +138,7 @@ function hasPermission(granted: bigint, permission: bigint): boolean {
 /** One line of the list: no line breaks, and a long reason cut so the list stays in one message. */
 function listedReason(reason: string | null): string {
   const flat = (reason ?? NO_REASON).replace(/\s+/g, " ");
-  const chars = [...flat];
-  return chars.length > LISTED_REASON_LENGTH
-    ? `${chars.slice(0, LISTED_REASON_LENGTH - 1).join("")}…`
-    : flat;
+  return truncate(flat, LISTED_REASON_LENGTH);
 }
 
 /**

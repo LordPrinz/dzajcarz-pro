@@ -13,6 +13,7 @@ import {
   PermissionFlagsBits,
   RESTJSONErrorCodes,
 } from "discord.js";
+import { sendDirectMessage } from "./direct.ts";
 import { downloadDiscordFile } from "./download.ts";
 import { hasCode } from "./errors.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
@@ -307,14 +308,7 @@ export function createPartyInvites(client: Client, fetchFile: typeof fetch = fet
 
     async sendDirect(userId, message) {
       const { content, embeds, files, components } = toReplyPayload(message);
-      try {
-        const user = await client.users.fetch(userId);
-        await user.send({ content, embeds, files, components, allowedMentions: NO_MENTIONS });
-        return true;
-      } catch (error) {
-        if (hasCode(error, RESTJSONErrorCodes.CannotSendMessagesToThisUser)) return false;
-        throw error;
-      }
+      return sendDirectMessage(client, userId, { content, embeds, files, components });
     },
   };
 }

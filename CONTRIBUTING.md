@@ -46,7 +46,7 @@ log shows `app: "dev"`. Production never receives the test pair.
 Test new commands on a private test server: set `DISCORD_DEV_GUILD_ID`, so slash commands show up there at
 once instead of after the global rollout. The bot registers them itself on start: it reads the set Discord
 has and sends the new one only when it differs (the log says "Deployed slash commands" or "Slash commands
-are up to date"). `COMMANDS_AUTO_DEPLOY=false` turns that off. `bun run commands:deploy` is now optional;
+are up to date"). `COMMANDS_AUTO_DEPLOY=false` turns that off. `bun run commands:deploy` is optional;
 it does the same without starting the bot and always sends the set.
 
 Guild commands cannot be used in DMs or as a user-installed app. To try those, deploy globally with
@@ -83,7 +83,7 @@ interaction responses only.
 - **Branch:** `DZAJ-<n>-short-kebab-description`.
 - **Commit / PR title:** `[DZAJ-<n>] <type>(<optional scope>): <Description>`
   - types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`, `ci`, `build`
-  - scopes: `core`, `bot`, `db`, `kv`, `general`, `settings`, `music`, `party`, `moderation`, `welcome`, `status`, `fun`, `infra`
+  - scopes: `core`, `bot`, `db`, `kv`, `general`, `settings`, `music`, `party`, `moderation`, `welcome`, `status`, `fun`, `dzajco`, `schedule`, `messages`, `riot`, `infra`, `ci`
   - `!` after the type/scope marks a breaking change.
 - PRs are **squash-merged**; the PR title becomes the commit on `main`.
 - **Dependabot** keeps its own `dependabot/…` branches; its PRs use the umbrella ticket DZAJ-3

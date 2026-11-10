@@ -12,7 +12,7 @@
 
 - [ ] Tests added or updated
 - [ ] `bun run check`, `bun run typecheck` and `bun test` pass locally
-- [ ] Slash commands re-deployed (`bun run commands:deploy`) if command definitions changed
+- [ ] Tried the changed commands on the test server (the bot redeploys them on start)
 - [ ] Docs / DESIGN.md updated if a decision changed
 
 Closes #
