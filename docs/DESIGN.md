@@ -227,7 +227,8 @@ sides, so `whatever` and `somewhat` do not count.
 
 The `messageCreate` handler stops at the first failing check, in this order:
 
-1. no guild, a bot or webhook author, or empty text;
+1. a bot or webhook author, or empty text (a DM with the bot is handled like a channel, with the default
+   prefix);
 2. no word matches (a regex test, so most messages cost no I/O);
 3. the text starts with the guild prefix (a command such as `!play what is love`) or with a mention of the bot;
 4. the channel's cooldown key is set;
@@ -242,10 +243,14 @@ The cooldown lives in Redis under `dzajco:cooldown:<channelId>` (`setIfAbsent` w
 racing for it cannot both answer) and starts only when the bot answers. A Redis error fails closed: no gif,
 a logged warning, so an outage never turns into gif spam. The default is a 3% chance and 60 s, per channel.
 
-`dzajco_channel_config` holds per-channel overrides, edited with `/dzajco set`, `show` and `reset` (Manage
-Server). A channel without a row uses the defaults. The handler reads settings through a Redis cache
-(`dzajco:settings:<channelId>`, 10 minutes, an unreadable entry is reloaded); `set` and `reset` delete that
-key and the running cooldown, so new values apply at once. If the invalidation fails, or a read races a
+`dzajco_channel_config` holds per-channel overrides (keyed by channel; `guild_id` is NULL for a DM), edited
+with `/dzajco set`, `show` and `reset`. On a server they need Manage Server and take any chat of it: text and
+announcement channels, threads and the chat of voice and stage channels. The command also runs in DMs with
+the bot and for user installs, where it sets only that conversation and needs no permission; because of
+that it carries no `permissions` (core allows those only on guild-only commands) and checks Manage Server
+itself, so Discord shows it to every member. A channel without a row uses the defaults. The handler reads
+settings through a Redis cache (`dzajco:settings:<channelId>`, 10 minutes, an unreadable entry is reloaded);
+`set` and `reset` write the new value to that key and end the running cooldown, so new values apply at once. If the invalidation fails, or a read races a
 write, the old settings can stay for up to the cache TTL. We accept that. Chance 0 switches the gif off in a
 channel. The random source is injected (`Math.random` in `modules.ts`), so the tests are deterministic. The
 reaction needs the Add Reactions permission; without it the bot logs a warning and still sends the gif.

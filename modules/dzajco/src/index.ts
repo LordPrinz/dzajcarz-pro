@@ -1,12 +1,11 @@
 import {
   type BotModule,
+  checkAccess,
   defineCommand,
   defineEvent,
   defineSubcommand,
   type Logger,
   MANAGE_GUILD,
-  requireGuild,
-  type TextChannels,
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
@@ -25,13 +24,22 @@ export interface DzajcoSettings {
   cooldownSeconds: number;
 }
 
-/** Per-channel overrides; a channel without one uses the defaults. */
+/** Per-channel overrides; a channel without one uses the defaults. `guildId` null is a DM with the bot. */
 export interface DzajcoSettingsStore {
   /** Null means "no override": the defaults apply. */
-  get(guildId: string, channelId: string): Promise<DzajcoSettings | null>;
-  set(guildId: string, channelId: string, settings: DzajcoSettings): Promise<void>;
+  get(guildId: string | null, channelId: string): Promise<DzajcoSettings | null>;
+  set(guildId: string | null, channelId: string, settings: DzajcoSettings): Promise<void>;
   /** False when the channel had no override. */
-  clear(guildId: string, channelId: string): Promise<boolean>;
+  clear(guildId: string | null, channelId: string): Promise<boolean>;
+}
+
+/** Asks Discord about channels, so a channel id typed by a member is never trusted on its own. */
+export interface DzajcoChannels {
+  /**
+   * Whether members can chat in the channel and it belongs to this guild: text and announcement channels,
+   * threads, and the text chat of voice and stage channels.
+   */
+  isChatOf(guildId: string, channelId: string): Promise<boolean>;
 }
 
 export interface DzajcoResponder {
@@ -39,13 +47,11 @@ export interface DzajcoResponder {
   respond(channelId: string, messageId: string): Promise<void>;
 }
 
-export type { TextChannels } from "@dzajcarz/core";
-
 export interface DzajcoModuleDeps {
   settings: DzajcoSettingsStore;
   responder: DzajcoResponder;
   kv: Pick<KeyValueStore, "get" | "set" | "setIfAbsent" | "del">;
-  channels: TextChannels;
+  channels: DzajcoChannels;
   /** Returns a number in [0, 1), like `Math.random`. */
   random: () => number;
   prefixFor: (guildId: string | null) => Promise<string>;
@@ -90,7 +96,10 @@ export function createDzajcoModule({
   };
 
   /** The channel's settings through a short-lived cache ("none" is cached too); a broken entry is reloaded. */
-  async function cachedSettings(guildId: string, channelId: string): Promise<DzajcoSettings> {
+  async function cachedSettings(
+    guildId: string | null,
+    channelId: string,
+  ): Promise<DzajcoSettings> {
     const cached = await kv.get(settingsKey(channelId));
     if (cached !== null) {
       try {
@@ -111,7 +120,7 @@ export function createDzajcoModule({
   }
 
   /** Called after every write: caches what the database now holds and ends the running cooldown. */
-  async function refresh(guildId: string, channelId: string): Promise<void> {
+  async function refresh(guildId: string | null, channelId: string): Promise<void> {
     try {
       const stored = await settings.get(guildId, channelId);
       await kv.set(settingsKey(channelId), JSON.stringify(stored), SETTINGS_CACHE_TTL_MS);
@@ -125,7 +134,8 @@ export function createDzajcoModule({
 
   async function handle(message: DzajcoMessage): Promise<void> {
     const { guildId, channelId, content } = message;
-    if (guildId === null || message.author.bot || message.webhookId !== null) return;
+    // A DM with the bot counts too (guildId null); it reads the default prefix and its own settings.
+    if (message.author.bot || message.webhookId !== null) return;
     if (content.trim().length === 0) return;
     try {
       if (!matchesWhat(content)) return;
@@ -155,37 +165,60 @@ export function createDzajcoModule({
     run: handle,
   });
 
-  /** The explicit channel must belong to this guild; without one the current channel is used. */
-  async function targetChannel(guildId: string, explicit: string | undefined, current: string) {
-    if (explicit === undefined) return current;
-    if (!(await channels.isTextChannelOf(guildId, explicit))) {
-      throw new UserError("Wybierz kanał tekstowy z tego serwera.");
+  /**
+   * Where a subcommand acts: the explicit channel, which must be a chat of this server, or the current one.
+   * In a DM only the conversation itself can be set, and nobody needs Manage Server for it.
+   */
+  async function targetOf(ctx: {
+    guildId: string | null;
+    channelId: string;
+    memberPermissions: bigint | null;
+    args: { channel?: string };
+  }): Promise<{ guildId: string | null; channelId: string }> {
+    const { guildId, channelId } = ctx;
+    if (guildId === null) {
+      if (ctx.args.channel !== undefined && ctx.args.channel !== channelId) {
+        throw new UserError("W prywatnej wiadomości ustawiasz tylko tę rozmowę.");
+      }
+      return { guildId, channelId };
     }
-    return explicit;
+    // The command also runs in DMs, so Discord cannot hide it from members; the server check is ours.
+    const denied = checkAccess({ permissions: MANAGE_GUILD }, ctx);
+    if (denied) throw new UserError(denied);
+    const explicit = ctx.args.channel;
+    if (explicit === undefined) return { guildId, channelId };
+    if (!(await channels.isChatOf(guildId, explicit))) {
+      throw new UserError(
+        "Wybierz kanał z tego serwera, na którym da się pisać (także wątek albo czat kanału głosowego).",
+      );
+    }
+    return { guildId, channelId: explicit };
   }
+
+  const where = (guildId: string | null, channelId: string) =>
+    guildId === null ? "w tej rozmowie" : `na <#${channelId}>`;
 
   const describe = ({ chancePercent, cooldownSeconds }: DzajcoSettings) =>
     `szansa ${chancePercent}%, przerwa ${cooldownSeconds} s`;
 
   const channelOption = {
     type: "channel",
-    description: "Kanał (domyślnie ten, w którym piszesz)",
+    description: "Kanał, wątek albo czat głosowy (domyślnie ten, w którym piszesz)",
   } as const;
 
   const dzajco = defineCommand({
     name: "dzajco",
-    description: "Ustawienia odpowiedzi Dżajco na „co?” w kanałach",
-    permissions: MANAGE_GUILD,
+    description: "Ustawienia odpowiedzi Dżajco na „co?” w kanałach i w prywatnej rozmowie z botem",
+    contexts: { places: ["guild", "bot-dm"], installs: ["guild", "user"] },
     subcommands: {
       show: defineSubcommand({
         description: "Pokazuje ustawienia Dżajco kanału",
         options: { channel: channelOption },
         run: async (ctx) => {
-          const guildId = requireGuild(ctx.guildId);
-          const channelId = await targetChannel(guildId, ctx.args.channel, ctx.channelId);
+          const { guildId, channelId } = await targetOf(ctx);
           const stored = await settings.get(guildId, channelId);
           await ctx.reply({
-            content: `Dżajco na <#${channelId}>: ${describe(stored ?? defaults)}${stored ? "" : " (domyślne)"}.`,
+            content: `Dżajco ${where(guildId, channelId)}: ${describe(stored ?? defaults)}${stored ? "" : " (domyślne)"}.`,
             ephemeral: true,
           });
         },
@@ -208,12 +241,11 @@ export function createDzajcoModule({
           },
         },
         run: async (ctx) => {
-          const guildId = requireGuild(ctx.guildId);
           const { chance, cooldown } = ctx.args;
+          const { guildId, channelId } = await targetOf(ctx);
           if (chance === undefined && cooldown === undefined) {
             throw new UserError("Podaj szansę albo przerwę.");
           }
-          const channelId = await targetChannel(guildId, ctx.args.channel, ctx.channelId);
           const current = (await settings.get(guildId, channelId)) ?? defaults;
           const next: DzajcoSettings = {
             chancePercent: chance ?? current.chancePercent,
@@ -222,7 +254,7 @@ export function createDzajcoModule({
           await settings.set(guildId, channelId, next);
           await refresh(guildId, channelId);
           await ctx.reply({
-            content: `Dżajco na <#${channelId}>: ${describe(next)}.`,
+            content: `Dżajco ${where(guildId, channelId)}: ${describe(next)}.`,
             ephemeral: true,
           });
         },
@@ -231,14 +263,13 @@ export function createDzajcoModule({
         description: "Przywraca domyślne ustawienia Dżajco w kanale",
         options: { channel: channelOption },
         run: async (ctx) => {
-          const guildId = requireGuild(ctx.guildId);
-          const channelId = await targetChannel(guildId, ctx.args.channel, ctx.channelId);
+          const { guildId, channelId } = await targetOf(ctx);
           const removed = await settings.clear(guildId, channelId);
           await refresh(guildId, channelId);
           await ctx.reply({
             content: removed
-              ? `Przywrócono domyślne ustawienia Dżajco na <#${channelId}>.`
-              : `Ustawienia Dżajco na <#${channelId}> były już domyślne.`,
+              ? `Przywrócono domyślne ustawienia Dżajco ${where(guildId, channelId)}.`
+              : `Ustawienia Dżajco ${where(guildId, channelId)} były już domyślne.`,
             ephemeral: true,
           });
         },

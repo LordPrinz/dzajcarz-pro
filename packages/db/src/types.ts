@@ -58,7 +58,8 @@ export interface ScheduledSongExclusionRow {
 }
 
 export interface DzajcoChannelConfigRow {
-  guild_id: string;
+  /** null: a DM with the bot. */
+  guild_id: string | null;
   channel_id: string;
   chance_percent: number;
   cooldown_seconds: number;

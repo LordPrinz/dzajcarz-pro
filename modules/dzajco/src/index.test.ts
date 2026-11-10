@@ -10,11 +10,11 @@ import { createFakeContext, replyText } from "@dzajcarz/core/testing";
 import { createMemoryStore, type KeyValueStore } from "@dzajcarz/kv";
 import {
   createDzajcoModule,
+  type DzajcoChannels,
   type DzajcoMessage,
   type DzajcoResponder,
   type DzajcoSettings,
   type DzajcoSettingsStore,
-  type TextChannels,
 } from "./index.ts";
 
 const MANAGE_GUILD = 1n << 5n;
@@ -23,6 +23,9 @@ const channelId = "300000000000000003";
 const otherChannelId = "300000000000000004";
 const voiceChannelId = "300000000000000005";
 const botId = "999000000000000009";
+const threadId = "300000000000000008";
+const voiceChatId = "300000000000000009";
+const dmChannelId = "300000000000000010";
 
 function setup({
   randoms = [],
@@ -38,7 +41,7 @@ function setup({
   let time = 1_000_000;
   const store = customStore ?? createMemoryStore(() => time);
   const rows = new Map<string, DzajcoSettings>();
-  const key = (guild: string, channel: string) => `${guild}:${channel}`;
+  const key = (guild: string | null, channel: string) => `${guild ?? "dm"}:${channel}`;
   const settingsReads: string[] = [];
   const settings: DzajcoSettingsStore = {
     get: async (guild, channel) => {
@@ -55,9 +58,9 @@ function setup({
       responses.push({ channelId: channel, messageId });
     },
   };
-  const channels: TextChannels = {
-    isTextChannelOf: async (id, channel) =>
-      id === guildId && (channel === channelId || channel === otherChannelId),
+  const channels: DzajcoChannels = {
+    isChatOf: async (id, channel) =>
+      id === guildId && [channelId, otherChannelId, threadId, voiceChatId].includes(channel),
   };
   const warnings: { message: string; fields?: LogFields }[] = [];
   const logger: Logger = {
@@ -107,6 +110,7 @@ function setup({
     guild: string | null = guildId,
   ) => {
     const ctx = createFakeContext({ args, subcommand, memberPermissions, guildId: guild });
+    if (guild === null) Object.assign(ctx, { channelId: dmChannelId });
     await executeCommand(command, ctx, silentLogger);
     return ctx.replies.map((r) => replyText(r));
   };
@@ -304,10 +308,9 @@ describe("per-channel settings", () => {
 });
 
 describe("/dzajco", () => {
-  test("is limited to Manage Server and registered under the module name", () => {
+  test("is registered under the module name", () => {
     const t = setup();
-    const command = t.registry.find("dzajco");
-    expect(command?.permissions).toBe(MANAGE_GUILD);
+    expect(t.registry.find("dzajco")?.name).toBe("dzajco");
   });
 
   test("a member without Manage Server is refused", async () => {
@@ -355,10 +358,10 @@ describe("/dzajco", () => {
     expect(t.rows.size).toBe(0);
   });
 
-  test("an explicit channel has to be a text channel of the guild", async () => {
+  test("an explicit channel has to be a chat of the guild", async () => {
     const t = setup();
     expect(await t.run("set", { channel: voiceChannelId, chance: 5 })).toEqual([
-      "Wybierz kanał tekstowy z tego serwera.",
+      "Wybierz kanał z tego serwera, na którym da się pisać (także wątek albo czat kanału głosowego).",
     ]);
     expect(await t.run("set", { channel: otherChannelId, chance: 5 })).toEqual([
       `Dżajco na <#${otherChannelId}>: szansa 5%, przerwa 60 s.`,
@@ -378,10 +381,10 @@ describe("/dzajco", () => {
     ]);
   });
 
-  test("outside a guild it is refused", async () => {
+  test("in a DM, show gives the conversation's settings", async () => {
     const t = setup();
-    expect(await t.run("show", {}, MANAGE_GUILD, null)).toEqual([
-      "Ta komenda działa tylko na serwerze.",
+    expect(await t.run("show", {}, 0n, null)).toEqual([
+      "Dżajco w tej rozmowie: szansa 3%, przerwa 60 s (domyślne).",
     ]);
   });
 
@@ -397,5 +400,60 @@ describe("/dzajco", () => {
     await t.run("reset");
     await t.say("what"); // back to 3%: 0.5 loses
     expect(t.responses).toHaveLength(2);
+  });
+});
+
+describe("threads, voice chats and DMs", () => {
+  test("a thread and a voice channel's chat can be configured", async () => {
+    const t = setup();
+    expect(await t.run("set", { channel: threadId, chance: 50 })).toEqual([
+      `Dżajco na <#${threadId}>: szansa 50%, przerwa 60 s.`,
+    ]);
+    expect(await t.run("set", { channel: voiceChatId, cooldown: 0 })).toEqual([
+      `Dżajco na <#${voiceChatId}>: szansa 3%, przerwa 0 s.`,
+    ]);
+  });
+
+  test("a channel of another server is still refused", async () => {
+    const t = setup();
+    expect(await t.run("set", { channel: "300000000000000099", chance: 50 })).toEqual([
+      "Wybierz kanał z tego serwera, na którym da się pisać (także wątek albo czat kanału głosowego).",
+    ]);
+  });
+
+  test("on a server it needs Manage Server, checked before the arguments", async () => {
+    const t = setup();
+    expect(await t.run("set", {}, 0n)).toEqual(["Nie masz uprawnień do tej komendy."]);
+    expect(await t.run("show", {}, 0n)).toEqual(["Nie masz uprawnień do tej komendy."]);
+  });
+
+  test("Dżajco answers in a DM with the bot", async () => {
+    const t = setup({ randoms: [0] });
+    await t.say("what", { guildId: null, channelId: dmChannelId });
+    expect(t.responses).toEqual([{ channelId: dmChannelId, messageId: "700000000000000007" }]);
+  });
+
+  test("a DM is configured by whoever is in it, for that conversation only", async () => {
+    const t = setup({ randoms: [0.5] });
+    expect(await t.run("set", { chance: 100 }, 0n, null)).toEqual([
+      "Dżajco w tej rozmowie: szansa 100%, przerwa 60 s.",
+    ]);
+    await t.say("what", { guildId: null, channelId: dmChannelId });
+    expect(t.responses).toHaveLength(1);
+    expect(await t.run("set", { channel: channelId, chance: 1 }, 0n, null)).toEqual([
+      "W prywatnej wiadomości ustawiasz tylko tę rozmowę.",
+    ]);
+    expect(await t.run("reset", {}, 0n, null)).toEqual([
+      "Przywrócono domyślne ustawienia Dżajco w tej rozmowie.",
+    ]);
+  });
+
+  test("the command is offered in bot DMs and to user installs", () => {
+    const t = setup();
+    expect(t.registry.find("dzajco")?.contexts).toEqual({
+      places: ["guild", "bot-dm"],
+      installs: ["guild", "user"],
+    });
+    expect(t.registry.find("dzajco")?.permissions).toBeUndefined();
   });
 });

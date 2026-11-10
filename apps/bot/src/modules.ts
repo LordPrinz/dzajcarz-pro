@@ -2,6 +2,7 @@ import type { BotModule, CommandSummary, CronScheduler, Logger, Scheduler } from
 import type { KeyValueStore } from "@dzajcarz/kv";
 import {
   createDzajcoModule,
+  type DzajcoChannels,
   type DzajcoResponder,
   type DzajcoSettingsStore,
 } from "@dzajcarz/module-dzajco";
@@ -100,6 +101,7 @@ export interface ModuleServices {
   dzajcoSettings: DzajcoSettingsStore;
   dzajcoResponder: DzajcoResponder;
   dzajcoStore: KeyValueStore;
+  dzajcoChannels: DzajcoChannels;
   // moderation
   moderationGuild: ModerationGuild;
   moderationLog: ModerationLog;
@@ -176,7 +178,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       settings: services.dzajcoSettings,
       responder: services.dzajcoResponder,
       kv: services.dzajcoStore,
-      channels: services.channels,
+      channels: services.dzajcoChannels,
       random: Math.random,
       prefixFor: services.prefixFor,
       logger: services.logger.child({ module: "dzajco" }),

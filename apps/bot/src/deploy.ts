@@ -318,6 +318,7 @@ export const createDeployRegistry = () =>
       dzajcoSettings: unusedServices(),
       dzajcoResponder: unusedServices(),
       dzajcoStore: unusedServices(),
+      dzajcoChannels: unusedServices(),
       // moderation
       moderationGuild: unusedServices(),
       moderationLog: unusedServices(),

@@ -23,7 +23,7 @@ import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { attachHandlers } from "./bot.ts";
 import { deployOnStartup } from "./deploy.ts";
-import { createDzajcoResponder } from "./discord/dzajco.ts";
+import { createDzajcoChannels, createDzajcoResponder } from "./discord/dzajco.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
 import { createMessageChannels, createScheduledMessageSender } from "./discord/messages.ts";
@@ -181,6 +181,7 @@ const modules = createModules({
   dzajcoSettings: createDzajcoRepository(sql),
   dzajcoResponder: createDzajcoResponder(client, logger.child({ component: "dzajco" }), DZAJCO_GIF),
   dzajcoStore: createRedisStore(redis),
+  dzajcoChannels: createDzajcoChannels(client),
   moderationGuild: createModerationGuild(client),
   moderationLog: createModerationRepository(sql),
   moderationDmLimit: createRedisStore(redis),

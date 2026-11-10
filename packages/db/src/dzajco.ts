@@ -6,13 +6,14 @@ export interface DzajcoSettings {
   cooldownSeconds: number;
 }
 
+/** `guildId` null is a DM with the bot. A row only matches the guild it was stored for. */
 export interface DzajcoRepository {
   /** Null when the channel has no override (the module then uses its defaults). */
-  get(guildId: string, channelId: string): Promise<DzajcoSettings | null>;
+  get(guildId: string | null, channelId: string): Promise<DzajcoSettings | null>;
   /** Insert or replace the channel's override. */
-  set(guildId: string, channelId: string, settings: DzajcoSettings): Promise<void>;
+  set(guildId: string | null, channelId: string, settings: DzajcoSettings): Promise<void>;
   /** False when the channel had no override. */
-  clear(guildId: string, channelId: string): Promise<boolean>;
+  clear(guildId: string | null, channelId: string): Promise<boolean>;
 }
 
 export function createDzajcoRepository(sql: SQL): DzajcoRepository {
@@ -20,7 +21,7 @@ export function createDzajcoRepository(sql: SQL): DzajcoRepository {
     async get(guildId, channelId) {
       const [row] = await sql<DzajcoChannelConfigRow[]>`
         SELECT * FROM dzajco_channel_config
-        WHERE guild_id = ${guildId} AND channel_id = ${channelId}
+        WHERE channel_id = ${channelId} AND guild_id IS NOT DISTINCT FROM ${guildId}
       `;
       return row
         ? { chancePercent: row.chance_percent, cooldownSeconds: row.cooldown_seconds }
@@ -31,8 +32,9 @@ export function createDzajcoRepository(sql: SQL): DzajcoRepository {
       await sql`
         INSERT INTO dzajco_channel_config (guild_id, channel_id, chance_percent, cooldown_seconds)
         VALUES (${guildId}, ${channelId}, ${chancePercent}, ${cooldownSeconds})
-        ON CONFLICT (guild_id, channel_id) DO UPDATE
-          SET chance_percent = EXCLUDED.chance_percent,
+        ON CONFLICT (channel_id) DO UPDATE
+          SET guild_id = EXCLUDED.guild_id,
+              chance_percent = EXCLUDED.chance_percent,
               cooldown_seconds = EXCLUDED.cooldown_seconds,
               updated_at = now()
       `;
@@ -41,7 +43,7 @@ export function createDzajcoRepository(sql: SQL): DzajcoRepository {
     async clear(guildId, channelId) {
       const deleted = await sql<DzajcoChannelConfigRow[]>`
         DELETE FROM dzajco_channel_config
-        WHERE guild_id = ${guildId} AND channel_id = ${channelId}
+        WHERE channel_id = ${channelId} AND guild_id IS NOT DISTINCT FROM ${guildId}
         RETURNING *
       `;
       return deleted.length > 0;
