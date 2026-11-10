@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createCronScheduler } from "./cron.ts";
+import { createCronScheduler, type StartCronJob } from "./cron.ts";
 
 const WARSAW = "Europe/Warsaw";
 const NINE_AND_TWENTY_ONE = "0 9,21 * * *";
@@ -57,7 +57,47 @@ describe("createCronScheduler", () => {
     expect(() => cron.every(NINE_AND_TWENTY_ONE, "Mars/Olympus", () => {})).toThrow();
   });
 
-  test("returns a function that stops the job", () => {
+  function recordingStart() {
+    const jobs: {
+      expression: string;
+      tz: string;
+      task: () => void | Promise<void>;
+      stops: number;
+    }[] = [];
+    const start: StartCronJob = (expression, task, { tz }) => {
+      const job = { expression, tz, task, stops: 0 };
+      jobs.push(job);
+      return { stop: () => void job.stops++ };
+    };
+    return { jobs, start };
+  }
+
+  test("starts one job with the expression, the zone and the task", () => {
+    const { jobs, start } = recordingStart();
+    let ran = 0;
+    createCronScheduler(start).every(NINE_AND_TWENTY_ONE, WARSAW, () => void ran++);
+    expect(jobs.map(({ expression, tz }) => ({ expression, tz }))).toEqual([
+      { expression: NINE_AND_TWENTY_ONE, tz: WARSAW },
+    ]);
+    jobs[0]?.task();
+    expect(ran).toBe(1);
+  });
+
+  test("the returned function stops that job", () => {
+    const { jobs, start } = recordingStart();
+    const stop = createCronScheduler(start).every(NINE_AND_TWENTY_ONE, WARSAW, () => {});
+    expect(jobs[0]?.stops).toBe(0);
+    stop();
+    expect(jobs[0]?.stops).toBe(1);
+  });
+
+  test("a rejected expression starts no job", () => {
+    const { jobs, start } = recordingStart();
+    expect(() => createCronScheduler(start).every("not a cron", WARSAW, () => {})).toThrow();
+    expect(jobs).toEqual([]);
+  });
+
+  test("works with the real Bun.cron", () => {
     const stop = createCronScheduler().every(NINE_AND_TWENTY_ONE, WARSAW, () => {});
     expect(() => stop()).not.toThrow();
   });

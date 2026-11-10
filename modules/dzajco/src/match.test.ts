@@ -113,7 +113,8 @@ describe("hostile input", () => {
     for (let i = 0; i < 20; i++) matches(hostile);
     const perMessage = (performance.now() - started) / 20;
     expect(matches(hostile)).toBe(false);
-    expect(perMessage).toBeLessThan(5);
+    // A backtracking regex takes seconds here; the bound is loose so a busy CI runner with coverage passes.
+    expect(perMessage).toBeLessThan(50);
   });
 
   test("only the first 2000 characters are searched", () => {

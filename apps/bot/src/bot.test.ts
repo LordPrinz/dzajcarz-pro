@@ -111,6 +111,22 @@ describe("module toggles in routing", () => {
     expect(ran).toEqual(["command"]);
   });
 
+  test("a prefix command from another bot is ignored", async () => {
+    const { ran, replies, message, deps } = setup([]);
+    Object.assign(message, { author: { bot: true } });
+    await handleMessage(message, undefined, deps);
+    expect(ran).toEqual([]);
+    expect(replies).toEqual([]);
+  });
+
+  test("a prefix command posted by a webhook is ignored", async () => {
+    const { ran, replies, message, deps } = setup([]);
+    Object.assign(message, { webhookId: "500000000000000005" });
+    await handleMessage(message, undefined, deps);
+    expect(ran).toEqual([]);
+    expect(replies).toEqual([]);
+  });
+
   test("passes deps.cooldowns to the dispatcher, so a second call is refused", async () => {
     const { ran, replies, message, deps } = setup([]);
     const windows = new Map<string, number>();

@@ -4,6 +4,7 @@ import {
   type ButtonSpec,
   createRegistry,
   executeCommand,
+  GENERIC_ERROR,
   type Reply,
   type SelectSpec,
   silentLogger,
@@ -669,6 +670,49 @@ describe("music module", () => {
     expect(registry.find("skip")?.cooldownMs).toBeUndefined();
   });
 
+  describe("player failures", () => {
+    test("/play when joining the channel fails answers with the generic error and the next /play works", async () => {
+      const { run, player } = setup();
+      player.failNext("join", new Error("Missing Connect permission"));
+      const failed = await run("play", { query: "a" });
+      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(player.state(GUILD)).toBeNull();
+
+      const retried = await run("play", { query: "a" });
+      expect(replyText(retried.replies.at(-1) as Reply)).toStartWith("Gram:");
+      expect(player.state(GUILD)?.current?.title).toBe("Pierwszy");
+    });
+
+    test("/play when the node refuses the tracks keeps the queue usable", async () => {
+      const { run, player } = setup();
+      player.failNext("enqueue", new Error("Node disconnected"));
+      const failed = await run("play", { query: "a" });
+      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(player.state(GUILD)?.current ?? null).toBeNull();
+
+      await run("play", { query: "a" });
+      expect(player.state(GUILD)?.current?.title).toBe("Pierwszy");
+    });
+
+    test("/play when the search itself throws answers with the generic error", async () => {
+      const { run, player } = setup();
+      player.failNext("search", new Error("Node unreachable"));
+      const failed = await run("play", { query: "a" });
+      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(player.joins).toEqual([]);
+    });
+
+    test("/skip when the node fails keeps the current track", async () => {
+      const { run, player } = setup();
+      player.nextResult = { kind: "playlist", name: "L", tracks: [track("A"), track("B")] };
+      await run("play", { query: "a" });
+      player.failNext("skip");
+      const failed = await run("skip");
+      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(player.state(GUILD)?.current?.title).toBe("A");
+    });
+  });
+
   describe("player events", () => {
     test("a failed track gets a short note in the panel's channel", async () => {
       const { run, player, panels } = setup();
@@ -971,7 +1015,8 @@ describe("music module", () => {
         );
         expect(ctx.player.state(GUILD)?.positionMs).toBe(0);
         await ctx.run("seek", { time: "3:20" });
-        expect(ctx.player.state(GUILD)?.positionMs).toBe(200_000);
+        // The end itself finishes the track; with nothing queued the player has nothing left to play.
+        expect(ctx.player.state(GUILD)?.current).toBeNull();
       });
 
       test("refuses a track whose source cannot seek", async () => {
@@ -1109,12 +1154,12 @@ describe("music module", () => {
         expect(ctx.panel()?.embeds?.[0]?.title).toBe("C");
       });
 
-      test("jump with the queue loop moves the passed tracks to the end", async () => {
+      test("jump with the queue loop moves the passed tracks and the current one to the end", async () => {
         const ctx = await playing(["A", "B", "C", "D"]);
         await ctx.run("loop", { mode: "queue" });
         expect(lastText(await ctx.run("jump", { place: 3 }))).toBe("Przeskoczono do: **D**.");
         expect(ctx.player.state(GUILD)?.current?.title).toBe("D");
-        expect(upcoming(ctx)).toEqual(["B", "C"]);
+        expect(upcoming(ctx)).toEqual(["B", "C", "A"]);
       });
 
       test("jump while a skip is on its way asks to try again", async () => {
@@ -1182,6 +1227,54 @@ describe("music module", () => {
         ctx.player.skipInFlight = true;
         expect(lastText(await ctx.run("back"))).toBe(queueChanged);
         expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+      });
+    });
+
+    describe("loop modes", () => {
+      test("the track loop plays the same track again when it ends", async () => {
+        const ctx = await playing(["A", "B"]);
+        await ctx.run("loop", { mode: "track" });
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("A");
+        expect(upcoming(ctx)).toEqual(["B"]);
+      });
+
+      test("/skip leaves a looped track", async () => {
+        const ctx = await playing(["A", "B"]);
+        await ctx.run("loop", { mode: "track" });
+        await ctx.run("skip");
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+      });
+
+      test("the queue loop sends a finished track to the end", async () => {
+        const ctx = await playing(["A", "B"]);
+        await ctx.run("loop", { mode: "queue" });
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+        expect(upcoming(ctx)).toEqual(["A"]);
+      });
+
+      test("/back after track-loop repeats goes to the track before, not to another copy", async () => {
+        const ctx = await playing(["A", "B"]);
+        ctx.player.finishTrack(GUILD);
+        await ctx.run("loop", { mode: "track" });
+        ctx.player.finishTrack(GUILD);
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(lastText(await ctx.run("back"))).toBe("Wracam do: **A**.");
+        expect(upcoming(ctx)).toEqual(["B"]);
+      });
+
+      test("/back with the queue loop does not leave a second copy of the track at the end", async () => {
+        const ctx = await playing(["A", "B", "C"]);
+        await ctx.run("loop", { mode: "queue" });
+        ctx.player.finishTrack(GUILD);
+        await settle();
+        expect(upcoming(ctx)).toEqual(["C", "A"]);
+        expect(lastText(await ctx.run("back"))).toBe("Wracam do: **A**.");
+        expect(upcoming(ctx)).toEqual(["B", "C"]);
       });
     });
 

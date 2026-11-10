@@ -1,4 +1,4 @@
-import type { Reply } from "@dzajcarz/core";
+import { type Reply, validateReplyLimits } from "@dzajcarz/core";
 import type { APIEmbed, MessageMentionOptions } from "discord.js";
 import { type ComponentRows, toComponentRows } from "./components.ts";
 
@@ -15,6 +15,7 @@ export interface ReplyPayload {
 }
 
 export function toReplyPayload(reply: Reply): ReplyPayload {
+  validateReplyLimits(reply);
   if (typeof reply === "string")
     return {
       content: reply,
