@@ -48,7 +48,6 @@ export interface ScheduledMessageRepository {
   remove(guildId: string, id: number): Promise<boolean>;
   /** Deletes every message of the guild; resolves how many there were. */
   removeGuild(guildId: string): Promise<number>;
-  /** At most `limit` messages of every guild due at `time`, by guild and id. */
   /**
    * At most `limit` messages, of every guild, whose time of day is the minute `at` falls on in that guild's
    * time zone (`guild_settings.time_zone`, else the repository's default zone).
