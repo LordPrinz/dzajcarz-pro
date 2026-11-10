@@ -223,7 +223,11 @@ attachHandlers(client, {
 
 client.on(
   Events.GuildDelete,
-  createGuildCleanup(createGuildDataRepository(sql), logger.child({ component: "guild-cleanup" })),
+  createGuildCleanup(
+    createGuildDataRepository(sql),
+    [prefixes.forget, timeZones.forget, gate.forget],
+    logger.child({ component: "guild-cleanup" }),
+  ),
 );
 
 client.once(Events.ClientReady, (ready) => {

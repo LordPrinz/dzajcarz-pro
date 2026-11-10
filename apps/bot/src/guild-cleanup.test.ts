@@ -16,19 +16,21 @@ function recordingLogger() {
 
 describe("guild cleanup", () => {
   test("forgets the server and logs what went", async () => {
-    const forgotten: string[] = [];
+    const steps: string[] = [];
     const { lines, logger } = recordingLogger();
     const cleanup = createGuildCleanup(
       {
         forget: async (guildId) => {
-          forgotten.push(guildId);
+          steps.push(`forget ${guildId}`);
           return { welcome_config: 1 };
         },
       },
+      [async (guildId) => void steps.push(`prefix ${guildId}`)],
       logger,
     );
     await cleanup({ id: "100000000000000001" });
-    expect(forgotten).toEqual(["100000000000000001"]);
+    // The caches reload only after the rows are gone, so they cannot pick the old settings back up.
+    expect(steps).toEqual(["forget 100000000000000001", "prefix 100000000000000001"]);
     expect(lines).toEqual([
       {
         level: "info",
@@ -42,6 +44,7 @@ describe("guild cleanup", () => {
     const { lines, logger } = recordingLogger();
     const cleanup = createGuildCleanup(
       { forget: () => Promise.reject(new Error("postgres down")) },
+      [],
       logger,
     );
     await expect(cleanup({ id: "1" })).resolves.toBeUndefined();

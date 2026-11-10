@@ -565,7 +565,6 @@ export function createMessagesModule({
     },
   });
 
-  // A server the bot left would only make every row fail daily, and its text should not outlive the bot there.
   return {
     name: MODULE_NAME,
     commands: [messages, dm],

@@ -7,6 +7,8 @@ import { createGuildSettingCache } from "./guild-setting-cache.ts";
 export interface TimeZones extends GuildTimeZones {
   /** `/timezone` reads and writes through this; a write refreshes the cache. */
   settings: TimeZoneSettings;
+  /** Puts what Postgres now holds into the cache, e.g. after the server's data was deleted. */
+  forget(guildId: string): Promise<void>;
 }
 
 /**
@@ -33,6 +35,7 @@ export function createTimeZones({
   });
   return {
     of: zones.resolve,
+    forget: zones.forget,
     settings: {
       async get(guildId) {
         return (await settings.find(guildId))?.time_zone ?? null;

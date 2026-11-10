@@ -202,7 +202,8 @@ moderation history. Members' opt-outs from the server's scheduled DMs stay (`KEP
 member's choice, and dropping them would let the server DM them again after re-adding the bot. A server that adds the bot again starts fresh. An outage is
 `guildUnavailable` in discord.js and deletes nothing; DM rows (`guild_id` NULL) are not touched.
 A database test compares `GUILD_TABLES` and `KEPT_GUILD_TABLES` with every table that has a `guild_id`, so a
-new one cannot be forgotten. Redis entries of the server expire on their own (at most 10 minutes).
+new one cannot be forgotten. The Redis copies of the prefix, zone and toggles are reloaded right after, so a server that re-adds the bot
+at once does not get its old settings back; Dżajco's per-channel cache expires within 10 minutes.
 
 ### Module toggles
 
