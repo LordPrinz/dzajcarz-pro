@@ -175,7 +175,10 @@ function setup(
   const { guild, calls } = fakeGuild(guildOptions);
   const { log, entries } = fakeLog(logOptions);
   const { logger, lines } = capturingLogger();
-  const registry = createRegistry([createModerationModule({ guild, log, dmLimit, logger })]);
+  const timeZones = { of: async () => "Europe/Warsaw" };
+  const registry = createRegistry([
+    createModerationModule({ guild, log, dmLimit, timeZones, logger }),
+  ]);
   async function run(
     name: string,
     args: Record<string, unknown>,

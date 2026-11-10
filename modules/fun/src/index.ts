@@ -1,11 +1,16 @@
-import { type BotModule, type CommandContexts, defineCommand } from "@dzajcarz/core";
+import {
+  type BotModule,
+  type CommandContexts,
+  defineCommand,
+  type GuildTimeZones,
+} from "@dzajcarz/core";
 
 export interface FunModuleDeps {
   /** Uniform in [0, 1), like `Math.random`. */
   random: () => number;
   now: () => Date;
-  /** IANA zone `/time` reports in. */
-  timeZone: string;
+  /** `/time` reports the server's clock; in DMs and private channels the default zone. */
+  timeZones: GuildTimeZones;
 }
 
 const EVERYWHERE: CommandContexts = {
@@ -15,13 +20,14 @@ const EVERYWHERE: CommandContexts = {
 
 export function createFunModule(deps: FunModuleDeps): BotModule {
   // h23 keeps midnight at 00; a 12/24 hybrid cycle can print 24.
-  const clock = new Intl.DateTimeFormat("pl-PL", {
-    timeZone: deps.timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  const clockIn = (timeZone: string) =>
+    new Intl.DateTimeFormat("pl-PL", {
+      timeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
 
   const didYouKnow = defineCommand({
     name: "czy_wiedziałeś",
@@ -37,10 +43,11 @@ export function createFunModule(deps: FunModuleDeps): BotModule {
 
   const time = defineCommand({
     name: "time",
-    description: "Aktualny czas w Polsce",
+    description: "Aktualny czas w strefie czasowej serwera",
     contexts: EVERYWHERE,
     run: async (ctx) => {
-      await ctx.reply(`Jest ${clock.format(deps.now())}.`);
+      const zone = await deps.timeZones.of(ctx.guildId);
+      await ctx.reply(`Jest ${clockIn(zone).format(deps.now())}.`);
     },
   });
 

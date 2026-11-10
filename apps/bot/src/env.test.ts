@@ -170,3 +170,16 @@ describe("SCHEDULED_SONG_CRON", () => {
     expect(parsed.error?.issues[0]?.path).toEqual(["SCHEDULED_SONG_CRON"]);
   });
 });
+
+describe("DEFAULT_TIME_ZONE", () => {
+  test("defaults to Europe/Warsaw and keeps a valid zone", () => {
+    expect(loadEnv(REQUIRED).DEFAULT_TIME_ZONE).toBe("Europe/Warsaw");
+    expect(loadEnv({ ...REQUIRED, DEFAULT_TIME_ZONE: "Europe/London" }).DEFAULT_TIME_ZONE).toBe(
+      "Europe/London",
+    );
+  });
+
+  test.each(["+01:00", "CET", "europe/warsaw", "Mars/Olympus"])("refuses %p", (zone) => {
+    expect(Env.safeParse({ ...REQUIRED, DEFAULT_TIME_ZONE: zone }).success).toBe(false);
+  });
+});

@@ -5,7 +5,7 @@ import { createFunModule } from "./index.ts";
 
 const WARSAW = "Europe/Warsaw";
 
-function setup(options: { randoms?: number[]; now?: Date } = {}) {
+function setup(options: { randoms?: number[]; now?: Date; guildZone?: string } = {}) {
   const randoms = [...(options.randoms ?? [])];
   const registry = createRegistry([
     createFunModule({
@@ -15,13 +15,15 @@ function setup(options: { randoms?: number[]; now?: Date } = {}) {
         return next;
       },
       now: () => options.now ?? new Date("2026-07-01T10:00:00Z"),
-      timeZone: WARSAW,
+      timeZones: {
+        of: async (guildId) => (guildId !== null && options.guildZone) || WARSAW,
+      },
     }),
   ]);
-  const run = async (name: string) => {
+  const run = async (name: string, guildId: string | null = "100000000000000001") => {
     const command = registry.find(name);
     if (!command) throw new Error(`no command ${name}`);
-    const ctx = createFakeContext();
+    const ctx = createFakeContext({ guildId });
     await executeCommand(command, ctx, silentLogger);
     return ctx.replies;
   };
@@ -74,5 +76,13 @@ describe("time", () => {
     // 2026-10-25 01:00 UTC: 03:00 CEST falls back to 02:00 CET.
     expect(await timeAt("2026-10-25T00:59:59Z")).toEqual(["Jest 02:59:59."]);
     expect(await timeAt("2026-10-25T01:00:00Z")).toEqual(["Jest 02:00:00."]);
+  });
+});
+
+describe("time in the server's zone", () => {
+  test("a server with its own zone gets its clock; a DM gets the default", async () => {
+    const { run } = setup({ now: new Date("2026-07-01T10:00:00Z"), guildZone: "Asia/Tokyo" });
+    expect(await run("time")).toEqual(["Jest 19:00:00."]);
+    expect(await run("time", null)).toEqual(["Jest 12:00:00."]);
   });
 });

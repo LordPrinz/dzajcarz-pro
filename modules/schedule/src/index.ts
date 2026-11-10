@@ -3,6 +3,8 @@ import {
   type CronScheduler,
   defineCommand,
   defineSubcommand,
+  firesAt,
+  type GuildTimeZones,
   type Logger,
   MANAGE_GUILD,
   requireGuild,
@@ -78,11 +80,15 @@ export interface ScheduleModuleDeps {
   logger: Logger;
   /** The fixed song list; the first entry is the default. */
   songs: readonly [ScheduledSong, ...ScheduledSong[]];
-  /** Five-field cron expression. */
+  /** Five-field cron expression, read on each server's own clock. */
   expression: string;
-  /** IANA zone the expression is read in. */
-  timeZone: string;
+  /** The zone of each server (`/timezone`). */
+  timeZones: GuildTimeZones;
+  now: () => Date;
 }
+
+/** How early the minute tick may fire and still count as the coming minute. */
+const EARLY_TICK_MS = 5_000;
 
 const MODULE_NAME = "schedule";
 /** The `/schedule song` value that goes back to the default song; no listed song may use it. */
@@ -113,7 +119,8 @@ export function createScheduleModule({
   logger,
   songs,
   expression,
-  timeZone,
+  timeZones,
+  now,
 }: ScheduleModuleDeps): BotModule {
   if (songs.some((song) => song.name === RESET)) {
     throw new Error(`"${RESET}" is reserved for /schedule song and cannot name a song`);
@@ -169,25 +176,53 @@ export function createScheduleModule({
     }
   }
 
-  async function run(): Promise<void> {
+  /** Every minute: plays in each server whose own clock reads a time the expression fires at. */
+  async function tick(): Promise<void> {
+    // A tick up to 5 s early belongs to the coming minute; a late one keeps its own.
+    const minute = new Date(Math.floor((now().getTime() + EARLY_TICK_MS) / 60_000) * 60_000);
+    // Most minutes nobody sits in voice anywhere, so the voice cache (no I/O) filters first and only those
+    // servers have their zone looked up; a minute the cron does not fire on then costs nothing further.
+    const occupied: string[] = [];
+    await Promise.all(
+      voice.guildIds().map(async (guildId) => {
+        const crowds = await voice.crowds(guildId);
+        if (crowds.some((crowd) => crowd.humans > 0)) occupied.push(guildId);
+      }),
+    );
+    const firesIn = new Map<string, boolean>();
+    const zones = await Promise.all(occupied.map((guildId) => timeZones.of(guildId)));
+    const due = occupied.filter((_guildId, index) => {
+      const zone = zones[index] as string;
+      let fires = firesIn.get(zone);
+      if (fires === undefined) {
+        fires = firesAt(expression, minute, zone);
+        firesIn.set(zone, fires);
+      }
+      return fires;
+    });
+    if (due.length === 0) return;
     if (!player.available()) {
       logger.warn("Skipping the scheduled song: the audio node is unavailable");
       return;
     }
-    // One snapshot: a server joined or left during the run must not shift the indexes logged below.
-    const guildIds = [...voice.guildIds()];
-    const results = await Promise.allSettled(guildIds.map((guildId) => playIn(guildId)));
+    const results = await Promise.allSettled(due.map((guildId) => playIn(guildId)));
     results.forEach((result, index) => {
       if (result.status === "rejected") {
-        logger.warn("The scheduled song failed", {
-          guildId: guildIds[index],
-          error: result.reason,
-        });
+        logger.warn("The scheduled song failed", { guildId: due[index], error: result.reason });
       }
     });
   }
 
-  const stop = cron.every(expression, timeZone, run);
+  async function safeTick(): Promise<void> {
+    try {
+      await tick();
+    } catch (error) {
+      logger.error("Scheduled song tick failed", { error });
+    }
+  }
+
+  // Every minute of UTC is every minute of every zone; each server's clock decides whether it plays.
+  const stop = cron.every("* * * * *", "UTC", safeTick);
 
   const channelLine = (channelId: string) => `<#${channelId}>`;
 
@@ -206,7 +241,7 @@ export function createScheduleModule({
           ]);
           const lines = [
             `Piosenka: **${song.title}**`,
-            `Harmonogram: \`${expression}\` (${timeZone})`,
+            `Harmonogram: \`${expression}\` (${await timeZones.of(guildId)}, zmienisz przez /timezone)`,
             excluded.length > 0
               ? `Wykluczone kanały: ${excluded.map(channelLine).join(", ")}`
               : "Brak wykluczonych kanałów.",

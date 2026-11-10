@@ -29,6 +29,9 @@ const SONGS = [
   { name: "icona_pop", title: "Icona Pop" },
 ] as const;
 
+/** 9:00 on 1 July in Warsaw (summer time, UTC+2). */
+const NINE_WARSAW = new Date("2026-07-01T07:00:00Z");
+
 interface PlayCall {
   guildId: string;
   voiceChannelId: string;
@@ -46,8 +49,15 @@ function setup(
     afk?: Record<string, string>;
     /** Delays the first settings read, so a test can fire a second run in between. */
     slowSettings?: Promise<void>;
+    /** Server time zones (`/timezone`); others use Warsaw time. */
+    zones?: Record<string, string>;
+    /** When the tick fires; 9:00 in Warsaw unless set. */
+    now?: Date;
+    /** Called with each server whose zone the tick looks up. */
+    onZoneLookup?: (guildId: string) => void;
   } = {},
 ) {
+  let current = options.now ?? NINE_WARSAW;
   const crowds = options.crowds ?? {};
   const songChoice = new Map<string, string>();
   const excluded = new Map<string, string[]>();
@@ -128,7 +138,13 @@ function setup(
     logger,
     songs: SONGS,
     expression: "0 9,21 * * *",
-    timeZone: "Europe/Warsaw",
+    timeZones: {
+      of: async (guildId) => {
+        if (guildId) options.onZoneLookup?.(guildId);
+        return (guildId && options.zones?.[guildId]) || "Europe/Warsaw";
+      },
+    },
+    now: () => current,
   });
   const registry = createRegistry([module]);
   const command = registry.find("schedule");
@@ -165,6 +181,9 @@ function setup(
     excluded,
     warnings,
     isStopped: () => stopped,
+    setNow: (date: Date) => {
+      current = date;
+    },
   };
 }
 
@@ -176,9 +195,57 @@ async function fireAndStart(s: ReturnType<typeof setup>) {
 }
 
 describe("the schedule", () => {
-  test("is registered at 9:00 and 21:00 in Europe/Warsaw and stops on dispose", async () => {
+  test("plays at 9:00 on each server's own clock", async () => {
+    const crowd = (id: string) => [{ channelId: id, humans: 2 }];
+    const s = setup({
+      crowds: { [GUILD]: crowd("500000000000000001"), [OTHER_GUILD]: crowd("500000000000000002") },
+      zones: { [OTHER_GUILD]: "Europe/London" },
+    });
+    void s.fire();
+    await s.settle();
+    expect(s.playCalls.map((call) => call.guildId)).toEqual([GUILD]);
+    s.finishers.get(GUILD)?.(false);
+    // An hour later it is 9:00 in London.
+    s.setNow(new Date(NINE_WARSAW.getTime() + 3_600_000));
+    void s.fire();
+    await s.settle();
+    expect(s.playCalls.map((call) => call.guildId)).toEqual([GUILD, OTHER_GUILD]);
+  });
+
+  test("servers with nobody in voice are not asked for their zone", async () => {
+    const asked: string[] = [];
+    const s = setup({
+      crowds: {
+        [GUILD]: [{ channelId: "500000000000000001", humans: 2 }],
+        [OTHER_GUILD]: [{ channelId: "500000000000000002", humans: 0 }],
+      },
+      onZoneLookup: (guildId) => asked.push(guildId),
+    });
+    void s.fire();
+    await s.settle();
+    expect(asked).toEqual([GUILD]);
+  });
+
+  test("nothing plays at a minute the expression does not fire on", async () => {
+    const s = setup({ crowds: { [GUILD]: [{ channelId: "500000000000000001", humans: 2 }] } });
+    s.setNow(new Date(NINE_WARSAW.getTime() + 60_000));
+    await s.fire();
+    expect(s.playCalls).toEqual([]);
+  });
+
+  test("a tick a few seconds early still counts as 9:00", async () => {
+    const s = setup({
+      crowds: { [GUILD]: [{ channelId: "500000000000000001", humans: 2 }] },
+      now: new Date(NINE_WARSAW.getTime() - 2_000),
+    });
+    void s.fire();
+    await s.settle();
+    expect(s.playCalls).toHaveLength(1);
+  });
+
+  test("ticks every minute and stops on dispose", async () => {
     const s = setup();
-    expect(s.cronCalls).toEqual([{ expression: "0 9,21 * * *", timeZone: "Europe/Warsaw" }]);
+    expect(s.cronCalls).toEqual([{ expression: "* * * * *", timeZone: "UTC" }]);
     await s.module.dispose?.();
     expect(s.isStopped()).toBe(true);
   });
@@ -481,7 +548,8 @@ describe("/schedule", () => {
         logger: silentLogger,
         songs: [{ name: "reset", title: "Reset" }],
         expression: "0 9 * * *",
-        timeZone: "Europe/Warsaw",
+        timeZones: { of: async () => "Europe/Warsaw" },
+        now: () => NINE_WARSAW,
       }),
     ).toThrow("reserved");
   });

@@ -42,6 +42,19 @@ describe.skipIf(!sql)("guild settings repository", () => {
     expect((await repo().setPrefix(guildId, null)).prefix).toBeNull();
   });
 
+  test("setTimeZone keeps the prefix and resets with null", async () => {
+    await repo().setPrefix(guildId, "?");
+    const set = await repo().setTimeZone(guildId, "Europe/London");
+    expect([set.prefix, set.time_zone]).toEqual(["?", "Europe/London"]);
+    expect((await repo().setTimeZone(guildId, null)).time_zone).toBeNull();
+    expect((await repo().find(guildId))?.prefix).toBe("?");
+  });
+
+  test("isKnownTimeZone asks Postgres, which does not know every name ICU does", async () => {
+    expect(await repo().isKnownTimeZone("Europe/Warsaw")).toBe(true);
+    expect(await repo().isKnownTimeZone("US/Pacific-New")).toBe(false);
+  });
+
   test("the database rejects a prefix longer than 5 characters", async () => {
     await expect(repo().setPrefix(guildId, "toolong")).rejects.toThrow();
   });

@@ -11,6 +11,7 @@ import {
   defineModal,
   defineSubcommand,
   fitLines,
+  type GuildTimeZones,
   type Logger,
   MANAGE_GUILD,
   requireGuild,
@@ -18,7 +19,7 @@ import {
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
-import { type LocalMinute, localMinute, parseTimeOfDay } from "./time.ts";
+import { parseTimeOfDay } from "./time.ts";
 
 export type MessageTarget = { kind: "channel"; channelId: string } | { kind: "dm"; userId: string };
 
@@ -47,6 +48,11 @@ export type AddResult =
   | { status: "recipient-full" }
   | { status: "duplicate" };
 
+/** A message due now; `date` (`YYYY-MM-DD` on its server's clock) makes it go out once that day. */
+export interface DueMessage extends ScheduledMessage {
+  date: string;
+}
+
 /** Where scheduled messages and members' opt-outs are kept. */
 export interface ScheduledMessageStore {
   add(message: Omit<ScheduledMessage, "id">, limits: ScheduledMessageLimits): Promise<AddResult>;
@@ -56,8 +62,11 @@ export interface ScheduledMessageStore {
   remove(guildId: string, id: number): Promise<boolean>;
   /** Deletes every message of the guild; resolves how many there were. */
   removeGuild(guildId: string): Promise<number>;
-  /** At most `limit` messages of every guild due at `time` (`HH:MM`). */
-  due(time: string, limit: number): Promise<ScheduledMessage[]>;
+  /**
+   * At most `limit` messages, of every guild, whose time of day is the minute `at` falls on in that guild's
+   * time zone, each with the date on that guild's clock.
+   */
+  due(at: Date, limit: number): Promise<DueMessage[]>;
   /** `guildId` null means every server. False when it was already off. */
   optOut(userId: string, guildId: string | null): Promise<boolean>;
   /** Removes exactly that opt-out (a null guild clears only the every-server one). False when there was none. */
@@ -104,8 +113,8 @@ export interface MessagesModuleDeps {
   /** The module toggle for the guild as a whole (DMs belong to no channel). */
   guildModuleEnabled: (guildId: string, module: string) => Promise<boolean>;
   now: () => Date;
-  /** IANA zone the times of day are read in. */
-  timeZone: string;
+  /** The zone each server reads its times of day in (`/timezone`). */
+  timeZones: GuildTimeZones;
   logger: Logger;
 }
 
@@ -218,7 +227,7 @@ export function createMessagesModule({
   moduleEnabled,
   guildModuleEnabled,
   now,
-  timeZone,
+  timeZones,
   logger,
 }: MessagesModuleDeps): BotModule {
   /** Shared by the form and the prefix form, so both refuse the same input with the same words. */
@@ -263,12 +272,13 @@ export function createMessagesModule({
     if (result.status === "recipient-full") throw new UserError(RECIPIENT_FULL);
     if (result.status === "duplicate") throw new UserError(DUPLICATE);
     const saved = result.message;
+    const when = `${saved.time} (${await timeZones.of(guildId)})`;
     // Whether the recipient opted out stays private to them, so the reply does not say.
     if (target.kind === "dm") {
-      return `Zaplanowano wiadomość #${saved.id} na ${saved.time} → DM do <@${target.userId}>.`;
+      return `Zaplanowano wiadomość #${saved.id} na ${when} → DM do <@${target.userId}>.`;
     }
     const note = content.includes(USER_PLACEHOLDER) ? USER_IN_CHANNEL : "";
-    return `Zaplanowano wiadomość #${saved.id} na ${saved.time} → <#${target.channelId}>.${note}`;
+    return `Zaplanowano wiadomość #${saved.id} na ${when} → <#${target.channelId}>.${note}`;
   }
 
   const addForm = defineModal({
@@ -279,7 +289,7 @@ export function createMessagesModule({
     fields: {
       time: {
         type: "short",
-        label: "Godzina (czas polski)",
+        label: "Godzina (strefa czasowa serwera)",
         description: "HH:MM, wiadomość wychodzi codziennie o tej porze.",
         placeholder: "19:00",
         maxLength: 5,
@@ -345,7 +355,7 @@ export function createMessagesModule({
     },
   });
 
-  async function deliver(message: ScheduledMessage, minute: LocalMinute): Promise<void> {
+  async function deliver(message: DueMessage): Promise<void> {
     const { guildId, target } = message;
     if (!botInGuild(guildId)) return;
     const enabled =
@@ -353,7 +363,7 @@ export function createMessagesModule({
         ? await moduleEnabled(guildId, target.channelId, MODULE_NAME)
         : await guildModuleEnabled(guildId, MODULE_NAME);
     if (!enabled) return;
-    const key = `messages:sent:${message.id}:${minute.date}T${minute.time}`;
+    const key = `messages:sent:${message.id}:${message.date}T${message.time}`;
     if (!(await lock.setIfAbsent(key, "1", LOCK_TTL_MS))) return;
 
     if (target.kind === "channel") {
@@ -396,16 +406,15 @@ export function createMessagesModule({
       // A job that fires up to 5 s early still belongs to the minute it was meant for; a late one keeps its
       // own minute, so a tick delayed past :30 does not skip to the next one.
       const rounded = new Date(Math.floor((now().getTime() + EARLY_TICK_MS) / 60_000) * 60_000);
-      const minute = localMinute(rounded, timeZone);
-      const due = await store.due(minute.time, MAX_DUE_PER_TICK);
+      const due = await store.due(rounded, MAX_DUE_PER_TICK);
       if (due.length >= MAX_DUE_PER_TICK) {
         logger.warn("Too many scheduled messages in one minute; the rest are skipped", {
-          time: minute.time,
+          at: rounded.toISOString(),
           limit: MAX_DUE_PER_TICK,
         });
       }
       for (const batch of batches(due, SEND_BATCH)) {
-        const results = await Promise.allSettled(batch.map((message) => deliver(message, minute)));
+        const results = await Promise.allSettled(batch.map((message) => deliver(message)));
         results.forEach((result, index) => {
           if (result.status === "rejected") {
             logger.warn("Scheduled message not sent", {
@@ -421,7 +430,8 @@ export function createMessagesModule({
     }
   }
 
-  const stop = cron.every("* * * * *", timeZone, tick);
+  // Every minute of UTC is every minute of every zone; the store matches each server's own clock.
+  const stop = cron.every("* * * * *", "UTC", tick);
 
   const messages = defineCommand({
     name: "messages",
@@ -433,7 +443,7 @@ export function createMessagesModule({
         options: {
           time: {
             type: "string",
-            description: "Godzina HH:MM (czas polski)",
+            description: "Godzina HH:MM w strefie czasowej serwera (/timezone)",
             required: true,
             prefixOnly: true,
           },
@@ -471,16 +481,18 @@ export function createMessagesModule({
       list: defineSubcommand({
         description: "Pokazuje zaplanowane wiadomości serwera",
         run: async (ctx) => {
-          const rows = await store.list(requireGuild(ctx.guildId));
+          const guildId = requireGuild(ctx.guildId);
+          const rows = await store.list(guildId);
           const content =
             rows.length === 0
               ? EMPTY_LIST
-              : fitLines(
-                  rows.map(
+              : fitLines([
+                  `Godziny w strefie ${await timeZones.of(guildId)}:`,
+                  ...rows.map(
                     (row) =>
                       `#${row.id} ${row.time} → ${targetLabel(row.target)}: ${preview(row.content)}`,
                   ),
-                );
+                ]);
           await ctx.reply({ content, ephemeral: true });
         },
       }),

@@ -55,6 +55,7 @@ import {
   type WelcomeConfigStore,
   type WelcomeSender,
 } from "@dzajcarz/module-welcome";
+import type { TimeZones } from "./time-zones.ts";
 
 /** Everything modules may ask for. Each module factory picks only what it needs. */
 export interface ModuleServices {
@@ -90,7 +91,11 @@ export interface ModuleServices {
   scheduleVoice: ScheduleVoice;
   scheduledSongPlayer: ScheduledSongPlayer;
   scheduledSongs: readonly [ScheduledSong, ...ScheduledSong[]];
-  scheduledSongCron: { expression: string; timeZone: string };
+  /** Five-field cron, read on each server's clock. */
+  scheduledSongCron: string;
+  /** Each server's zone (`/timezone`), and its settings for the command. */
+  timeZones: TimeZones;
+  defaultTimeZone: string;
   // dzajco
   dzajcoSettings: DzajcoSettingsStore;
   dzajcoResponder: DzajcoResponder;
@@ -118,6 +123,8 @@ export function createModules(services: ModuleServices): BotModule[] {
     createSettingsModule({
       prefixes: services.prefixSettings,
       defaultPrefix: services.defaultPrefix,
+      timeZones: services.timeZones.settings,
+      defaultTimeZone: services.defaultTimeZone,
       modules: services.moduleToggles,
       channels: services.channels,
     }),
@@ -154,8 +161,9 @@ export function createModules(services: ModuleServices): BotModule[] {
       cron: services.cron,
       moduleEnabled: services.moduleEnabled,
       songs: services.scheduledSongs,
-      expression: services.scheduledSongCron.expression,
-      timeZone: services.scheduledSongCron.timeZone,
+      expression: services.scheduledSongCron,
+      timeZones: services.timeZones,
+      now: () => new Date(),
       logger: services.logger.child({ module: "schedule" }),
     }),
     createStatusModule({
@@ -163,7 +171,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       clock: services.clock,
       logger: services.logger.child({ module: "status" }),
     }),
-    createFunModule({ random: Math.random, now: () => new Date(), timeZone: "Europe/Warsaw" }),
+    createFunModule({ random: Math.random, now: () => new Date(), timeZones: services.timeZones }),
     createDzajcoModule({
       settings: services.dzajcoSettings,
       responder: services.dzajcoResponder,
@@ -177,6 +185,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       guild: services.moderationGuild,
       log: services.moderationLog,
       dmLimit: services.moderationDmLimit,
+      timeZones: services.timeZones,
       logger: services.logger.child({ module: "moderation" }),
     }),
     createRiotModule({
@@ -195,7 +204,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       moduleEnabled: services.moduleEnabled,
       guildModuleEnabled: services.guildModuleEnabled,
       now: () => new Date(),
-      timeZone: "Europe/Warsaw",
+      timeZones: services.timeZones,
       logger: services.logger.child({ module: "messages" }),
     }),
   ];

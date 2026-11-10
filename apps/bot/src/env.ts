@@ -1,4 +1,4 @@
-import { prefixProblem } from "@dzajcarz/core";
+import { canonicalTimeZone, DEFAULT_TIME_ZONE, prefixProblem } from "@dzajcarz/core";
 import { z } from "zod";
 
 const snowflake = z.string().regex(/^\d{17,20}$/, "expected a Discord id (17–20 digits)");
@@ -22,15 +22,6 @@ const flag = z.preprocess(
 function isCron(value: string): boolean {
   try {
     return Bun.cron.parse(value) !== null;
-  } catch {
-    return false;
-  }
-}
-
-function isTimeZone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: value });
-    return true;
   } catch {
     return false;
   }
@@ -85,15 +76,19 @@ const EnvFields = z.object({
   // Optional, one key per game: without it /valorant (or /lol) answers that stats are off.
   RIOT_VALORANT_API_KEY: optional(z.string().trim().min(1)),
   RIOT_LOL_API_KEY: optional(z.string().trim().min(1)),
-  // When the scheduled song plays (five-field cron, read in the time zone below).
+  // When the scheduled song plays (five-field cron, read on each server's clock, see /timezone).
   SCHEDULED_SONG_CRON: z
     .string()
     .default("0 9,21 * * *")
     .refine(isCron, "expected a cron expression that fires"),
-  SCHEDULED_SONG_TIMEZONE: z
+  // The time zone of servers that did not choose one with /timezone.
+  DEFAULT_TIME_ZONE: z
     .string()
-    .default("Europe/Warsaw")
-    .refine(isTimeZone, "expected an IANA time zone, e.g. Europe/Warsaw"),
+    .default(DEFAULT_TIME_ZONE)
+    .refine(
+      (value) => canonicalTimeZone(value) === value,
+      "expected an IANA time zone name as spelled in the tz database, e.g. Europe/Warsaw",
+    ),
   // The health endpoint (GET /health). 0 turns it off. The Docker image sets HEALTH_HOSTNAME=0.0.0.0 so a
   // published port reaches it.
   HEALTH_PORT: z.coerce.number().int().min(0).max(65535).default(8080),

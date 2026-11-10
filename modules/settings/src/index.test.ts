@@ -45,6 +45,8 @@ function setup() {
     createSettingsModule({
       prefixes,
       defaultPrefix: "!",
+      timeZones: memoryZones(),
+      defaultTimeZone: "Europe/Warsaw",
       modules: noModules,
       channels: channelsOf([]),
     }),
@@ -164,6 +166,8 @@ describe("settings module: /modules", () => {
       createSettingsModule({
         prefixes,
         defaultPrefix: "!",
+        timeZones: memoryZones(),
+        defaultTimeZone: "Europe/Warsaw",
         modules,
         channels: channelsOf([CHANNEL, THREAD], threads),
       }),
@@ -303,5 +307,102 @@ describe("settings module: /modules", () => {
       subcommand: "disable",
       args: { module: "music", channel: CHANNEL },
     });
+  });
+});
+
+function memoryZones() {
+  const zones = new Map<string, string>();
+  return {
+    zones,
+    get: async (guildId: string) => zones.get(guildId) ?? null,
+    set: async (guildId: string, zone: string) => void zones.set(guildId, zone),
+    // Stands in for Postgres, which has dropped this deprecated alias.
+    isKnown: async (zone: string) => zone !== "US/Pacific-New",
+    reset: async (guildId: string) => void zones.delete(guildId),
+  };
+}
+
+describe("settings module: /timezone", () => {
+  const GUILD = "100000000000000001";
+  const MANAGE = 1n << 5n;
+
+  function setupZones() {
+    const timeZones = memoryZones();
+    const registry = createRegistry([
+      createSettingsModule({
+        prefixes: { get: async () => null, set: async () => {}, reset: async () => {} },
+        defaultPrefix: "!",
+        timeZones,
+        defaultTimeZone: "Europe/Warsaw",
+        modules: {
+          moduleNames: () => [],
+          list: async () => [],
+          disable: async () => {},
+          enable: async () => false,
+        },
+        channels: { belongsTo: async () => true, isThread: async () => false },
+        now: () => new Date("2026-07-01T12:00:00Z"),
+      }),
+    ]);
+    const run = async (
+      subcommand: string,
+      args: Record<string, unknown> = {},
+      permissions = MANAGE,
+    ) => {
+      const command = registry.find("timezone");
+      if (!command) throw new Error("timezone command missing");
+      const ctx = createFakeContext({
+        args,
+        subcommand,
+        guildId: GUILD,
+        memberPermissions: permissions,
+      });
+      await executeCommand(command, ctx, silentLogger);
+      return ctx.replies.map((reply) => replyText(reply));
+    };
+    return { run, zones: timeZones.zones };
+  }
+
+  test("show gives the default with its clock until a zone is set", async () => {
+    const { run } = setupZones();
+    expect(await run("show")).toEqual([
+      "Strefa czasowa serwera: `Europe/Warsaw` (teraz 14:00) (domyślna).",
+    ]);
+  });
+
+  test("set stores the canonical name, whatever its case", async () => {
+    const { run, zones } = setupZones();
+    expect(await run("set", { zone: "america/new_york" })).toEqual([
+      "Strefa czasowa serwera to teraz `America/New_York` (teraz 08:00). Zaplanowane wiadomości i piosenki idą według niej.",
+    ]);
+    expect(zones.get(GUILD)).toBe("America/New_York");
+    expect(await run("show")).toEqual([
+      "Strefa czasowa serwera: `America/New_York` (teraz 08:00).",
+    ]);
+  });
+
+  test("set refuses offsets and unknown names and stores nothing", async () => {
+    const { run, zones } = setupZones();
+    for (const zone of ["+02:00", "CEST", "Mars/Olympus", "US/Pacific-New"]) {
+      expect((await run("set", { zone }))[0]).toStartWith(`Nie znam strefy \`${zone}\`.`);
+    }
+    expect(zones.size).toBe(0);
+  });
+
+  test("reset goes back to the default", async () => {
+    const { run, zones } = setupZones();
+    await run("set", { zone: "Asia/Tokyo" });
+    expect(await run("reset")).toEqual([
+      "Przywrócono domyślną strefę `Europe/Warsaw` (teraz 14:00).",
+    ]);
+    expect(zones.size).toBe(0);
+  });
+
+  test("needs Manage Server", async () => {
+    const { run, zones } = setupZones();
+    expect(await run("set", { zone: "Asia/Tokyo" }, 0n)).toEqual([
+      "Nie masz uprawnień do tej komendy.",
+    ]);
+    expect(zones.size).toBe(0);
   });
 });

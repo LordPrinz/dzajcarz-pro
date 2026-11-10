@@ -15,6 +15,12 @@ export interface ScheduledMessageRecord {
   createdBy: string;
 }
 
+/** A message due now, with the date on its server's clock (the key that sends it once that day). */
+export interface DueScheduledMessage extends ScheduledMessageRecord {
+  /** `YYYY-MM-DD` in the server's time zone. */
+  date: string;
+}
+
 export interface ScheduledMessageLimits {
   perGuild: number;
   /** DM messages to one member from one guild. */
@@ -42,8 +48,11 @@ export interface ScheduledMessageRepository {
   remove(guildId: string, id: number): Promise<boolean>;
   /** Deletes every message of the guild; resolves how many there were. */
   removeGuild(guildId: string): Promise<number>;
-  /** At most `limit` messages of every guild due at `time`, by guild and id. */
-  due(time: string, limit: number): Promise<ScheduledMessageRecord[]>;
+  /**
+   * At most `limit` messages, of every guild, whose time of day is the minute `at` falls on in that guild's
+   * time zone (`guild_settings.time_zone`, else the repository's default zone).
+   */
+  due(at: Date, limit: number): Promise<DueScheduledMessage[]>;
   /** `guildId` null means every server. False when it was already off. */
   optOut(userId: string, guildId: string | null): Promise<boolean>;
   /** Removes exactly that opt-out (null: only the every-server one). False when there was none. */
@@ -66,7 +75,10 @@ function toRecord(row: ScheduledMessageRow): ScheduledMessageRecord {
   };
 }
 
-export function createScheduledMessageRepository(sql: SQL): ScheduledMessageRepository {
+export function createScheduledMessageRepository(
+  sql: SQL,
+  { defaultTimeZone }: { defaultTimeZone: string },
+): ScheduledMessageRepository {
   return {
     async add({ guildId, time, content, target, createdBy }, limits) {
       const channelId = target.kind === "channel" ? target.channelId : null;
@@ -121,11 +133,24 @@ export function createScheduledMessageRepository(sql: SQL): ScheduledMessageRepo
       return deleted.length;
     },
 
-    async due(time, limit) {
-      const rows = await sql<ScheduledMessageRow[]>`
-        SELECT * FROM scheduled_message WHERE time_of_day = ${time} ORDER BY guild_id, id LIMIT ${limit}
+    async due(at, limit) {
+      // Postgres turns the instant into each guild's wall clock, so one query serves every zone. A stored
+      // zone Postgres does not know (its tzdata can lag the runtime's) counts as the default, so one bad row
+      // cannot fail the query for every server.
+      const rows = await sql<(ScheduledMessageRow & { local_date: string })[]>`
+        WITH known AS MATERIALIZED (SELECT name FROM pg_timezone_names)
+        SELECT m.*, to_char(local.at, 'YYYY-MM-DD') AS local_date
+        FROM scheduled_message m
+        LEFT JOIN guild_settings g ON g.guild_id = m.guild_id
+        LEFT JOIN known k ON k.name = g.time_zone
+        CROSS JOIN LATERAL (
+          SELECT ${at}::timestamptz AT TIME ZONE coalesce(k.name, ${defaultTimeZone}) AS at
+        ) local
+        WHERE m.time_of_day = to_char(local.at, 'HH24:MI')
+        ORDER BY m.guild_id, m.id
+        LIMIT ${limit}
       `;
-      return rows.map(toRecord);
+      return rows.map((row) => ({ ...toRecord(row), date: row.local_date }));
     },
 
     async optOut(userId, guildId) {
