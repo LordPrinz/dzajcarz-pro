@@ -24,13 +24,18 @@ export const HEADER_PATTERN = new RegExp(
 );
 
 /** Branches that never carry a ticket number. */
-export const UNTICKETED_BRANCHES = new Set(["main", TRUNK_BRANCH, "HEAD"]);
+export const UNTICKETED_BRANCHES = new Set([TRUNK_BRANCH, "HEAD"]);
 
 /** Dependabot names its own branches (`dependabot/bun/zod-4.2.0`); its PR titles carry the umbrella ticket DZAJ-3. */
 export const BOT_BRANCH_PATTERN = /^dependabot\/[\w./-]+$/;
 
 /** Commits git generates itself; they are allowed without a ticket. */
 export const GENERATED_HEADER = /^(?:Merge |Revert "|fixup! |squash! |amend! )/;
+
+/** A message that is git-generated (`fixup! …`) or already carries a ticket tag must not get another prefix. */
+export function needsTicketPrefix(message: string): boolean {
+  return !GENERATED_HEADER.test(message) && !/^\[DZAJ-\d+\]/.test(message);
+}
 
 export function ticketFromBranch(branch: string): string | undefined {
   const id = BRANCH_PATTERN.exec(branch)?.[1] ?? /^DZAJ-(\d+)/i.exec(branch)?.[1];

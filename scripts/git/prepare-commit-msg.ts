@@ -1,5 +1,5 @@
 // Prefixes the commit message with the ticket from the branch name: DZAJ-44-foo → "[DZAJ-44] …".
-import { currentBranch, ticketFromBranch } from "./conventions.ts";
+import { currentBranch, needsTicketPrefix, ticketFromBranch } from "./conventions.ts";
 
 const [messageFile, source] = Bun.argv.slice(2);
 if (!messageFile || source === "merge" || source === "squash" || source === "commit") {
@@ -11,6 +11,6 @@ if (!ticket) process.exit(0);
 
 const tag = `[${ticket}]`;
 const message = await Bun.file(messageFile).text();
-if (!message.startsWith(tag)) {
+if (needsTicketPrefix(message)) {
   await Bun.write(messageFile, `${tag} ${message}`);
 }

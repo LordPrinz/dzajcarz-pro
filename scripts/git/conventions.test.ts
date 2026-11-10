@@ -4,6 +4,7 @@ import {
   BRANCH_PATTERN,
   GENERATED_HEADER,
   HEADER_PATTERN,
+  needsTicketPrefix,
   ticketFromBranch,
 } from "./conventions.ts";
 
@@ -51,5 +52,19 @@ describe("git conventions", () => {
     expect(ticketFromBranch("DZAJ-44-set-user-permissions")).toBe("DZAJ-44");
     expect(ticketFromBranch("main")).toBeUndefined();
     expect(ticketFromBranch("main")).toBeUndefined();
+  });
+
+  test.each([
+    "fixup! [DZAJ-5] feat: Add thing",
+    "squash! [DZAJ-5] feat: Add thing",
+    "amend! [DZAJ-5] feat: Add thing",
+    "[DZAJ-9] fix: Other ticket",
+    "[DZAJ-5] feat: Already tagged",
+  ])("does not prefix %p", (message) => {
+    expect(needsTicketPrefix(message)).toBe(false);
+  });
+
+  test("prefixes a normal message", () => {
+    expect(needsTicketPrefix("feat: Add thing")).toBe(true);
   });
 });
