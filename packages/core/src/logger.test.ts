@@ -22,3 +22,59 @@ test("writes JSON lines at or above the level, with child fields", () => {
     },
   ]);
 });
+
+function lastLine(log: (logger: ReturnType<typeof createJsonLogger>) => void) {
+  const lines: string[] = [];
+  log(createJsonLogger({ level: "info", write: (line) => lines.push(line) }));
+  return JSON.parse(lines.at(-1) ?? "{}");
+}
+
+test("a Discord API error keeps its code, status and method, but not its URL or body", () => {
+  const error = Object.assign(new Error("Missing Permissions"), {
+    name: "DiscordAPIError[50013]",
+    code: 50013,
+    status: 403,
+    method: "POST",
+    url: "https://discord.com/api/v10/interactions/1/secret-token/callback",
+    requestBody: { json: { content: "what a member typed" } },
+  });
+  const { error: logged } = lastLine((logger) => logger.error("Reply failed", { error }));
+  expect(logged).toMatchObject({
+    name: "DiscordAPIError[50013]",
+    message: "Missing Permissions",
+    code: 50013,
+    status: 403,
+    method: "POST",
+  });
+  expect(logged.url).toBeUndefined();
+  expect(logged.requestBody).toBeUndefined();
+});
+
+test("a system error keeps its string code, and a cause is described one level deep", () => {
+  const root = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+  const middle = new Error("Redis down", { cause: root });
+  const error = new Error("Prefix lookup failed", { cause: middle });
+  const { error: logged } = lastLine((logger) => logger.warn("x", { error }));
+  expect(logged.cause).toMatchObject({ message: "Redis down" });
+  expect(logged.cause.cause).toBeUndefined();
+  const direct = lastLine((logger) => logger.warn("x", { error: root })).error;
+  expect(direct.code).toBe("ECONNREFUSED");
+});
+
+test("a Postgres error keeps its SQLSTATE, and a plain string cause is kept as it is", () => {
+  const error = Object.assign(new Error("duplicate key"), {
+    code: "ERR_POSTGRES_SERVER_ERROR",
+    errno: "23505",
+    cause: "unique_violation",
+  });
+  expect(lastLine((logger) => logger.warn("x", { error })).error).toMatchObject({
+    code: "ERR_POSTGRES_SERVER_ERROR",
+    errno: "23505",
+    cause: "unique_violation",
+  });
+});
+
+test("non-primitive values under the allowed names are left out", () => {
+  const error = Object.assign(new Error("odd"), { code: { nested: "secret" } });
+  expect(lastLine((logger) => logger.warn("x", { error })).error.code).toBeUndefined();
+});
