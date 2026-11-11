@@ -35,7 +35,11 @@ describe.skipIf(!sql)("scheduled message repository", () => {
   const limits = { perGuild: 25, perRecipient: 3 };
   const dmTo = (userId: string) => ({ kind: "dm", userId }) as const;
 
-  /** Adds a message that must be accepted and returns it. */
+  /**
+   * Adds a message that must be accepted and returns it. `add` starts a message whose time has passed today
+   * with today's date; the tests use fixed instants, so the date is cleared and the message is due like an
+   * older one.
+   */
   async function add(
     guildId: string,
     time: string,
@@ -44,6 +48,7 @@ describe.skipIf(!sql)("scheduled message repository", () => {
   ): Promise<ScheduledMessageRecord> {
     const result = await repo().add({ guildId, time, content, target, createdBy: admin }, limits);
     if (result.status !== "added") throw new Error(`not added: ${result.status}`);
+    await (sql as SQL)`UPDATE scheduled_message SET last_sent_date = NULL WHERE id = ${result.message.id}`;
     return result.message;
   }
 
@@ -69,14 +74,16 @@ describe.skipIf(!sql)("scheduled message repository", () => {
 
   // 17:00 UTC on 1 July is 19:00 in Warsaw (summer time) and 18:00 in London.
   const SEVEN_PM_WARSAW = new Date("2026-07-01T17:00:00Z");
+  const contents = (due: { content: string }[]) => due.map((m) => m.content).sort();
 
-  test("due returns the messages of every guild at that time, up to the limit", async () => {
+  test("due returns what has passed today in every guild, up to the limit", async () => {
     await add(guild, "19:00", "A");
     await add(otherGuild, "19:00", "B");
-    await add(guild, "19:01", "C");
-    expect((await repo().due(SEVEN_PM_WARSAW, 500)).map((m) => m.content)).toEqual(["A", "B"]);
-    expect((await repo().due(SEVEN_PM_WARSAW, 1)).map((m) => m.content)).toEqual(["A"]);
-    expect(await repo().due(new Date("2026-07-01T22:00:00Z"), 500)).toEqual([]);
+    await add(guild, "08:00", "Wcześniej");
+    await add(guild, "19:01", "Jeszcze nie");
+    expect(contents(await repo().due(SEVEN_PM_WARSAW, 500))).toEqual(["A", "B", "Wcześniej"]);
+    expect(await repo().due(SEVEN_PM_WARSAW, 1)).toHaveLength(1);
+    expect(await repo().due(new Date("2026-07-01T05:00:00Z"), 500)).toEqual([]);
   });
 
   test("due reads each guild's own time zone and gives the date on its clock", async () => {
@@ -89,35 +96,143 @@ describe.skipIf(!sql)("scheduled message repository", () => {
       ["Warszawa", "2026-07-01"],
       ["Londyn", "2026-07-01"],
     ]);
-    // A zone Postgres does not know counts as the default instead of failing every server's messages.
-    await createGuildSettingsRepository(sql as SQL).setTimeZone(otherGuild, "US/Pacific-New");
-    expect((await repo().due(SEVEN_PM_WARSAW, 500)).map((m) => m.content)).toEqual([
-      "Warszawa",
-      "Nie teraz",
-    ]);
     // 23:30 UTC is already the next day in Warsaw.
     await add(guild, "01:30", "Po północy");
     const late = await repo().due(new Date("2026-07-01T23:30:00Z"), 500);
-    expect(late.map((m) => [m.content, m.date])).toEqual([["Po północy", "2026-07-02"]]);
+    expect(late.find((m) => m.content === "Po północy")?.date).toBe("2026-07-02");
   });
 
-  test("on the spring clock change a time that does not exist that day is skipped", async () => {
+  test("a message that went out is not due again that day, but is the next day", async () => {
+    const message = await add(guild, "19:00", "Raz");
+    const [due] = await repo().due(SEVEN_PM_WARSAW, 500);
+    expect(due?.date).toBe("2026-07-01");
+    await repo().claim(message.id, "2026-07-01");
+    expect(await repo().due(SEVEN_PM_WARSAW, 500)).toEqual([]);
+    expect(await repo().due(new Date("2026-07-01T21:59:00Z"), 500)).toEqual([]);
+    expect(await repo().due(new Date("2026-07-02T16:59:00Z"), 500)).toEqual([]);
+    expect(contents(await repo().due(new Date("2026-07-02T17:00:00Z"), 500))).toEqual(["Raz"]);
+  });
+
+  test("a message that is not claimed stays due", async () => {
+    await add(guild, "19:00", "Ponów");
+    expect(await repo().due(SEVEN_PM_WARSAW, 500)).toHaveLength(1);
+    expect(await repo().due(new Date(SEVEN_PM_WARSAW.getTime() + 60_000), 500)).toHaveLength(1);
+  });
+
+  test("claim is taken by one caller only, and release makes the message due again", async () => {
+    const message = await add(guild, "19:00", "Raz");
+    const attempts = await Promise.all(
+      Array.from({ length: 6 }, () => repo().claim(message.id, "2026-07-01")),
+    );
+    expect(attempts.filter(Boolean)).toHaveLength(1);
+    expect(await repo().claim(message.id, "2026-07-01")).toBe(false);
+    expect(await repo().claim(message.id, "2026-06-30")).toBe(false);
+    await repo().release(message.id, "2026-07-01");
+    expect(await repo().due(SEVEN_PM_WARSAW, 500)).toHaveLength(1);
+    expect(await repo().claim(message.id, "2026-07-01")).toBe(true);
+    // A release for another date, or of a message that is not there, changes nothing.
+    await repo().release(message.id, "2026-07-02");
+    await repo().release(message.id + 1000, "2026-07-01");
+    expect(await repo().due(SEVEN_PM_WARSAW, 500)).toEqual([]);
+    expect(await repo().claim(message.id, "2026-07-02")).toBe(true);
+    expect(await repo().claim(message.id + 1000, "2026-07-02")).toBe(false);
+  });
+
+  test("a message added after its time has passed today waits for tomorrow", async () => {
+    // add() reads the real clock, so this uses 00:00, which has always passed.
+    const passed = await repo().add(
+      { guildId: guild, time: "00:00", content: "Minęła", target: channel, createdBy: admin },
+      limits,
+    );
+    if (passed.status !== "added") throw new Error("not added");
+    expect(await repo().due(new Date(), 500)).toEqual([]);
+    const tomorrow = new Date(Date.now() + 86_400_000);
+    expect(contents(await repo().due(tomorrow, 500))).toEqual(["Minęła"]);
+  });
+
+  test("a message added before its time today is due once the time comes", async () => {
+    const result = await repo().add(
+      { guildId: guild, time: "23:59", content: "Wieczorem", target: channel, createdBy: admin },
+      limits,
+    );
+    if (result.status !== "added") throw new Error("not added");
+    const [row] = await (sql as SQL)<{ last_sent_date: Date | null }[]>`
+      SELECT last_sent_date FROM scheduled_message WHERE id = ${result.message.id}
+    `;
+    // Unless the test runs in the last minute of the day in Warsaw.
+    const warsaw = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Warsaw",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date());
+    if (warsaw !== "23:59") expect(row?.last_sent_date).toBeNull();
+  });
+
+  test("a /timezone change in mid-day neither repeats nor skips the message", async () => {
+    const settings = createGuildSettingsRepository(sql as SQL);
+    const morning = await add(guild, "10:00", "Rano");
+    const evening = await add(guild, "21:00", "Wieczorem");
+    // 08:30 UTC is 10:30 in Warsaw: the 10:00 message is due and goes out.
+    const due = await repo().due(new Date("2026-07-01T08:30:00Z"), 500);
+    expect(due.map((m) => m.id)).toEqual([morning.id]);
+    await repo().claim(morning.id, "2026-07-01");
+    // Moved to New York (UTC-4), it is 04:30 on the same date: nothing repeats, and 10:00 there does not either.
+    await settings.setTimeZone(guild, "America/New_York");
+    expect(await repo().due(new Date("2026-07-01T08:30:00Z"), 500)).toEqual([]);
+    expect(await repo().due(new Date("2026-07-01T14:00:00Z"), 500)).toEqual([]);
+    // 21:00 in New York has not come yet at 20:00 UTC, so the evening message is not skipped or sent early.
+    expect(await repo().due(new Date("2026-07-01T20:00:00Z"), 500)).toEqual([]);
+    expect((await repo().due(new Date("2026-07-02T01:00:00Z"), 500)).map((m) => m.id)).toEqual([
+      evening.id,
+    ]);
+    // Moved the other way before the 10:00 message went out, it still goes out that day.
+    await repo().claim(evening.id, "2026-07-01");
+    await repo().release(morning.id, "2026-07-01");
+    await settings.setTimeZone(guild, "Pacific/Auckland");
+    expect((await repo().due(new Date("2026-07-01T00:30:00Z"), 500)).map((m) => m.id)).toEqual([
+      morning.id,
+    ]);
+  });
+
+  test("on the spring clock change a time that does not exist that day goes out once the clock is past it", async () => {
     await add(guild, "02:30", "Nie ma takiej godziny");
     await add(guild, "03:00", "Trzecia");
     // 29 March 2026: Warsaw jumps from 02:00 to 03:00 at 01:00 UTC.
     expect(await repo().due(new Date("2026-03-29T00:30:00Z"), 500)).toEqual([]);
-    const three = await repo().due(new Date("2026-03-29T01:00:00Z"), 500);
-    expect(three.map((m) => [m.content, m.date])).toEqual([["Trzecia", "2026-03-29"]]);
+    const jump = await repo().due(new Date("2026-03-29T01:00:00Z"), 500);
+    expect(jump.map((m) => [m.content, m.date])).toEqual([
+      ["Nie ma takiej godziny", "2026-03-29"],
+      ["Trzecia", "2026-03-29"],
+    ]);
   });
 
-  test("on the autumn clock change a repeated time is due twice with the same date", async () => {
-    await add(guild, "02:30", "Dwa razy");
-    // 25 October 2026: Warsaw goes from 03:00 back to 02:00 at 01:00 UTC, so 02:30 happens twice. The same
-    // date makes the module's once-a-day key send it only the first time.
+  test("on the autumn clock change a repeated time goes out only the first time", async () => {
+    const message = await add(guild, "02:30", "Dwa razy");
+    // 25 October 2026: Warsaw goes from 03:00 back to 02:00 at 01:00 UTC, so 02:30 happens twice.
+    expect(await repo().due(new Date("2026-10-25T00:29:00Z"), 500)).toEqual([]);
     const first = await repo().due(new Date("2026-10-25T00:30:00Z"), 500);
-    const second = await repo().due(new Date("2026-10-25T01:30:00Z"), 500);
     expect(first.map((m) => m.date)).toEqual(["2026-10-25"]);
-    expect(second.map((m) => m.date)).toEqual(["2026-10-25"]);
+    await repo().claim(message.id, "2026-10-25");
+    expect(await repo().due(new Date("2026-10-25T01:30:00Z"), 500)).toEqual([]);
+    expect(await repo().due(new Date("2026-10-25T20:00:00Z"), 500)).toEqual([]);
+  });
+
+  test("with more due than the limit, every guild gets a message before any gets a second", async () => {
+    const third = "1234567890123456791";
+    for (const time of ["10:00", "11:00", "12:00"]) await add(guild, time, `A${time}`);
+    await add(otherGuild, "10:00", "B");
+    await add(third, "10:00", "C");
+    for (let run = 0; run < 10; run++) {
+      const due = await repo().due(SEVEN_PM_WARSAW, 3);
+      expect(contents(due)).toEqual(["A10:00", "B", "C"]);
+    }
+    // The guild with the most messages is not always first: the cut is random between guilds of a round.
+    const firsts = new Set<string>();
+    for (let run = 0; run < 60 && firsts.size < 3; run++) {
+      const due = await repo().due(SEVEN_PM_WARSAW, 1);
+      firsts.add(due[0]?.guildId ?? "");
+    }
+    expect(firsts.size).toBe(3);
   });
 
   test("remove only takes a message of the given guild", async () => {

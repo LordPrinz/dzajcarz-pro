@@ -14,6 +14,7 @@ import { clickComponent, createFakeContext, replyText, submitModal } from "@dzaj
 import { createMemoryStore } from "@dzajcarz/kv";
 import {
   createMessagesModule,
+  MAX_ATTEMPTS_PER_DAY,
   MAX_CONTENT_LENGTH,
   MAX_DMS_PER_RECIPIENT,
   MAX_DUE_PER_TICK,
@@ -65,6 +66,7 @@ function createStore(zones: Zones = {}): ScheduledMessageStore & {
   const rows: ScheduledMessage[] = [];
   const optOuts = new Set<string>();
   const dueLimits: number[] = [];
+  const lastSent = new Map<number, string>();
   const key = (userId: string, guildId: string | null) => `${userId}|${guildId ?? "*"}`;
   let nextId = 1;
   const insert = (message: Omit<ScheduledMessage, "id">) => {
@@ -108,9 +110,20 @@ function createStore(zones: Zones = {}): ScheduledMessageStore & {
       dueLimits.push(limit);
       return rows
         .map((row) => ({ row, minute: localMinute(at, zones[row.guildId] ?? ZONE) }))
-        .filter(({ row, minute }) => row.time === minute.time)
+        .filter(
+          ({ row, minute }) =>
+            minute.time >= row.time && (lastSent.get(row.id) ?? "") < minute.date,
+        )
         .map(({ row, minute }) => ({ ...row, date: minute.date }))
         .slice(0, limit);
+    },
+    async claim(id, date) {
+      if ((lastSent.get(id) ?? "") >= date) return false;
+      lastSent.set(id, date);
+      return true;
+    },
+    async release(id, date) {
+      if (lastSent.get(id) === date) lastSent.delete(id);
     },
     async optOut(userId, guildId) {
       const had = optOuts.has(key(userId, guildId));
@@ -199,6 +212,7 @@ function setup(
   };
 
   let current = SEVEN_PM;
+  let ready = true;
   const warnings: { message: string; fields?: LogFields }[] = [];
   const infos: { message: string; fields?: LogFields }[] = [];
   const errors: { message: string; fields?: LogFields }[] = [];
@@ -220,7 +234,8 @@ function setup(
       botCanPostIn: async (_guildId, channelId) => !options.mutedChannels?.includes(channelId),
     },
     cron,
-    lock: createMemoryStore(() => current.getTime()),
+    failures: createMemoryStore(() => current.getTime()),
+    clientReady: () => ready,
     botInGuild: (guildId) => botGuilds.includes(guildId),
     moduleEnabled: async (_guildId, channelId) => !options.disabledChannels?.includes(channelId),
     guildModuleEnabled: async (guildId) => !options.disabledGuilds?.includes(guildId),
@@ -309,6 +324,9 @@ function setup(
     guildNames,
     setNow: (date: Date) => {
       current = date;
+    },
+    setReady: (value: boolean) => {
+      ready = value;
     },
     isStopped: () => stopped,
   };
@@ -447,18 +465,172 @@ describe("sending", () => {
     expect(s.channelSends).toHaveLength(1);
   });
 
-  test("02:30 does not go out on the day March skips it", async () => {
+  test("02:30 goes out once, right after the clock jumps over it in March", async () => {
     const s = setup();
     await s.schedule({
       time: "02:30",
       content: "Noc",
       target: { kind: "channel", channelId: GENERAL },
     });
-    for (const instant of ["2026-03-29T00:30:00Z", "2026-03-29T01:30:00Z"]) {
+    s.setNow(new Date("2026-03-29T00:30:00Z"));
+    await s.fire();
+    expect(s.channelSends).toEqual([]);
+    for (const instant of ["2026-03-29T01:00:00Z", "2026-03-29T01:30:00Z"]) {
       s.setNow(new Date(instant));
       await s.fire();
     }
+    expect(s.channelSends).toHaveLength(1);
+  });
+
+  test("a message whose minute passed while the bot was down goes out when it is back, that day", async () => {
+    const s = setup();
+    await s.schedule({
+      time: "19:00",
+      content: "Spóźnione",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    s.setNow(new Date(SEVEN_PM.getTime() + 3 * 3_600_000));
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["Spóźnione"]);
+    await s.fire();
+    expect(s.channelSends).toHaveLength(1);
+  });
+
+  test("a message that failed is tried again the next minute and then not repeated", async () => {
+    const failChannels = [GENERAL];
+    const s = setup({ failChannels });
+    const message = await s.schedule({
+      time: "19:00",
+      content: "Za drugim razem",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    await s.fire();
     expect(s.channelSends).toEqual([]);
+    expect(s.warnings[0]?.fields).toMatchObject({ id: message.id, attempts: 1 });
+    failChannels.length = 0;
+    s.setNow(new Date(SEVEN_PM.getTime() + 60_000));
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["Za drugim razem"]);
+    s.setNow(new Date(SEVEN_PM.getTime() + 120_000));
+    await s.fire();
+    expect(s.channelSends).toHaveLength(1);
+  });
+
+  test("a message that keeps failing is given up for the day, logged, and tried again tomorrow", async () => {
+    const failChannels = [GENERAL];
+    const s = setup({ failChannels });
+    const message = await s.schedule({
+      time: "19:00",
+      content: "Uparte",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    for (let minute = 0; minute < MAX_ATTEMPTS_PER_DAY + 2; minute++) {
+      s.setNow(new Date(SEVEN_PM.getTime() + minute * 60_000));
+      await s.fire();
+    }
+    expect(s.warnings).toHaveLength(MAX_ATTEMPTS_PER_DAY - 1);
+    expect(s.errors.map((entry) => entry.message)).toEqual([
+      "Scheduled message given up for today after repeated failures",
+    ]);
+    expect(s.errors[0]?.fields).toMatchObject({
+      id: message.id,
+      attempts: MAX_ATTEMPTS_PER_DAY,
+    });
+    failChannels.length = 0;
+    s.setNow(new Date("2026-07-02T17:00:00Z"));
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["Uparte"]);
+  });
+
+  test("closing DMs or a missing member end the day's attempts without a retry", async () => {
+    const s = setup({ closedDms: [MEMBER] });
+    await s.schedule({ time: "19:00", content: "x", target: { kind: "dm", userId: MEMBER } });
+    await s.fire();
+    s.setNow(new Date(SEVEN_PM.getTime() + 60_000));
+    await s.fire();
+    expect(s.dmSends).toEqual([]);
+    expect(s.infos).toHaveLength(1);
+  });
+
+  test("a /timezone change in mid-day neither repeats nor skips the day's message", async () => {
+    const zones: Zones = {};
+    const s = setup({ zones });
+    await s.schedule({
+      time: "10:00",
+      content: "Rano",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    // 10:30 in Warsaw: it goes out.
+    s.setNow(new Date("2026-07-01T08:30:00Z"));
+    await s.fire();
+    expect(s.channelSends).toHaveLength(1);
+    // The server moves to New York, where 10:00 comes six hours later, on the same date.
+    zones[GUILD] = "America/New_York";
+    s.setNow(new Date("2026-07-01T14:30:00Z"));
+    await s.fire();
+    expect(s.channelSends).toHaveLength(1);
+    // Next day it goes out once more, on the new clock.
+    s.setNow(new Date("2026-07-02T13:30:00Z"));
+    await s.fire();
+    expect(s.channelSends).toHaveLength(1);
+    s.setNow(new Date("2026-07-02T14:00:00Z"));
+    await s.fire();
+    expect(s.channelSends).toHaveLength(2);
+  });
+
+  test("a tick before the client is ready sends and claims nothing, the next one sends", async () => {
+    const s = setup();
+    await s.schedule({
+      time: "19:00",
+      content: "Po starcie",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    s.setReady(false);
+    await s.fire();
+    expect(s.channelSends).toEqual([]);
+    s.setReady(true);
+    s.setNow(new Date(SEVEN_PM.getTime() + 60_000));
+    await s.fire();
+    expect(s.channelSends.map((send) => send.content)).toEqual(["Po starcie"]);
+  });
+
+  test("a message claimed by another tick is not sent again by a slow one", async () => {
+    const s = setup();
+    const message = await s.schedule({
+      time: "19:00",
+      content: "Raz",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    // Another instance took the day's date after this tick read the row.
+    const due = s.store.due.bind(s.store);
+    s.store.due = async (at, limit) => {
+      const rows = await due(at, limit);
+      await s.store.claim(message.id, "2026-07-01");
+      return rows;
+    };
+    await s.fire();
+    expect(s.channelSends).toEqual([]);
+  });
+
+  test("two ticks at once send a message once", async () => {
+    let release = () => {};
+    const s = setup({
+      onSend: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    });
+    await s.schedule({
+      time: "19:00",
+      content: "Raz",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    const first = s.fire();
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    await s.fire();
+    release();
+    await first;
+    expect(s.channelSends).toHaveLength(1);
   });
 
   test("two messages at the same minute both go out", async () => {
@@ -614,7 +786,9 @@ describe("sending", () => {
     expect(s.channelSends.map((send) => send.content)).toEqual(["y"]);
     expect(s.dmSends).toHaveLength(1);
     expect(s.warnings).toHaveLength(1);
-    expect(s.warnings[0]?.message).toBe("Scheduled message not sent");
+    expect(s.warnings[0]?.message).toBe(
+      "Scheduled message not sent; it is tried again next minute",
+    );
     expect(s.warnings[0]?.fields).toMatchObject({ id: broken.id, guildId: GUILD });
     // The row stays; the admin removes it.
     expect(s.store.rows).toHaveLength(3);
@@ -1076,7 +1250,7 @@ describe("sending, under load and at the edges", () => {
     s.setNow(new Date("2026-07-01T16:59:59.990Z"));
     await s.fire();
     expect(s.channelSends.map((send) => send.content)).toEqual(["Na czas"]);
-    // The same minute fired again just after 19:00 is still locked.
+    // The same minute fired again just after 19:00 finds it already sent.
     s.setNow(new Date("2026-07-01T17:00:00.020Z"));
     await s.fire();
     expect(s.channelSends).toHaveLength(1);
@@ -1120,7 +1294,7 @@ describe("sending, under load and at the edges", () => {
     expect(s.store.dueLimits).toEqual([MAX_DUE_PER_TICK]);
     expect(s.warnings).toEqual([
       {
-        message: "Too many scheduled messages in one minute; the rest are skipped",
+        message: "Too many scheduled messages due at once; the rest wait for the next minute",
         fields: { at: SEVEN_PM.toISOString(), limit: MAX_DUE_PER_TICK },
       },
     ]);

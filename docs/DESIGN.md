@@ -521,23 +521,46 @@ as typed; backticks become `ˋ` so they cannot end the span), cut to fit 2000 ch
 `remove <id>` only finds messages of the server it runs in. When the bot leaves a server, its messages go
 with the rest of its data (see Leaving a server).
 
-Sending is a `CronScheduler` job at `* * * * *` in UTC. Each tick rounds down to its minute (up to 5 s
-early still counts as the coming one) and reads at most 500 rows due then across all servers (a warning
-when that is hit): Postgres turns the instant into each server's wall clock (`guild_settings.time_zone`,
-else `DEFAULT_TIME_ZONE`) and compares it with `time_of_day`, so one query serves every zone. It sends them
-five at a time. Each row is handled on its own: a failure is a warning
-with the row id, and the whole tick is wrapped too. For each row, in order:
+Sending is a `CronScheduler` job at `* * * * *` in UTC. A tick does nothing until the Discord client is
+ready: before that `botInGuild` sees no servers, and every message would look like one for a server the bot
+left. Each tick rounds down to its minute (up to 5 s early still counts as the coming one) and reads at most
+500 due rows across all servers (a warning when that is hit; the rest wait for the next minute). A message is
+due when its `time_of_day` has passed on the server's clock and the server's local date is later than
+`scheduled_message.last_sent_date`. Postgres turns the instant into each server's wall clock
+(`guild_settings.time_zone`, else `DEFAULT_TIME_ZONE`), so one query serves every zone; it does not check the
+zone against `pg_timezone_names`, since `/timezone` and the startup check already did. Over the limit, the
+query takes one message per server before a second from any, and the servers in random order, so a large
+server cannot crowd out the others. The tick sends them five at a time. Each row is handled on its own: a
+failure is a warning with the row id, and the whole tick is wrapped too. For each row, in order:
 
+- claim the local date: `UPDATE ... SET last_sent_date = <date> WHERE id = <id> AND (last_sent_date IS NULL
+  OR last_sent_date < <date>)`. Exactly one tick or instance gets the row, so overlapping or slow ticks and
+  a second instance never send a message twice, and a write that fails after the send cannot cause a resend;
 - skip a server the bot is no longer in;
 - the module toggle: a channel message asks for its channel, a DM for the server as a whole (it has no
   channel), so `/modules disable messages #kanał` stops only messages to that channel;
-- take `messages:sent:<id>:<date>T<time>` in Redis with `setIfAbsent` (2 h TTL). The lock stops a double
-  cron fire, a second instance and October's repeated 02:xx hour from sending twice. A minute missed while
-  the bot was down is not caught up, and a time the March change skips does not fire that day;
 - a DM goes out only while the recipient is still a member, is not a bot and has not opted out. `{user}`
   becomes a ping of the recipient, a footer names the server (with markdown and mention characters
   stripped from the name), and a "Nie wysyłaj mi więcej" button sits under it. Closed DMs (50007) are
   logged at info.
+
+A skipped server or module, a deleted channel, a member who left or opted out and closed DMs keep the claim:
+a retry would not change them. When Discord fails, the claim is given back (the date steps back one day), so
+the next minute's tick tries again. The failures of a message on a local date are counted in Redis
+(`messages:failed:<id>:<date>`, 26 h TTL; losable state, ADR 3). The 5th failure is logged as an error and
+keeps the claim, so that day's message is given up and the next day's goes out as usual. A retry stops at
+local midnight: the next day's attempt starts over.
+
+New messages and the migration both start a message whose time has already passed today with today's date,
+so adding "19:00" at 20:00 waits for tomorrow, and the deploy does not repeat what the old Redis lock sent
+that day. The migration reads each server's zone from `guild_settings`, else `Europe/Warsaw`.
+
+The rule keeps the schedule right across the clock changes and `/timezone`: a minute missed while the bot was
+down is sent when it is back, the same day; a time the March change skips goes out right after the jump;
+October's repeated 02:xx hour sends once, since the second 02:30 finds the date stored; and a `/timezone`
+change mid-day neither repeats a message that already went out (the new zone's date is not later) nor skips
+one that did not. One edge stays: moving to a zone that is behind the old one can leave the stored date a day
+ahead of the local date, and that day's message is skipped.
 
 The DM can grow past what was typed, so `add` checks the worst case: every `{user}` replaced by the
 recipient's mention, plus the footer with a 100-character server name, must fit Discord's 2000 characters.
