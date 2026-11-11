@@ -43,6 +43,27 @@ describe("executeCommand", () => {
     expect(ctx.replies).toEqual([{ content: "Wejdź na kanał głosowy.", ephemeral: true }]);
   });
 
+  test("asks for an ephemeral error even after a public defer, and survives a reply that fails", async () => {
+    const command = defineCommand({
+      name: "late",
+      description: "Late",
+      run: async (ctx) => {
+        await ctx.defer();
+        throw new UserError("Za późno.");
+      },
+    });
+    const ctx = createFakeContext();
+    await executeCommand(command, ctx, silentLogger);
+    expect(ctx.deferOptions).toBeUndefined();
+    expect(ctx.replies).toEqual([{ content: "Za późno.", ephemeral: true }]);
+
+    const broken = createFakeContext();
+    broken.reply = async () => {
+      throw new Error("interaction expired");
+    };
+    await expect(executeCommand(command, broken, silentLogger)).resolves.toBeUndefined();
+  });
+
   test("logs an unexpected error and hides its message", async () => {
     const lines: string[] = [];
     const command = defineCommand({

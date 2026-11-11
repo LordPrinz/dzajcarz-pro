@@ -175,6 +175,74 @@ describe("reactions", () => {
     expect(calls[0]).not.toHaveProperty("withResponse");
   });
 
+  test("slash: an ephemeral reply after a public defer follows up privately and deletes the placeholder", async () => {
+    const calls: string[] = [];
+    const interaction = fakeInteraction([], null);
+    Object.assign(interaction, {
+      deferred: true,
+      ephemeral: false,
+      deleteReply: async () => {
+        calls.push("delete");
+      },
+      followUp: async (options: { flags?: unknown }) => {
+        calls.push(`followUp:${String(options.flags)}`);
+      },
+      editReply: async () => {
+        calls.push("edit");
+      },
+    });
+    await contextFromInteraction(interaction).reply({ content: "błąd", ephemeral: true });
+    expect(calls).toEqual([`followUp:${MessageFlags.Ephemeral}`, "delete"]);
+  });
+
+  test("slash: a public reply after a public defer, or any reply after an ephemeral defer, edits it", async () => {
+    const calls: string[] = [];
+    for (const [ephemeral, deferEphemeral] of [
+      [false, false],
+      [true, true],
+    ] as const) {
+      const interaction = fakeInteraction([], null);
+      Object.assign(interaction, {
+        deferred: true,
+        ephemeral: deferEphemeral,
+        deleteReply: async () => {
+          calls.push("delete");
+        },
+        editReply: async () => {
+          calls.push("edit");
+        },
+      });
+      await contextFromInteraction(interaction).reply({ content: "ok", ephemeral });
+    }
+    expect(calls).toEqual(["edit", "edit"]);
+  });
+
+  test("slash: a failing delete or follow-up is logged and does not throw", async () => {
+    for (const failing of ["deleteReply", "followUp"]) {
+      const followUps: unknown[] = [];
+      const interaction = fakeInteraction([], null);
+      Object.assign(interaction, {
+        deferred: true,
+        ephemeral: false,
+        deleteReply: async () => {
+          if (failing === "deleteReply") throw new Error("gone");
+        },
+        followUp: async (options: unknown) => {
+          if (failing === "followUp") throw new Error("expired");
+          followUps.push(options);
+        },
+      });
+      const warnings = warnRecorder();
+      await contextFromInteraction(interaction, warnings.logger).reply({
+        content: "błąd",
+        ephemeral: true,
+      });
+      expect(warnings.calls).toHaveLength(1);
+      // A failed delete must not lose the private message.
+      expect(followUps).toHaveLength(failing === "deleteReply" ? 1 : 0);
+    }
+  });
+
   test("slash: reacts to the edited reply of a deferred interaction", async () => {
     const { message, reacted } = fakeMessage();
     const interaction = fakeInteraction([], null);

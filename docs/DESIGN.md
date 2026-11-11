@@ -122,7 +122,9 @@ command with the same filters; an unknown or hidden name gets the same "not foun
 ### Errors
 
 `UserError` messages go to the caller as they are (Polish). Any other error is logged with the command,
-guild and user, and the caller gets a generic message. Event handlers are wrapped the same way, so one
+guild and user, and the caller gets a generic message. On slash both are private even after a public
+`defer()`: the adapter sends an ephemeral follow-up, then deletes the deferred reply (a failure in either step is
+only logged). A prefix reply cannot be ephemeral, so it is a normal reply. Event handlers are wrapped the same way, so one
 failing module cannot take the process down. An unhandled rejection is logged and the process keeps
 running; an uncaught exception is logged and the process exits with code 1, so the container's restart
 policy starts a clean instance.
