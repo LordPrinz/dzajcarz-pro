@@ -102,6 +102,8 @@ const wordIn = <T>(words: Readonly<Record<string, T>>, input: string): T | undef
 export const UNAVAILABLE = "Odtwarzacz muzyki jest teraz niedostępny.";
 export const NOT_IN_VOICE = "Najpierw wejdź na kanał głosowy.";
 export const NOTHING_PLAYING = "Nic teraz nie gra.";
+export const SONG_LOCKED =
+  "Lato z Radiem gra do końca: nie da się go wstrzymać, pominąć, zatrzymać, przewinąć ani zapętlić.";
 export const UNSUPPORTED_LINK = "Obsługuję tylko linki z YouTube, Bandcamp, Twitch i Vimeo.";
 export const trackFailedText = (title: string) =>
   `Nie udało się odtworzyć **${escapeMarkdown(title)}**, gram dalej.`;
@@ -176,6 +178,11 @@ export function createMusicModule({
     return state;
   }
 
+  /** The scheduled song plays to the end: members cannot pause, skip, stop, seek or loop it. */
+  function refuseSongControl(state: PlayerState) {
+    if (state.current?.byBot) throw new UserError(SONG_LOCKED);
+  }
+
   /** Additions run one at a time per guild: two quick `/play`s must not both join or both "start". */
   const additions = new Map<string, Promise<unknown>>();
 
@@ -245,6 +252,7 @@ export function createMusicModule({
     async run(ctx) {
       const guildId = guildOf(ctx);
       const state = await requireControl(guildId, ctx.user.id);
+      refuseSongControl(state);
       if (state.paused) await player.resume(guildId);
       else await player.pause(guildId);
       await updatePanelFromClick(ctx, guildId);
@@ -261,6 +269,7 @@ export function createMusicModule({
       // Answer the click first: Discord gives three seconds, and the skip waits for the node.
       await ctx.defer();
       const state = await requireControl(guildId, ctx.user.id);
+      refuseSongControl(state);
       if (!state.current) throw new UserError(NOTHING_PLAYING);
       // The next trackStart (or queueEnd) redraws the panel.
       await player.skip(guildId, state.current.id);
@@ -276,7 +285,7 @@ export function createMusicModule({
       const guildId = guildOf(ctx);
       // Acknowledged before playerDestroyed deletes the panel this button sits on.
       await ctx.defer();
-      await requireControl(guildId, ctx.user.id, false);
+      refuseSongControl(await requireControl(guildId, ctx.user.id, false));
       // playerDestroyed removes the panel.
       await player.leave(guildId);
     },
@@ -302,6 +311,7 @@ export function createMusicModule({
       // In the chain, so a double click reads the mode the first click set and moves on from there.
       await oneAtATime(guildId, async () => {
         const state = await requireControl(guildId, ctx.user.id);
+        refuseSongControl(state);
         await player.setLoop(guildId, nextLoop(state.loop));
       });
       await updatePanelFromClick(ctx, guildId);
@@ -384,6 +394,8 @@ export function createMusicModule({
   async function showPanel(guildId: string): Promise<void> {
     const state = player.state(guildId);
     const message = state && panelMessage(state, buttons);
+    // The scheduled song has no panel, and one left from before it must not keep live buttons.
+    if (state?.current?.byBot) return removePanel(guildId);
     if (!state || !message) return;
     const existing = posted.get(guildId);
     if (existing?.channelId === state.textChannelId) {
@@ -700,6 +712,7 @@ export function createMusicModule({
     async run(ctx) {
       const guildId = guildOf(ctx);
       const state = await requireControl(guildId, ctx.user.id);
+      refuseSongControl(state);
       if (!state.current) throw new UserError(NOTHING_PLAYING);
       await player.skip(guildId, state.current.id);
       await ctx.reply(`Pominięto: **${escapeMarkdown(state.current.title)}**.`);
@@ -712,7 +725,7 @@ export function createMusicModule({
     async run(ctx) {
       const guildId = guildOf(ctx);
       // Works while the node is away too: the bot still leaves voice.
-      await requireControl(guildId, ctx.user.id, false);
+      refuseSongControl(await requireControl(guildId, ctx.user.id, false));
       await player.leave(guildId);
       await ctx.reply("Zatrzymano muzykę i wyczyszczono kolejkę.");
     },
@@ -724,6 +737,7 @@ export function createMusicModule({
     async run(ctx) {
       const guildId = guildOf(ctx);
       const state = await requireControl(guildId, ctx.user.id);
+      refuseSongControl(state);
       if (!state.current) throw new UserError(NOTHING_PLAYING);
       if (state.paused) throw new UserError("Muzyka już jest wstrzymana.");
       await player.pause(guildId);
@@ -792,7 +806,7 @@ export function createMusicModule({
         );
       }
       await oneAtATime(guildId, async () => {
-        await requireControl(guildId, ctx.user.id);
+        refuseSongControl(await requireControl(guildId, ctx.user.id));
         await player.setLoop(guildId, mode);
       });
       redrawPanel(guildId);
@@ -825,6 +839,7 @@ export function createMusicModule({
       }
       await oneAtATime(guildId, async () => {
         const state = await requireControl(guildId, ctx.user.id);
+        refuseSongControl(state);
         const current = state.current;
         if (!current) throw new UserError(NOTHING_PLAYING);
         if (current.isStream) throw new UserError("Transmisji na żywo nie da się przewijać.");
@@ -955,6 +970,7 @@ export function createMusicModule({
       const guildId = guildOf(ctx);
       const target = await oneAtATime(guildId, async () => {
         const state = await requireControl(guildId, ctx.user.id);
+        refuseSongControl(state);
         const index = queueIndexOf(state, ctx.args.place);
         const wanted = state.upcoming[index];
         if (!wanted || !(await player.jump(guildId, index, wanted.id))) {
@@ -972,7 +988,7 @@ export function createMusicModule({
     async run(ctx) {
       const guildId = guildOf(ctx);
       const previous = await oneAtATime(guildId, async () => {
-        await requireControl(guildId, ctx.user.id);
+        refuseSongControl(await requireControl(guildId, ctx.user.id));
         return player.previous(guildId);
       });
       if (previous === "none") throw new UserError("Nie ma poprzedniego utworu.");

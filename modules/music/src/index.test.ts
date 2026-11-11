@@ -40,6 +40,7 @@ import {
   otherChannel,
   queueChanged,
   SEARCH_COOLDOWN_MS,
+  SONG_LOCKED,
   trackFailedText,
   UNAVAILABLE,
   UNSUPPORTED_LINK,
@@ -922,6 +923,88 @@ describe("music module", () => {
     }
     const upcoming = (ctx: Awaited<ReturnType<typeof playing>>) =>
       ctx.player.state(GUILD)?.upcoming.map((t) => t.title);
+
+    describe("the scheduled song", () => {
+      async function songPlaying() {
+        const ctx = setup();
+        ctx.player.playByBot(GUILD, VOICE, "Lato z Radiem");
+        await settle();
+        return ctx;
+      }
+
+      test("pause, skip, stop, seek and loop refuse and change nothing", async () => {
+        const ctx = await songPlaying();
+        for (const [name, args] of [
+          ["pause", {}],
+          ["skip", {}],
+          ["stop", {}],
+          ["seek", { time: "0:10" }],
+          ["loop", { mode: "track" }],
+        ] as const) {
+          expect(lastText(await ctx.run(name, args))).toBe(SONG_LOCKED);
+        }
+        const state = ctx.player.state(GUILD);
+        expect(state?.current?.title).toBe("Lato z Radiem");
+        expect(state?.paused).toBe(false);
+        expect(state?.loop).toBe("off");
+        expect(state?.positionMs).toBe(0);
+      });
+
+      test("stale panel buttons refuse too", async () => {
+        const ctx = setup();
+        ctx.player.nextResult = { kind: "tracks", tracks: [track("A")] };
+        await ctx.run("play", { query: "a" });
+        const ids = ["panel-pause", "panel-skip", "panel-stop", "panel-loop"].map(
+          (name) => ctx.panelButton(name).customId,
+        );
+        ctx.player.playByBot(GUILD, VOICE, "Lato z Radiem");
+        await settle();
+        for (const id of ids) {
+          expect(replyText((await ctx.click(id)).replies[0])).toBe(SONG_LOCKED);
+        }
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("Lato z Radiem");
+        expect(ctx.player.state(GUILD)?.paused).toBe(false);
+        expect(ctx.player.state(GUILD)?.loop).toBe("off");
+      });
+
+      test("jump and back refuse while the song plays", async () => {
+        const ctx = setup();
+        ctx.player.nextResult = { kind: "tracks", tracks: [track("A")] };
+        await ctx.run("play", { query: "a" });
+        ctx.player.playByBot(GUILD, VOICE, "Lato z Radiem");
+        await settle();
+        ctx.player.nextResult = { kind: "tracks", tracks: [track("B")] };
+        await ctx.run("play", { query: "b" });
+        expect(lastText(await ctx.run("jump", { place: "1" }))).toBe(SONG_LOCKED);
+        expect(lastText(await ctx.run("back"))).toBe(SONG_LOCKED);
+        const state = ctx.player.state(GUILD);
+        expect(state?.current?.title).toBe("Lato z Radiem");
+        expect(state?.upcoming.map((t) => t.title)).toEqual(["B"]);
+      });
+
+      test("an old panel is removed when the song starts", async () => {
+        const ctx = setup();
+        ctx.player.nextResult = { kind: "tracks", tracks: [track("A")] };
+        await ctx.run("play", { query: "a" });
+        expect(ctx.panels.messages.size).toBe(1);
+        ctx.player.playByBot(GUILD, VOICE, "Lato z Radiem");
+        await settle();
+        expect(ctx.panels.messages.size).toBe(0);
+      });
+
+      test("a member's own track stays controllable", async () => {
+        const ctx = await playing(["A", "B"]);
+        expect(lastText(await ctx.run("pause"))).toBe("Wstrzymano.");
+        expect(ctx.player.state(GUILD)?.paused).toBe(true);
+        await ctx.run("resume");
+        await ctx.run("loop", { mode: "track" });
+        expect(ctx.player.state(GUILD)?.loop).toBe("track");
+        await ctx.run("skip");
+        expect(ctx.player.state(GUILD)?.current?.title).toBe("B");
+        await ctx.run("stop");
+        expect(ctx.player.state(GUILD)).toBeNull();
+      });
+    });
 
     test("every control command is registered", () => {
       const { registry } = setup();
