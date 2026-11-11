@@ -1,3 +1,5 @@
+import { escapeMarkdown } from "@dzajcarz/core";
+
 /** Discord's message length limit; a longer greeting would be rejected on send. */
 export const MAX_MESSAGE_LENGTH = 2000;
 
@@ -26,9 +28,4 @@ export function renderWelcome(template: string, values: WelcomeValues): string {
   );
   // Cut by code points so an emoji at the boundary is not split into a broken half.
   return [...rendered].slice(0, MAX_MESSAGE_LENGTH).join("");
-}
-
-/** A display name like `**bold**` or `[link](url)` must show as text, not format the greeting. */
-function escapeMarkdown(text: string): string {
-  return text.replace(/[\\*_~`|>#[\]()<@:-]/g, "\\$&");
 }

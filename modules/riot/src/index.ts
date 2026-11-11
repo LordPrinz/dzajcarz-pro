@@ -8,7 +8,7 @@ import {
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
-import { escapeMarkdown, lolEmbed, valorantEmbed } from "./format.ts";
+import { escapeText, lolEmbed, valorantEmbed } from "./format.ts";
 import {
   LOL_PLATFORMS,
   type LolPlatform,
@@ -128,11 +128,11 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     switch (error.kind) {
       case "not-found":
         return new UserError(
-          `Nie znalazłem gracza **${escapeMarkdown(id.gameName)}#${escapeMarkdown(id.tagLine)}**.`,
+          `Nie znalazłem gracza **${escapeText(id.gameName)}#${escapeText(id.tagLine)}**.`,
         );
       case "no-region-profile":
         return new UserError(
-          `Gracz **${escapeMarkdown(id.gameName)}#${escapeMarkdown(id.tagLine)}** nie ma konta League of Legends na serwerze ${region ?? "tym"}. Spróbuj z innym regionem.`,
+          `Gracz **${escapeText(id.gameName)}#${escapeText(id.tagLine)}** nie ma konta League of Legends na serwerze ${region ?? "tym"}. Spróbuj z innym regionem.`,
         );
       case "forbidden":
         return new UserError(

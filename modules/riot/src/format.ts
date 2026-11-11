@@ -1,4 +1,4 @@
-import type { Embed } from "@dzajcarz/core";
+import { type Embed, escapeMarkdown } from "@dzajcarz/core";
 import type { LolProfile, LolQueueEntry, ValorantMatch, ValorantProfile } from "./ports.ts";
 
 const VALORANT_COLOR = 0xff4655;
@@ -10,12 +10,12 @@ const FIELD_LIMIT = 1024;
 const POINTS = new Intl.NumberFormat("pl-PL");
 
 /** Player and champion names come from Riot, so markdown in them must not format the embed. */
-export function escapeMarkdown(text: string): string {
-  return text.replace(/[\\*_~`|>#[\]()<-]/g, "\\$&").replace(/\s+/g, " ");
+export function escapeText(text: string): string {
+  return escapeMarkdown(text).replace(/\s+/g, " ");
 }
 
 const riotIdTitle = ({ gameName, tagLine }: { gameName: string; tagLine: string }) =>
-  `${escapeMarkdown(gameName)}#${escapeMarkdown(tagLine)}`;
+  `${escapeText(gameName)}#${escapeText(tagLine)}`;
 
 const QUEUE_LABELS: Record<string, string> = {
   competitive: "Rankingowa",
@@ -29,7 +29,7 @@ const QUEUE_LABELS: Record<string, string> = {
 
 /** A Polish name for the common queues, the raw id for the rest, nothing for an empty one. */
 const queueLabel = (queue: string) =>
-  queue === "" ? "" : (QUEUE_LABELS[queue] ?? escapeMarkdown(queue));
+  queue === "" ? "" : (QUEUE_LABELS[queue] ?? escapeText(queue));
 
 function matchLine(match: ValorantMatch): string {
   const outcome = match.won === null ? "Mecz" : match.won ? "Wygrana" : "Porażka";
@@ -37,8 +37,8 @@ function matchLine(match: ValorantMatch): string {
   const when = `<t:${Math.floor(match.startedAt.getTime() / 1000)}:R>`;
   return [
     result,
-    escapeMarkdown(match.map),
-    escapeMarkdown(match.agent),
+    escapeText(match.map),
+    escapeText(match.agent),
     `${match.kills}/${match.deaths}/${match.assists}`,
     queueLabel(match.queue),
     when,
@@ -61,10 +61,10 @@ export function valorantEmbed(profile: ValorantProfile): Embed {
     title: riotIdTitle(profile.riotId),
     color: VALORANT_COLOR,
     fields: [
-      { name: "Region", value: escapeMarkdown(profile.region.toUpperCase()), inline: true },
+      { name: "Region", value: escapeText(profile.region.toUpperCase()), inline: true },
       {
         name: "Ranga",
-        value: profile.rank ? escapeMarkdown(profile.rank) : "Bez rangi",
+        value: profile.rank ? escapeText(profile.rank) : "Bez rangi",
         inline: true,
       },
       { name: "Ostatnie mecze", value: matches },
@@ -98,7 +98,7 @@ export function lolEmbed(profile: LolProfile): Embed {
   const champions = profile.topChampions
     .map(
       (champion) =>
-        `**${escapeMarkdown(champion.name)}**, poziom ${champion.level}, ${POINTS.format(champion.points)} pkt`,
+        `**${escapeText(champion.name)}**, poziom ${champion.level}, ${POINTS.format(champion.points)} pkt`,
     )
     .join("\n");
   return {
