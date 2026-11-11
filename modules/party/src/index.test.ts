@@ -256,7 +256,7 @@ function setup({
   let nextMessageId = 9000;
   const chatFailures = { post: false, delete: false };
   /** Message id -> flags a test sets on messages left in a chat. */
-  const messageFlags = new Map<string, { pinned?: boolean; system?: boolean }>();
+  const messageFlags = new Map<string, { author?: string; pinned?: boolean; system?: boolean }>();
   const deleteCalls: string[][] = [];
   const chat: PartyChat = {
     async post(channelId, message) {
@@ -272,10 +272,12 @@ function setup({
     async recentMessages(channelId) {
       return [...(chats.get(channelId) ?? [])].reverse().map((id) => ({
         id,
+        authorId: messageFlags.get(id)?.author ?? "member",
         pinned: messageFlags.get(id)?.pinned ?? false,
         system: messageFlags.get(id)?.system ?? false,
       }));
     },
+    selfId: () => "bot",
     async deleteMessages(channelId, ids) {
       deleteCalls.push(ids);
       if (chatFailures.delete) throw new Error("Missing Permissions");
@@ -1681,6 +1683,15 @@ describe("command channel panel", () => {
       expect(t.chats.get("400")).toEqual(["2", "3", panel]);
     });
 
+    test("startup spares the bot's own messages and removes members'", async () => {
+      const t = await withPanel();
+      const panel = panelId(t) ?? "";
+      t.chats.set("400", ["1", "2", panel, "3"]);
+      t.messageFlags.set("2", { author: "bot" });
+      await t.eventFor("party-panels").run({} as never);
+      expect(t.chats.get("400")).toEqual(["2", panel]);
+    });
+
     test("a failing area does not stop the others", async () => {
       const t = setup();
       t.areas.set("400", panelArea);
@@ -1887,6 +1898,14 @@ describe("command channel panel", () => {
       t.scheduler.advance(20_000);
       await Bun.sleep(0);
       expect(t.deleteCalls).toEqual([["a1", "a2", "a3"]]);
+    });
+
+    test("the bot's own message is not scheduled, a member's is", async () => {
+      const t = await withPanel();
+      await t.eventFor("party-chat-message").run({ ...message("b1"), author: { id: "bot" } });
+      expect(t.scheduler.pending).toBe(0);
+      await t.eventFor("party-chat-message").run({ ...message("m1"), author: { id: "member" } });
+      expect(t.scheduler.pending).toBe(1);
     });
 
     test("a pinned or system message is never scheduled", async () => {

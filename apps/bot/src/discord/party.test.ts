@@ -379,17 +379,22 @@ describe("party chat adapter", () => {
           messages: {
             fetch: async () =>
               new Map([
-                ["2", { id: "2", pinned: true, system: false }],
-                ["1", { id: "1", pinned: false, system: true }],
+                ["2", { id: "2", author: { id: "u2" }, pinned: true, system: false }],
+                ["1", { id: "1", author: { id: "u1" }, pinned: false, system: true }],
               ]),
           },
         }),
       },
     } as unknown as Client;
     expect(await createPartyChat(client).recentMessages(CHANNEL)).toEqual([
-      { id: "2", pinned: true, system: false },
-      { id: "1", pinned: false, system: true },
+      { id: "2", authorId: "u2", pinned: true, system: false },
+      { id: "1", authorId: "u1", pinned: false, system: true },
     ]);
+  });
+
+  test("selfId is the client user's id, or undefined before login", () => {
+    expect(createPartyChat({ user: { id: "bot" } } as unknown as Client).selfId()).toBe("bot");
+    expect(createPartyChat({ user: null } as unknown as Client).selfId()).toBeUndefined();
   });
 });
 

@@ -362,7 +362,10 @@ A party channel is deleted when its last person (bots do not count) leaves. The 
 Discord confirms the delete (a channel that is already gone counts as deleted); if Discord refuses, the row
 stays and the next leave or the next startup retries. `channelDelete` cleans up after manual deletes:
 deleting the join channel or the category removes the whole area (its party channels, the join channel and
-the category); deleting a party channel removes its row. On `clientReady` the bot drops areas whose join
+the category); deleting a party channel removes its row. The whole area goes because party channels outside
+their category would be orphaned and an area missing either channel is useless. The bot does this with its
+own permissions, so anyone who can delete the join channel or the category (Manage Channels granted by an
+overwrite on that one channel is enough) can dismantle the area. That is accepted. On `clientReady` the bot drops areas whose join
 channel or category no longer exists and removes stored channels that are empty or gone, skipping channels
 younger than 15 s so a fresh join is not raced. All handlers log and never throw. It needs the
 `GuildVoiceStates` intent, which the client already has.
@@ -389,13 +392,15 @@ and a member lookup only for someone who is not the owner. The cooldown also sto
 becoming a stream of those lookups. The user selects redraw the panel first, which clears the menu's choice,
 then answer with a follow-up.
 
-Everything in that chat except the panel is deleted 15 seconds after it appears, the bot's replies to prefix
-commands and slash replies included. A `messageCreate` handler schedules the delete through the `Scheduler`
+Everything in that chat except the panel and the bot's own messages is deleted 15 seconds after it appears.
+The bot's messages stay because commands run from this chat (`/play`, for one) answer here, and deleting the
+now-playing panel would make `showPanel` post another one that is deleted in turn. The event carries the
+author id; the module compares it with `PartyChat.selfId()`. A `messageCreate` handler schedules the delete through the `Scheduler`
 port (`@dzajcarz/core`: `after(ms, task)`, `createScheduler()` is `setTimeout`, `createFakeScheduler()` in
 `@dzajcarz/core/testing` is advanced by hand). Messages that fall due within one second of each other are
 deleted in one request per channel, so a burst costs one call (the effective delay is 15 to 16 s). The flush
 re-reads the area, so a message that turns out to be the panel (its creation event can beat the write of its
-id) or a flag switched off meanwhile is left alone. Pinned and system messages are never scheduled; a message
+id) or a flag switched off meanwhile is left alone. Pinned, system and bot-authored messages are never scheduled; a message
 pinned inside the 15 s window is still deleted. `dispose` cancels pending timers; the startup sweep covers
 what restarts lose.
 
