@@ -70,6 +70,18 @@ describe("Dżajco channels", () => {
     isDMBased: () => dm,
   });
 
+  test("a cached thread has its parent, anything else or uncached has none", () => {
+    const cache = new Map<string, unknown>([
+      ["thread", { isThread: () => true, parentId: "parent" }],
+      ["text", { isThread: () => false, parentId: null }],
+    ]);
+    const client = { channels: { cache } } as unknown as Client;
+    const channels = createDzajcoChannels(client);
+    expect(channels.parentOf("thread")).toBe("parent");
+    expect(channels.parentOf("text")).toBeNull();
+    expect(channels.parentOf("missing")).toBeNull();
+  });
+
   test("text channels, threads and voice chats of the guild count", async () => {
     expect(await createDzajcoChannels(clientWith(chat(GUILD))).isChatOf(GUILD, "1")).toBe(true);
   });

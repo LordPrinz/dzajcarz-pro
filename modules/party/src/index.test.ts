@@ -1060,6 +1060,26 @@ describe("leaving a party channel", () => {
     expect(stuck.owned.get("1000")?.ownerId).toBe("u1");
   });
 
+  test("an heir who leaves during the transfer is replaced by a member still in the channel", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    t.discord.get("1000")?.add("heir");
+    t.discord.get("1000")?.add("friend");
+    const transfer = t.repository.transferOwner;
+    let first = true;
+    t.repository.transferOwner = async (channelId, expected, next) => {
+      const done = await transfer(channelId, expected, next);
+      if (first) {
+        first = false;
+        t.discord.get(channelId)?.delete(next);
+      }
+      return done;
+    };
+    await t.voice("1000", null);
+    expect(t.owned.get("1000")?.ownerId).toBe("friend");
+  });
+
   test("a non-owner leaving keeps the owner", async () => {
     const t = setup();
     t.areas.set("400", area);
@@ -1184,6 +1204,17 @@ describe("startup reconciliation", () => {
     expect([...t.owned.keys()]).toEqual(["2"]);
     expect(t.discord.has("1")).toBe(false);
     expect(t.discord.has("2")).toBe(true);
+  });
+
+  test("hands a channel whose owner left while the bot was offline to a member who stayed", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.discord.set("400", new Set());
+    t.discord.set("300", new Set());
+    t.owned.set("1", row("1", "gone"));
+    t.discord.set("1", new Set(["friend"]));
+    await t.eventFor("clientReady").run(ready);
+    expect(t.owned.get("1")?.ownerId).toBe("friend");
   });
 
   test("is a once-handler and tolerates a failing channel check", async () => {

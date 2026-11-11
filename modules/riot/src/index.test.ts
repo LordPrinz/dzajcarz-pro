@@ -329,6 +329,32 @@ describe("riot module", () => {
       expect(await store.get("riot:retry-after:valorant")).toBe(String(1_000_000 + 1000));
     });
 
+    test("a lookup the request budget refuses does not use up the user's cooldown", async () => {
+      const { run, advance } = setup();
+      for (let user = 1; user <= 30; user++) {
+        await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: String(user) });
+      }
+      advance(59_000);
+      const refused = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "31" });
+      expect(textOf(refused.replies[0])).toContain("Za dużo zapytań");
+      // The budget window is over, the 10 s cooldown would not be.
+      advance(1_001);
+      const retry = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "31" });
+      expect(embedOf(retry.replies[0])?.title).toBe("Dzajcarz#EUNE");
+    });
+
+    test("a failing cooldown release is ignored, the member still gets the budget message", async () => {
+      const { run, store } = setup();
+      for (let user = 1; user <= 30; user++) {
+        await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: String(user) });
+      }
+      store.delIfEquals = async () => {
+        throw new Error("redis down");
+      };
+      const refused = await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { userId: "31" });
+      expect(textOf(refused.replies[0])).toContain("Za dużo zapytań");
+    });
+
     test("a huge Retry-After is capped at two minutes", async () => {
       const stats = fakeStats();
       stats.failWith = new RiotLookupError("rate-limited", Number.MAX_SAFE_INTEGER);

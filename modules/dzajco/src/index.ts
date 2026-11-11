@@ -40,6 +40,8 @@ export interface DzajcoSettingsStore {
 
 /** Asks Discord about channels, so a channel id typed by a member is never trusted on its own. */
 export interface DzajcoChannels {
+  /** The parent channel of a thread, or null for any other channel (or one the bot has not cached). */
+  parentOf(channelId: string): string | null;
   /**
    * Whether members can chat in the channel and it belongs to this guild: text and announcement channels,
    * threads, and the text chat of voice and stage channels.
@@ -100,16 +102,16 @@ export function createDzajcoModule({
     cooldownSeconds: DEFAULT_COOLDOWN_SECONDS,
   };
 
-  /** The channel's settings through a short-lived cache ("none" is cached too); a broken entry is reloaded. */
-  async function cachedSettings(
+  /** The channel's own override through a short-lived cache ("none" is cached too); a broken entry is reloaded. */
+  async function cachedOverride(
     guildId: string | null,
     channelId: string,
-  ): Promise<DzajcoSettings> {
+  ): Promise<DzajcoSettings | null> {
     const cached = await kv.get(settingsKey(channelId));
     if (cached !== null) {
       try {
         const parsed: unknown = JSON.parse(cached);
-        if (parsed === null) return defaults;
+        if (parsed === null) return null;
         if (isSettings(parsed)) return parsed;
       } catch {
         // Falls through to the database.
@@ -121,7 +123,19 @@ export function createDzajcoModule({
     // refresh); a broken entry is overwritten.
     if (cached === null) await kv.setIfAbsent(settingsKey(channelId), value, SETTINGS_CACHE_TTL_MS);
     else await kv.set(settingsKey(channelId), value, SETTINGS_CACHE_TTL_MS);
-    return stored ?? defaults;
+    return stored;
+  }
+
+  /** A thread without an override of its own follows its parent channel, like module toggles do. */
+  async function effectiveSettings(
+    guildId: string | null,
+    channelId: string,
+  ): Promise<DzajcoSettings> {
+    const own = await cachedOverride(guildId, channelId);
+    if (own) return own;
+    const parentId = channels.parentOf(channelId);
+    const inherited = parentId ? await cachedOverride(guildId, parentId) : null;
+    return inherited ?? defaults;
   }
 
   /** Called after every write: caches what the database now holds and ends the running cooldown. */
@@ -151,7 +165,7 @@ export function createDzajcoModule({
       if (botId && (content.startsWith(`<@${botId}>`) || content.startsWith(`<@!${botId}>`)))
         return;
       if ((await kv.get(cooldownKey(channelId))) !== null) return;
-      const { chancePercent, cooldownSeconds } = await cachedSettings(guildId, channelId);
+      const { chancePercent, cooldownSeconds } = await effectiveSettings(guildId, channelId);
       if (random() * 100 >= chancePercent) return;
       if (cooldownSeconds > 0) {
         const taken = await kv.setIfAbsent(cooldownKey(channelId), "1", cooldownSeconds * 1000);
@@ -223,9 +237,16 @@ export function createDzajcoModule({
         options: { channel: channelOption },
         run: async (ctx) => {
           const { guildId, channelId } = await targetOf(ctx);
-          const stored = await settings.get(guildId, channelId);
+          const own = await settings.get(guildId, channelId);
+          const parentId = own ? null : channels.parentOf(channelId);
+          const inherited = parentId ? await settings.get(guildId, parentId) : null;
+          const source = own
+            ? ""
+            : inherited
+              ? ` (z kanału nadrzędnego <#${parentId}>)`
+              : " (domyślne)";
           await ctx.reply({
-            content: `Dżajco ${where(guildId, channelId)}: ${describe(stored ?? defaults)}${stored ? "" : " (domyślne)"}.`,
+            content: `Dżajco ${where(guildId, channelId)}: ${describe(own ?? inherited ?? defaults)}${source}.`,
             ephemeral: true,
           });
         },

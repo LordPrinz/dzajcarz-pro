@@ -59,6 +59,7 @@ function setup({
     },
   };
   const channels: DzajcoChannels = {
+    parentOf: (id) => (id === threadId ? channelId : null),
     isChatOf: async (id, channel) =>
       id === guildId && [channelId, otherChannelId, threadId, voiceChatId].includes(channel),
   };
@@ -253,6 +254,29 @@ describe("per-channel settings", () => {
     await t.say("what");
     await t.say("what", { channelId: otherChannelId });
     expect(t.responses.map((r) => r.channelId)).toEqual([channelId]);
+  });
+
+  test("a thread without its own settings uses its parent channel's", async () => {
+    const t = setup({ randoms: [0.5] });
+    t.rows.set(`${guildId}:${channelId}`, { chancePercent: 60, cooldownSeconds: 60 });
+    await t.say("what", { channelId: threadId });
+    expect(t.responses.map((r) => r.channelId)).toEqual([threadId]);
+  });
+
+  test("show in a thread without settings reports the parent's and says so", async () => {
+    const t = setup();
+    t.rows.set(`${guildId}:${channelId}`, { chancePercent: 60, cooldownSeconds: 30 });
+    expect(await t.run("show", { channel: threadId })).toEqual([
+      `Dżajco na <#${threadId}>: szansa 60%, przerwa 30 s (z kanału nadrzędnego <#${channelId}>).`,
+    ]);
+  });
+
+  test("a thread's own settings win over its parent's", async () => {
+    const t = setup({ randoms: [0.5] });
+    t.rows.set(`${guildId}:${channelId}`, { chancePercent: 100, cooldownSeconds: 60 });
+    t.rows.set(`${guildId}:${threadId}`, { chancePercent: 0, cooldownSeconds: 60 });
+    await t.say("what", { channelId: threadId });
+    expect(t.responses).toEqual([]);
   });
 
   test("chance 0 turns the gif off", async () => {

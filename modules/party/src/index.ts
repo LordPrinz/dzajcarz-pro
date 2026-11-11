@@ -357,6 +357,8 @@ const MAX_CREATIONS = 3;
 const CREATION_WINDOW_MS = 60_000;
 /** Reconciliation leaves younger channels alone: their owner may still be mid-join. */
 const RECONCILE_GRACE_MS = 15_000;
+/** How often a leave re-checks the owner after a handover, in case the new owner left meanwhile. */
+const OWNER_CHECK_ROUNDS = 3;
 /** Messages in a command channel (the panel excepted) are deleted this long after they appear. */
 const CHAT_CLEANUP_MS = 15_000;
 /** Messages that fall due within this window of each other are deleted in one request. */
@@ -1786,26 +1788,33 @@ export function createPartyModule({
   }
 
   async function handleLeave(leftChannelId: string): Promise<void> {
-    const owned = await repository.findChannel(leftChannelId);
-    if (!owned) return;
-    const members = await channels.members(leftChannelId);
-    if (members === undefined) return;
-    if (members === null || members.length === 0) {
-      await removeChannel(leftChannelId);
-      return;
-    }
-    if (members.includes(owned.ownerId)) return;
-    // The owner left but others stay: the first one who is free to own a channel takes over.
-    for (const candidate of members) {
-      if (await repository.transferOwner(leftChannelId, owned.ownerId, candidate)) {
-        logger.info("Party channel ownership transferred", {
-          channelId: leftChannelId,
-          from: owned.ownerId,
-          to: candidate,
-        });
-        await moveOwnerAccess(leftChannelId, owned.ownerId, candidate);
+    // Each round re-reads the owner and the members: an heir may leave while the transfer runs, and the
+    // channel must not end up owned by someone who is gone.
+    for (let round = 0; round < OWNER_CHECK_ROUNDS; round++) {
+      const owned = await repository.findChannel(leftChannelId);
+      if (!owned) return;
+      const members = await channels.members(leftChannelId);
+      if (members === undefined) return;
+      if (members === null || members.length === 0) {
+        await removeChannel(leftChannelId);
         return;
       }
+      if (members.includes(owned.ownerId)) return;
+      // The owner left but others stay: the first one who is free to own a channel takes over.
+      let transferred = false;
+      for (const candidate of members) {
+        if (await repository.transferOwner(leftChannelId, owned.ownerId, candidate)) {
+          logger.info("Party channel ownership transferred", {
+            channelId: leftChannelId,
+            from: owned.ownerId,
+            to: candidate,
+          });
+          await moveOwnerAccess(leftChannelId, owned.ownerId, candidate);
+          transferred = true;
+          break;
+        }
+      }
+      if (!transferred) return;
     }
   }
 
@@ -1945,7 +1954,11 @@ export function createPartyModule({
             waitingGuilds.add(channelGuild);
             continue;
           }
-          if (members !== null && members.length > 0) continue;
+          if (members !== null && members.length > 0) {
+            // The owner may have left while the bot was offline.
+            await handleLeave(channelId);
+            continue;
+          }
           await removeChannel(channelId);
           removedCount++;
         } catch (error) {

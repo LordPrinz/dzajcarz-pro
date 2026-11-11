@@ -257,7 +257,9 @@ The `messageCreate` handler stops at the first failing check, in this order:
 5. the dice roll (`random() * 100 >= chancePercent`) fails;
 6. another message took the cooldown key first.
 
-Edits are not handled, and a thread uses its own channel id. At most one answer per message. The matcher
+Edits are not handled. A thread keeps its own cooldown key, but with no override of its own it uses the
+chance and cooldown length of its parent channel (`DzajcoChannels.parentOf`, read from the client's channel
+cache); an override on the thread wins. At most one answer per message. The matcher
 collapses runs of one character in the words and in the text (so `whaaat` matches `what` without a quadratic
 regex) and searches only the first 2000 characters.
 

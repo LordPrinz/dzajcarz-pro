@@ -79,6 +79,26 @@ describe("parsePrefixArgs", () => {
     });
   });
 
+  test("strips the quotes from a rest option that is one quoted token", () => {
+    expect(parsePrefixArgs(play, `50 "never gonna"`)).toEqual({
+      ok: true,
+      args: { volume: 50, query: "never gonna" },
+    });
+  });
+
+  test("treats an empty quoted token as a missing required string", () => {
+    const say = defineCommand({
+      name: "say",
+      description: "Say",
+      options: { text: { type: "string", description: "Text", required: true } },
+      run: noop,
+    });
+    expect(parsePrefixArgs(say, '""')).toEqual({
+      ok: false,
+      error: "Brakuje argumentu `text`. Użycie: `say <text>`",
+    });
+  });
+
   test("leaves a missing optional argument out", () => {
     expect(parsePrefixArgs(play, "10")).toEqual({ ok: true, args: { volume: 10 } });
   });

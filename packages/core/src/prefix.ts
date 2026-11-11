@@ -101,7 +101,8 @@ function parseOptions(
   let index = 0;
   for (const [name, option] of options) {
     const token = tokens[index];
-    if (!token) {
+    // An empty quoted token ("") carries no value, so a required string counts it as missing.
+    if (!token || (option.required && option.type === "string" && token.value === "")) {
       if (option.required) {
         return {
           ok: false,
@@ -111,7 +112,8 @@ function parseOptions(
       continue;
     }
     if (option.rest) {
-      args[name] = input.slice(token.start).trim();
+      // One quoted token is taken without its quotes; anything longer keeps the raw text.
+      args[name] = index === tokens.length - 1 ? token.value : input.slice(token.start).trim();
       index = tokens.length;
       break;
     }
