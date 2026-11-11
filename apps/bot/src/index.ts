@@ -18,7 +18,7 @@ import {
   createWelcomeRepository,
 } from "@dzajcarz/db";
 import { migrate } from "@dzajcarz/db/migrator";
-import { createRedisStore, keepConnected } from "@dzajcarz/kv";
+import { createRedisStore, createTimedStore, keepConnected } from "@dzajcarz/kv";
 import { DZAJCO_GIF } from "@dzajcarz/module-dzajco";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
@@ -76,7 +76,7 @@ try {
 }
 const redis = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
 keepConnected(redis, logger);
-const redisStore = createRedisStore(redis);
+const redisStore = createTimedStore(createRedisStore(redis));
 
 const guildSettings = createGuildSettingsRepository(sql);
 // Replaced by DEFAULT_TIME_ZONE and /timezone; a leftover value would otherwise be dropped without a word.

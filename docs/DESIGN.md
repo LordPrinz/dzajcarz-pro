@@ -825,8 +825,25 @@ Redis runs with `--maxmemory 256mb --maxmemory-policy volatile-lru`: under memor
 keys that have a TTL, least recently used first. Every key the bot writes carries one (caches, cooldown
 and rate-limit windows, locks, component state), so nothing is kept forever; a key without a TTL would
 never be evicted and could fill the memory. Locks and counters have short TTLs, so they can still be
-evicted in a real shortage, which only means a duplicate or a missed limit once (ADR 3). A call that waits on
-Redis in the interaction path (guild setting caches, the cooldown counter) is abandoned after 500 ms and
-treated like a failed Redis; the guild setting cache also fills and refreshes with that limit, and its backfill
-does not delay the answer. The other Redis callers (party, music, messages, moderation, dzajco, riot, the module
-gate's cache writes, component state) are not time-limited yet.
+evicted in a real shortage, which only means a duplicate or a missed limit once (ADR 3). The store the bot hands to
+every module and handler is wrapped once (`createTimedStore`): a call that waits on Redis longer than 500 ms is
+abandoned and rejects like a failed Redis, so each caller's existing choice applies. Rate limits and cooldowns
+fail open (the command runs). Per area:
+
+- Party: a join lock fails open because the unique owner row still stops duplicates; a SET that timed out may
+  still land, so the join asks for it to be deleted again, and a release that failed is retried once in the
+  background. The button rate limits fail open, and the special invite limits fail closed with a Polish message.
+- Music: the search state is needed to offer the results, so a stalled store fails the `/search` with the
+  generic Polish error, and a pick whose state cannot be read fails the same way.
+- Dzajco: the settings cache falls back to nothing, and any Redis error skips the gif (fail closed, no
+  message, as it is an event) so an outage cannot bypass the cooldown.
+- Messages: the failure counter fails open to "first failure", so the send is retried the next minute.
+- Moderation: the warning DM limit fails open, so the DM is sent.
+- Riot: the pause read, the user cooldown, the shared budget and the pause write all fail open; the lookup
+  goes ahead and the failure is logged.
+- Module gate: cache reads and writes fail open to Postgres, and a lookup that fails or times out counts the
+  module as enabled.
+
+The guild setting cache also fills and refreshes with that limit, and its backfill does not delay the answer.
+The module gate's 1.5 s race and the health probes use the same `withTimeout` helper; `ping` keeps its own
+timeout.

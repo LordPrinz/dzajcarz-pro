@@ -1746,8 +1746,10 @@ export function createPartyModule({
         return;
       }
     } catch (error) {
-      // Redis down: carry on. The unique (guild, owner) row still stops duplicates.
+      // Redis down or stalled: carry on. The unique (guild, owner) row still stops duplicates. The SET may
+      // still land late and would block the member's joins for the whole TTL, so ask to drop it.
       logger.warn("Party lock unavailable", { guildId, userId, error });
+      void lock.delIfEquals(key, token).catch(() => {});
     }
 
     try {
@@ -1767,7 +1769,13 @@ export function createPartyModule({
         throw error;
       }
     } finally {
-      if (held) await lock.delIfEquals(key, token).catch(() => {});
+      if (held) {
+        // A release that failed or timed out is asked once more in the background, so the lock does not
+        // outlive the join for the whole TTL.
+        await lock.delIfEquals(key, token).catch(() => {
+          void lock.delIfEquals(key, token).catch(() => {});
+        });
+      }
     }
   }
 

@@ -7,7 +7,12 @@ import {
   silentLogger,
 } from "@dzajcarz/core";
 import { createFakeContext } from "@dzajcarz/core/testing";
-import { createMemoryStore } from "@dzajcarz/kv";
+import {
+  createMemoryStore,
+  createStalledStore,
+  createTimedStore,
+  type KeyValueStore,
+} from "@dzajcarz/kv";
 import { createRiotModule } from "./index.ts";
 import {
   type LolPlatform,
@@ -80,9 +85,15 @@ function fakeStats(): FakeStats {
   return stats;
 }
 
-function setup({ stats = fakeStats() as Partial<RiotStats> } = {}) {
+function setup({
+  stats = fakeStats() as Partial<RiotStats>,
+  store: given,
+}: {
+  stats?: Partial<RiotStats>;
+  store?: KeyValueStore;
+} = {}) {
   let time = 1_000_000;
-  const store = createMemoryStore(() => time);
+  const store = given ?? createMemoryStore(() => time);
   const module = createRiotModule({ stats, store, now: () => time, logger: silentLogger });
   const command = (name: string): AnyCommand => {
     const found = module.commands?.find((candidate) => candidate.name === name);
@@ -424,5 +435,13 @@ describe("riot module", () => {
       expect(command.contexts?.places).toEqual(["guild", "bot-dm", "private-channel"]);
       expect(command.contexts?.installs).toEqual(["guild", "user"]);
     }
+  });
+
+  test("a store that never answers does not hold a lookup past the limit", async () => {
+    const t = setup({ store: createTimedStore(createStalledStore(), 20) });
+    const started = performance.now();
+    const ctx = await t.run("valorant", { riot_id: "Dzajcarz#EUNE" });
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(ctx.replies).toHaveLength(1);
   });
 });

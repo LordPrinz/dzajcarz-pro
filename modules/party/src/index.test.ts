@@ -14,7 +14,12 @@ import {
   replyText,
   submitModal,
 } from "@dzajcarz/core/testing";
-import { createMemoryStore } from "@dzajcarz/kv";
+import {
+  createMemoryStore,
+  createStalledStore,
+  createTimedStore,
+  type KeyValueStore,
+} from "@dzajcarz/kv";
 import type { Channel, VoiceState } from "discord.js";
 import {
   createPartyModule,
@@ -45,7 +50,7 @@ interface SetupOptions {
   moveFails?: boolean;
   memberGone?: boolean;
   deleteFails?: boolean;
-  lock?: ReturnType<typeof createMemoryStore>;
+  lock?: KeyValueStore;
   allowFails?: boolean;
   allowSelfFails?: boolean;
   renameFails?: boolean;
@@ -919,6 +924,37 @@ describe("joining the party area", () => {
     await t.voice(null, "400");
     expect(t.created).toHaveLength(1);
     expect(t.moves).toEqual([{ userId: "u1", channelId: "1000" }]);
+  });
+
+  test("a store that never answers does not hold a join past the limit", async () => {
+    const t = setup({ lock: createTimedStore(createStalledStore(), 20) });
+    t.areas.set("400", area);
+    const started = performance.now();
+    await t.voice(null, "400");
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(t.created).toHaveLength(1);
+    expect(t.moves).toEqual([{ userId: "u1", channelId: "1000" }]);
+  });
+
+  test("a lock SET that times out but lands late is dropped again", async () => {
+    const memory = createMemoryStore();
+    // Calls reach Redis in order, so a delete sent after the SET still runs after it.
+    let queue: Promise<unknown> = Promise.resolve();
+    const inOrder = <T>(work: () => Promise<T>): Promise<T> => {
+      const result = queue.then(() => new Promise((r) => setTimeout(r, 10))).then(work);
+      queue = result.catch(() => {});
+      return result;
+    };
+    const slow: KeyValueStore = {
+      ...memory,
+      setIfAbsent: (k, v, ttl) => inOrder(() => memory.setIfAbsent(k, v, ttl)),
+      delIfEquals: (k, v) => inOrder(() => memory.delIfEquals(k, v)),
+    };
+    const t = setup({ lock: createTimedStore(slow, 5) });
+    t.areas.set("400", area);
+    await t.voice(null, "400");
+    await Bun.sleep(60);
+    expect(await memory.get(`party:${guildId}:u1`)).toBeNull();
   });
 
   test("an expired lock is not released over its new holder", async () => {

@@ -1,4 +1,4 @@
-import type { Logger } from "@dzajcarz/core";
+import { type Logger, withTimeout } from "@dzajcarz/core";
 import { Status } from "discord.js";
 
 type CheckName = "gateway" | "postgres" | "redis";
@@ -23,17 +23,9 @@ export function gatewayReady(shards: {
   return shards.size > 0 && [...shards.values()].every((shard) => shard.status === Status.Ready);
 }
 
-async function runProbe(probe: () => Promise<boolean>, timeoutMs: number): Promise<boolean> {
-  let timer: Timer | undefined;
-  const timeout = new Promise<boolean>((resolve) => {
-    timer = setTimeout(resolve, timeoutMs, false);
-  });
-  try {
-    // A throwing probe counts as down, like a slow one.
-    return await Promise.race([probe().catch(() => false), timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
+function runProbe(probe: () => Promise<boolean>, timeoutMs: number): Promise<boolean> {
+  // A throwing probe counts as down, like a slow one.
+  return withTimeout(probe(), timeoutMs).catch(() => false);
 }
 
 /** Runs every probe in parallel, each with its own timeout. */

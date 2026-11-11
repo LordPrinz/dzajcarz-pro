@@ -9,6 +9,7 @@ import {
   type Logger,
   type Reply,
   type SelectSpec,
+  type StateStorage,
   silentLogger,
 } from "@dzajcarz/core";
 import {
@@ -17,6 +18,7 @@ import {
   createFakeScheduler,
   replyText,
 } from "@dzajcarz/core/testing";
+import { createStalledStore, createTimedStore } from "@dzajcarz/kv";
 import type { Guild, VoiceState } from "discord.js";
 import {
   createFakeDirectMessages,
@@ -53,7 +55,7 @@ const OTHER_VOICE = "400000000000000005";
 const CALLER = "200000000000000002";
 const FRIEND = "200000000000000009";
 
-function setup() {
+function setup(stateStorage: StateStorage = createMemoryStorage()) {
   const infos: { message: string; fields?: LogFields }[] = [];
   const logger: Logger = {
     ...silentLogger,
@@ -71,7 +73,7 @@ function setup() {
     panels,
     directMessages,
     scheduler,
-    stateStorage: createMemoryStorage(),
+    stateStorage,
     logger,
   });
   const registry = createRegistry([module]);
@@ -322,6 +324,15 @@ describe("music module", () => {
       ]);
       expect(JSON.stringify(infos)).not.toContain("tajny");
       expect(JSON.stringify(infos)).not.toContain("youtu.be");
+    });
+
+    test("a state store that never answers fails the search within the limit", async () => {
+      const { run, player } = setup(createTimedStore(createStalledStore(), 20));
+      player.nextResult = { kind: "tracks", tracks: [track("Wynik")] };
+      const started = performance.now();
+      const ctx = await run("search", { query: "lofi" });
+      expect(performance.now() - started).toBeLessThan(500);
+      expect(lastText(ctx)).toBe(GENERIC_ERROR);
     });
 
     test("offers up to ten results to the caller only and queues the chosen one", async () => {

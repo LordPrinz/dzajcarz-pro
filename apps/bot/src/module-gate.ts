@@ -1,4 +1,4 @@
-import type { Logger } from "@dzajcarz/core";
+import { type Logger, TimeoutError, withTimeout } from "@dzajcarz/core";
 import type { ModuleToggleRepository } from "@dzajcarz/db";
 import type { KeyValueStore } from "@dzajcarz/kv";
 import { PROTECTED_MODULES } from "@dzajcarz/module-settings";
@@ -88,22 +88,16 @@ export function createModuleGate({
   }
 
   /** A slow Redis plus a slow Postgres must not eat the 3 s Discord gives an interaction to respond. */
-  async function loadWithin(guildId: string): Promise<Entry[] | null> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<null>((resolve) => {
-      timer = setTimeout(() => {
-        logger.warn("Module toggle lookup timed out; treating modules as enabled", {
-          guildId,
-          timeoutMs,
-        });
-        resolve(null);
-      }, timeoutMs);
+  function loadWithin(guildId: string): Promise<Entry[] | null> {
+    return withTimeout(load(guildId), timeoutMs).catch((error: unknown) => {
+      logger.warn(
+        error instanceof TimeoutError
+          ? "Module toggle lookup timed out; treating modules as enabled"
+          : "Module toggle lookup failed; treating modules as enabled",
+        { guildId, timeoutMs, error },
+      );
+      return null;
     });
-    try {
-      return await Promise.race([load(guildId), timedOut]);
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   return {

@@ -11,7 +11,12 @@ import {
   silentLogger,
 } from "@dzajcarz/core";
 import { clickComponent, createFakeContext, replyText, submitModal } from "@dzajcarz/core/testing";
-import { createMemoryStore } from "@dzajcarz/kv";
+import {
+  createMemoryStore,
+  createStalledStore,
+  createTimedStore,
+  type KeyValueStore,
+} from "@dzajcarz/kv";
 import {
   createMessagesModule,
   MAX_ATTEMPTS_PER_DAY,
@@ -155,6 +160,7 @@ function setup(
     onSend?: () => Promise<void>;
     /** Server time zones (`/timezone`); others use Warsaw time. */
     zones?: Zones;
+    failures?: KeyValueStore;
   } = {},
 ) {
   const zones = options.zones ?? {};
@@ -234,7 +240,7 @@ function setup(
       botCanPostIn: async (_guildId, channelId) => !options.mutedChannels?.includes(channelId),
     },
     cron,
-    failures: createMemoryStore(() => current.getTime()),
+    failures: options.failures ?? createMemoryStore(() => current.getTime()),
     clientReady: () => ready,
     botInGuild: (guildId) => botGuilds.includes(guildId),
     moduleEnabled: async (_guildId, channelId) => !options.disabledChannels?.includes(channelId),
@@ -514,6 +520,23 @@ describe("sending", () => {
     s.setNow(new Date(SEVEN_PM.getTime() + 120_000));
     await s.fire();
     expect(s.channelSends).toHaveLength(1);
+  });
+
+  test("a failure counter that never answers does not hold the tick past the limit", async () => {
+    const s = setup({
+      failChannels: [GENERAL],
+      failures: createTimedStore(createStalledStore(), 20),
+    });
+    const message = await s.schedule({
+      time: "19:00",
+      content: "Bez licznika",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    const started = performance.now();
+    await s.fire();
+    expect(performance.now() - started).toBeLessThan(500);
+    const retry = s.warnings.find((entry) => entry.message.includes("tried again"));
+    expect(retry?.fields).toMatchObject({ id: message.id, attempts: 1 });
   });
 
   test("a message that keeps failing is given up for the day, logged, and tried again tomorrow", async () => {
