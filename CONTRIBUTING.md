@@ -84,6 +84,7 @@ interaction responses only.
 - **Commit / PR title:** `[DZAJ-<n>] <type>(<optional scope>): <Description>`
   - types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`, `ci`, `build`
   - scopes: `core`, `bot`, `db`, `kv`, `general`, `settings`, `music`, `party`, `moderation`, `welcome`, `status`, `fun`, `dzajco`, `schedule`, `messages`, `riot`, `infra`, `ci`
+  - issue areas (`area:*` labels and the board's Area field): `core`, `music`, `moderation`, `party`, `welcome`, `fun`, `schedule`, `messages`, `riot`, `dzajco`, `settings`, `infra`, `docs`
   - `!` after the type/scope marks a breaking change.
 - PRs are **squash-merged**; the PR title becomes the commit on `main`.
 - **Dependabot** keeps its own `dependabot/…` branches; its PRs use the umbrella ticket DZAJ-3

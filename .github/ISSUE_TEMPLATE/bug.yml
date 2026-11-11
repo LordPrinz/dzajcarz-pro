@@ -6,7 +6,22 @@ body:
     id: area
     attributes:
       label: Area
-      options: [core, music, moderation, party, welcome, fun, infra, docs]
+      options:
+        [
+          core,
+          music,
+          moderation,
+          party,
+          welcome,
+          fun,
+          schedule,
+          messages,
+          riot,
+          dzajco,
+          settings,
+          infra,
+          docs,
+        ]
     validations:
       required: true
   - type: textarea
