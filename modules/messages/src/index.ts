@@ -48,7 +48,7 @@ export type AddResult =
   | { status: "recipient-full" }
   | { status: "duplicate" };
 
-/** A message due now; `date` (`YYYY-MM-DD` on its server's clock) makes it go out once that day. */
+/** A message due now; `date` is today's date on its server's clock, which `claim` stores. */
 export interface DueMessage extends ScheduledMessage {
   date: string;
 }
@@ -61,10 +61,18 @@ export interface ScheduledMessageStore {
   /** False when the guild has no message with that id. */
   remove(guildId: string, id: number): Promise<boolean>;
   /**
-   * At most `limit` messages, of every guild, whose time of day is the minute `at` falls on in that guild's
-   * time zone, each with the date on that guild's clock.
+   * At most `limit` messages, of every guild, whose time of day has passed at `at` on a date later than the
+   * one they last went out, on that guild's clock; each carries the date on that clock. A message stays due
+   * until `claim`. Over the limit, every guild gets one message before any gets a second.
    */
   due(at: Date, limit: number): Promise<DueMessage[]>;
+  /**
+   * Takes the message for that local date before it is sent, atomically: true for exactly one caller, and
+   * only while the stored date is earlier. A claimed message is not due again that day.
+   */
+  claim(id: number, date: string): Promise<boolean>;
+  /** Undoes `claim(id, date)` after a failed send, so the next tick tries again. */
+  release(id: number, date: string): Promise<void>;
   /** `guildId` null means every server. False when it was already off. */
   optOut(userId: string, guildId: string | null): Promise<boolean>;
   /** Removes exactly that opt-out (a null guild clears only the every-server one). False when there was none. */
@@ -106,8 +114,10 @@ export interface MessagesModuleDeps {
   sender: ScheduledMessageSender;
   channels: MessageChannels;
   cron: CronScheduler;
-  /** Claims a message's minute before it is sent, so it goes out once (see DESIGN.md, Scheduled messages). */
-  lock: Pick<KeyValueStore, "setIfAbsent">;
+  /** Counts a message's failed sends per local day, which are lost on a restart (see DESIGN.md, Scheduled messages). */
+  failures: Pick<KeyValueStore, "increment">;
+  /** False until the Discord client has loaded its servers; before that `botInGuild` knows nothing. */
+  clientReady: () => boolean;
   botInGuild: (guildId: string) => boolean;
   /** The module toggle for a channel. */
   moduleEnabled: (guildId: string, channelId: string, module: string) => Promise<boolean>;
@@ -132,8 +142,10 @@ const DISCORD_MESSAGE_LIMIT = DISCORD_LIMITS.content;
 /** Discord's limit on a server name; the DM footer must fit even after a rename. */
 const MAX_GUILD_NAME = 100;
 const PREVIEW_LENGTH = 40;
-/** Longer than the repeated hour in October, so its second 02:xx finds the lock still held. */
-const LOCK_TTL_MS = 2 * 3_600_000;
+/** A bit over a day, so the count outlives the local date it is kept for. */
+const FAILURE_TTL_MS = 26 * 3_600_000;
+/** Failed deliveries in one local day after which the message is given up for that day. */
+export const MAX_ATTEMPTS_PER_DAY = 5;
 const SNOWFLAKE = /^\d{17,20}$/;
 const CHANNEL_MENTION = /^<#(\d{17,20})>$/;
 const USER_MENTION = /^<@!?(\d{17,20})>$/;
@@ -221,7 +233,8 @@ export function createMessagesModule({
   sender,
   channels,
   cron,
-  lock,
+  failures,
+  clientReady,
   botInGuild,
   moduleEnabled,
   guildModuleEnabled,
@@ -354,7 +367,8 @@ export function createMessagesModule({
     },
   });
 
-  async function deliver(message: DueMessage): Promise<void> {
+  /** One attempt. Returns for every outcome that retrying would not change; throws when Discord failed. */
+  async function send(message: DueMessage): Promise<void> {
     const { guildId, target } = message;
     if (!botInGuild(guildId)) return;
     const enabled =
@@ -362,8 +376,6 @@ export function createMessagesModule({
         ? await moduleEnabled(guildId, target.channelId, MODULE_NAME)
         : await guildModuleEnabled(guildId, MODULE_NAME);
     if (!enabled) return;
-    const key = `messages:sent:${message.id}:${message.date}T${message.time}`;
-    if (!(await lock.setIfAbsent(key, "1", LOCK_TTL_MS))) return;
 
     if (target.kind === "channel") {
       const result = await sender.toChannel(guildId, target.channelId, message.content);
@@ -404,16 +416,60 @@ export function createMessagesModule({
     }
   }
 
+  /** Failed sends of this message on its local date; a counter that cannot be reached counts as a first failure. */
+  async function countFailure(message: DueMessage): Promise<number> {
+    try {
+      const key = `messages:failed:${message.id}:${message.date}`;
+      return (await failures.increment(key, FAILURE_TTL_MS)).count;
+    } catch (error) {
+      logger.warn("Scheduled message failure counter unavailable", { id: message.id, error });
+      return 1;
+    }
+  }
+
   /**
-   * Sends what is due this minute. A minute missed while the bot was down is not caught up, and a time the
-   * March clock change skips does not fire that day.
+   * Claims the day's date first, so a slow or overlapping tick, or a second instance, cannot send the same
+   * message again, and a failed write after the send cannot cause a resend. A Discord failure gives the claim
+   * back, so the next minute's tick tries again, up to `MAX_ATTEMPTS_PER_DAY` times; any other outcome (sent,
+   * a deleted channel, a member who is gone, DMs closed, the module off) keeps it.
+   */
+  async function deliver(message: DueMessage): Promise<void> {
+    if (!(await store.claim(message.id, message.date))) return;
+    try {
+      await send(message);
+    } catch (error) {
+      const attempts = await countFailure(message);
+      if (attempts < MAX_ATTEMPTS_PER_DAY) {
+        await store.release(message.id, message.date);
+        logger.warn("Scheduled message not sent; it is tried again next minute", {
+          id: message.id,
+          guildId: message.guildId,
+          attempts,
+          error,
+        });
+        return;
+      }
+      logger.error("Scheduled message given up for today after repeated failures", {
+        id: message.id,
+        guildId: message.guildId,
+        attempts,
+        error,
+      });
+    }
+  }
+
+  /**
+   * Sends what is due: everything whose time has passed today and has not gone out, so a minute missed while
+   * the bot was down is caught up the same day, and a time the March clock change skips goes out after it.
    */
   async function tick(): Promise<void> {
+    // Before the client has its servers, every guild looks left; claiming then would drop the day's messages.
+    if (!clientReady()) return;
     try {
       const rounded = tickMinute(now());
       const due = await store.due(rounded, MAX_DUE_PER_TICK);
       if (due.length >= MAX_DUE_PER_TICK) {
-        logger.warn("Too many scheduled messages in one minute; the rest are skipped", {
+        logger.warn("Too many scheduled messages due at once; the rest wait for the next minute", {
           at: rounded.toISOString(),
           limit: MAX_DUE_PER_TICK,
         });

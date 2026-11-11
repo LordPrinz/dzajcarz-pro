@@ -91,6 +91,7 @@ export interface ScheduledMessageRow {
   user_id: string | null;
   created_by: string;
   created_at: Date;
+  last_sent_date: Date | null;
 }
 
 export interface ScheduledMessageOptOutRow {

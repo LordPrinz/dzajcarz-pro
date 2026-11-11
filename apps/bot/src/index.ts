@@ -209,7 +209,8 @@ const modules = createModules({
   }),
   scheduledMessageSender: createScheduledMessageSender(client),
   guildModuleEnabled: (guildId, module) => gate.isEnabled(guildId, null, module),
-  messageLock: redisStore,
+  messageFailures: redisStore,
+  clientReady: () => client.isReady(),
   messageChannels: createMessageChannels(client),
   logger,
 });

@@ -115,7 +115,8 @@ export interface ModuleServices {
   scheduledMessages: ScheduledMessageStore;
   scheduledMessageSender: ScheduledMessageSender;
   guildModuleEnabled: (guildId: string, module: string) => Promise<boolean>;
-  messageLock: KeyValueStore;
+  messageFailures: KeyValueStore;
+  clientReady: () => boolean;
   messageChannels: MessageChannels;
   logger: Logger;
 }
@@ -205,7 +206,8 @@ export function createModules(services: ModuleServices): BotModule[] {
       sender: services.scheduledMessageSender,
       channels: services.messageChannels,
       cron: services.cron,
-      lock: services.messageLock,
+      failures: services.messageFailures,
+      clientReady: services.clientReady,
       botInGuild: services.botInGuild,
       moduleEnabled: services.moduleEnabled,
       guildModuleEnabled: services.guildModuleEnabled,
