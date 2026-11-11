@@ -48,12 +48,12 @@ interface Token {
   start: number;
 }
 
-/** Splits on whitespace; "double quotes" keep spaces together. */
+/** Splits on whitespace; "double quotes" keep spaces together, as do „Polish” and “smart” ones. */
 export function tokenize(input: string): Token[] {
   const tokens: Token[] = [];
-  const pattern = /"([^"]*)"|(\S+)/g;
+  const pattern = /"([^"]*)"|„([^”“]*)[”“]|“([^”]*)”|(\S+)/g;
   for (const match of input.matchAll(pattern)) {
-    tokens.push({ value: match[1] ?? match[2] ?? "", start: match.index });
+    tokens.push({ value: match[1] ?? match[2] ?? match[3] ?? match[4] ?? "", start: match.index });
   }
   return tokens;
 }

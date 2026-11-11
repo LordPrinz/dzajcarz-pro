@@ -33,6 +33,26 @@ describe("tokenize", () => {
       { value: "d", start: 9 },
     ]);
   });
+
+  test.each([
+    ["„", "”"],
+    ["„", "“"],
+    ["“", "”"],
+  ])("accepts %s…%s as a quote pair", (open, close) => {
+    expect(tokenize(`a ${open}b c${close} d`)).toEqual([
+      { value: "a", start: 0 },
+      { value: "b c", start: 2 },
+      { value: "d", start: 8 },
+    ]);
+  });
+
+  test("allows different quote styles in one input", () => {
+    expect(tokenize(`"a b" „c d” “e f” x`).map((t) => t.value)).toEqual(["a b", "c d", "e f", "x"]);
+  });
+
+  test("treats an unmatched typographic opening quote as a plain word", () => {
+    expect(tokenize("„dwa słowa x").map((t) => t.value)).toEqual(["„dwa", "słowa", "x"]);
+  });
 });
 
 describe("parsePrefixArgs", () => {
