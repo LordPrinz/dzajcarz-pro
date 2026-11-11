@@ -1,4 +1,4 @@
-import type { Logger } from "@dzajcarz/core";
+import { type Logger, STORE_TIMEOUT_MS, withTimeout } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
 
 /** One per-guild setting read on hot paths (every message, every minute), cached in Redis. */
@@ -18,13 +18,15 @@ export interface GuildSettingCacheDeps {
   cache: KeyValueStore;
   logger: Logger;
   ttlMs?: number;
+  /** How long a Redis call may take before it counts as failed. */
+  timeoutMs?: number;
 }
 
 /** Stored for guilds that use the fallback, so they are not looked up in Postgres every time. */
 const FALLBACK_MARKER = "";
 
 /**
- * If Redis is down it reads Postgres; if Postgres is down too it answers with the fallback. A lookup only
+ * If Redis is down or stalled it reads Postgres; if Postgres is down too it answers with the fallback. A lookup only
  * fills an empty slot (`setIfAbsent`) and a change writes the new value, so a read that raced a change
  * cannot bring the old value back for the TTL.
  */
@@ -35,16 +37,19 @@ export function createGuildSettingCache({
   cache,
   logger,
   ttlMs = 10 * 60_000,
+  timeoutMs = STORE_TIMEOUT_MS,
 }: GuildSettingCacheDeps): GuildSettingCache {
   const key = (guildId: string) => `guild:${guildId}:${name}`;
   return {
     async resolve(guildId) {
       if (guildId === null) return fallback;
 
-      const cached = await cache.get(key(guildId)).catch((error: unknown) => {
-        logger.warn("Guild setting cache read failed", { setting: name, guildId, error });
-        return null;
-      });
+      const cached = await withTimeout(cache.get(key(guildId)), timeoutMs).catch(
+        (error: unknown) => {
+          logger.warn("Guild setting cache read failed", { setting: name, guildId, error });
+          return null;
+        },
+      );
       if (cached !== null) return cached === FALLBACK_MARKER ? fallback : cached;
 
       let stored: string | null;
@@ -58,25 +63,27 @@ export function createGuildSettingCache({
         });
         return fallback;
       }
-      await cache
-        .setIfAbsent(key(guildId), stored ?? FALLBACK_MARKER, ttlMs)
-        .catch((error: unknown) => {
-          logger.warn("Guild setting cache write failed", { setting: name, guildId, error });
-        });
+      // Not awaited: the answer is ready, and a stalled Redis must not delay it a second time.
+      void withTimeout(
+        cache.setIfAbsent(key(guildId), stored ?? FALLBACK_MARKER, ttlMs),
+        timeoutMs,
+      ).catch((error: unknown) => {
+        logger.warn("Guild setting cache write failed", { setting: name, guildId, error });
+      });
       return stored ?? fallback;
     },
 
     async forget(guildId) {
       try {
         const stored = await load(guildId);
-        await cache.set(key(guildId), stored ?? FALLBACK_MARKER, ttlMs);
+        await withTimeout(cache.set(key(guildId), stored ?? FALLBACK_MARKER, ttlMs), timeoutMs);
       } catch (error) {
         logger.warn("Guild setting cache refresh failed; dropping the entry", {
           setting: name,
           guildId,
           error,
         });
-        await cache.del(key(guildId)).catch((delError: unknown) => {
+        await withTimeout(cache.del(key(guildId)), timeoutMs).catch((delError: unknown) => {
           logger.warn("Guild setting cache invalidation failed", {
             setting: name,
             guildId,

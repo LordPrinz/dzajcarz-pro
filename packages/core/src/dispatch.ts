@@ -5,6 +5,7 @@ import type { Logger } from "./logger.ts";
 import { type ModalBaseContext, type ModalRawValues, parseModalValues } from "./modal.ts";
 import { splitInvocation, usage } from "./prefix.ts";
 import type { ResolvedComponent, ResolvedModal } from "./registry.ts";
+import { withTimeout } from "./timeout.ts";
 
 type AccessContext = Pick<CommandContext, "guildId" | "place" | "memberPermissions">;
 
@@ -23,7 +24,7 @@ export const GENERIC_ERROR = "Coś poszło nie tak. Spróbuj ponownie za chwilę
  * Runs a command with the checks every command shares (DMs, member permissions) and one error policy:
  * a UserError is shown to the caller, anything else is logged and replaced by a generic message.
  * With `cooldowns`, a command or subcommand that sets `cooldownMs` is limited per user across servers; when
- * the store fails the command runs anyway.
+ * the store fails or does not answer in time the command runs anyway.
  */
 export async function executeCommand(
   command: AnyCommand,
@@ -88,7 +89,7 @@ async function enforceCooldown(
   if (!cooldowns || cooldownMs === undefined) return;
   let counter: { count: number; ttlMs: number };
   try {
-    counter = await cooldowns.increment(key, cooldownMs);
+    counter = await withTimeout(cooldowns.increment(key, cooldownMs));
   } catch (error) {
     log.warn("Cooldown check failed; running the command anyway", { error });
     return;
