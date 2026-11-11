@@ -137,6 +137,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       sender: services.welcomeSender,
       guilds: services.guildLookup,
       channels: services.channels,
+      moduleEnabled: services.moduleEnabled,
       logger: services.logger.child({ module: "welcome" }),
     }),
     createPartyModule({
