@@ -671,6 +671,40 @@ describe("lavalink music player", () => {
       expect(events).toEqual([]);
     });
 
+    test("a join during the recovery waits for it instead of connecting a second time", async () => {
+      const { manager, music } = setup();
+      const player = manager.playing(GUILD, song("A"));
+      manager.restart();
+      await music.join(GUILD, "500000000000000005", TEXT);
+      expect(player.calls).toEqual(["disconnect", `connect ${VOICE}`, "play A at 0"]);
+    });
+
+    test("an earlier recovery finishing does not release a join still waiting for a later one", async () => {
+      const { manager, music } = setup();
+      const player = manager.playing(GUILD, song("A"));
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let connects = 0;
+      player.duringConnect = async () => {
+        if (++connects === 2) await gate;
+      };
+      manager.restart();
+      manager.restart();
+      // The first recovery is done by now, the second waits at the gate.
+      await settle();
+      let joined = false;
+      const join = music.join(GUILD, "500000000000000005", TEXT).then(() => {
+        joined = true;
+      });
+      await settle();
+      expect(joined).toBe(false);
+      release();
+      await join;
+      expect(joined).toBe(true);
+    });
+
     test("a track that would have ended goes on with the next one", async () => {
       const { manager } = setup();
       const player = manager.playing(GUILD, song("A", 100_000), [song("B")]);

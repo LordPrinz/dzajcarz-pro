@@ -6,6 +6,7 @@ import {
   type Embed,
   type Logger,
   UserError,
+  withTimeout,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
 import { escapeText, lolEmbed, valorantEmbed } from "./format.ts";
@@ -26,7 +27,7 @@ export { parseRiotId } from "./riot-id.ts";
 export interface RiotModuleDeps {
   /** A game without its API key is left out: its command then says that stats are off. */
   stats: Partial<RiotStats>;
-  store: Pick<KeyValueStore, "get" | "set" | "setIfAbsent" | "increment">;
+  store: Pick<KeyValueStore, "get" | "set" | "setIfAbsent" | "increment" | "delIfEquals">;
   now: () => number;
   logger: Logger;
 }
@@ -99,14 +100,25 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
       await guarded("pause read", null, () => store.get(retryAfterKey(game))),
     );
     if (deadline > now()) throw new UserError(pauseMessage(secondsUntil(deadline, now())));
-    const free = await guarded("cooldown", true, () =>
-      store.setIfAbsent(`riot:user:${ctx.user.id}`, "1", USER_COOLDOWN_MS),
-    );
+    const cooldownKey = `riot:user:${ctx.user.id}`;
+    // A unique value, so only this call's own key is ever released.
+    const cooldownToken = crypto.randomUUID();
+    let tookCooldown = false;
+    const free = await guarded("cooldown", true, async () => {
+      tookCooldown = await store.setIfAbsent(cooldownKey, cooldownToken, USER_COOLDOWN_MS);
+      return tookCooldown;
+    });
     if (!free) throw new UserError("Poczekaj chwilę przed kolejnym sprawdzeniem.");
     const budget = await guarded("budget", null, () =>
       store.increment(GLOBAL_KEY, GLOBAL_WINDOW_MS),
     );
     if (budget !== null && budget.count > GLOBAL_MAX_LOOKUPS) {
+      // No lookup happened, so the member should not also wait out the cooldown.
+      if (tookCooldown) {
+        await guarded("cooldown release", false, () =>
+          withTimeout(store.delIfEquals(cooldownKey, cooldownToken)),
+        );
+      }
       throw new UserError("Za dużo zapytań do Riot w ostatniej minucie. Spróbuj za chwilę.");
     }
 

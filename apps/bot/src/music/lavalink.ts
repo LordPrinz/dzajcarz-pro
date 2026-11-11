@@ -1,5 +1,5 @@
 /** `MusicPlayer` on top of lavalink-client (ADR 4): one node, one player per guild. */
-import type { Logger } from "@dzajcarz/core";
+import { type Logger, withTimeout } from "@dzajcarz/core";
 import type {
   LoopMode,
   MusicFilter,
@@ -73,6 +73,9 @@ const TRACK_CACHE_SIZE = 2000;
 const VOLUME = 100;
 /** How long a recovery waits for Discord to confirm that the bot left voice before joining again. */
 const REJOIN_TIMEOUT_MS = 5000;
+
+/** How long a join or enqueue waits for a recovery of its guild; after that it goes ahead on its own. */
+const RECOVERY_WAIT_MS = 10_000;
 /** setTimeout fires at once above this (2^31 - 1 ms), so a longer wait is split into several checks. */
 const MAX_TIMER_MS = 2_147_483_647;
 /** A song file name in the music directory: no separators, so no way out of it. */
@@ -187,6 +190,8 @@ export function createLavalinkMusicPlayer({
   const skipping = new Map<string, string>();
   /** Guilds whose bot leaves and rejoins voice on purpose (recovery); their disconnect is not a kick. */
   const rejoining = new Map<string, () => void>();
+  /** Recoveries in progress; a join or enqueue waits for its guild's, as the player has no channel meanwhile. */
+  const recovering = new Map<string, Promise<void>>();
 
   /**
    * Local files being played: settled by the track's end, the queue's end or the player's end. The player's
@@ -375,11 +380,16 @@ export function createLavalinkMusicPlayer({
   manager.nodeManager.on("connect", (node) => {
     logger.info("Lavalink node connected", { node: node.id });
     node.options.retryDelay = retryDelayAfter(0);
-    const recovering = [...resumeAt];
+    const pending = [...resumeAt];
     resumeAt.clear();
-    for (const [guildId, position] of recovering) {
+    for (const [guildId, position] of pending) {
       const player = manager.getPlayer(guildId);
-      if (player) void recover(player, position);
+      if (!player) continue;
+      // A later recovery of the same guild may have replaced the entry; only remove our own.
+      const done: Promise<void> = recover(player, position).finally(() => {
+        if (recovering.get(guildId) === done) recovering.delete(guildId);
+      });
+      recovering.set(guildId, done);
     }
   });
   manager.nodeManager.on("reconnecting", (node) => {
@@ -409,11 +419,23 @@ export function createLavalinkMusicPlayer({
       .catch((error: unknown) => logger.error("Lavalink init failed", { error }));
   });
 
+  /** Waits for the guild's recovery, at most RECOVERY_WAIT_MS: a stuck one must not hold `/play` forever. */
+  async function afterRecovery(guildId: string): Promise<void> {
+    const recovery = recovering.get(guildId);
+    if (!recovery) return;
+    try {
+      await withTimeout(recovery, RECOVERY_WAIT_MS);
+    } catch (error) {
+      logger.warn("Recovery still running, not waiting any longer", { guildId, error });
+    }
+  }
+
   async function joinVoice(
     guildId: string,
     voiceChannelId: string,
     textChannelId: string,
   ): Promise<void> {
+    await afterRecovery(guildId);
     const player = manager.createPlayer({
       guildId,
       voiceChannelId,
@@ -437,6 +459,7 @@ export function createLavalinkMusicPlayer({
    * one, which the client then applies to the new player and kills it.
    */
   async function takeOver(guildId: string, voiceChannelId: string): Promise<Player> {
+    await afterRecovery(guildId);
     const idle = manager.getPlayer(guildId);
     if (idle) {
       idle.options.voiceChannelId = voiceChannelId;
@@ -485,6 +508,7 @@ export function createLavalinkMusicPlayer({
     join: joinVoice,
 
     async enqueue(guildId, tracks) {
+      await afterRecovery(guildId);
       const player = playerOf(guildId);
       await player.queue.add(await Promise.all(tracks.map((track) => toTrack(player, track))));
       // `current` is set as soon as play() starts, unlike `playing`, which waits for the node. While a

@@ -6,6 +6,10 @@ import { NO_MENTIONS } from "./reply.ts";
 /** Any channel of the guild members write in: text, announcement, threads and voice or stage chats. */
 export function createDzajcoChannels(client: Client): DzajcoChannels {
   return {
+    parentOf(channelId) {
+      const channel = client.channels.cache.get(channelId);
+      return channel?.isThread() ? channel.parentId : null;
+    },
     async isChatOf(guildId, channelId) {
       const channel = await client.channels.fetch(channelId).catch(() => null);
       if (!channel?.isTextBased() || channel.isDMBased()) return false;
