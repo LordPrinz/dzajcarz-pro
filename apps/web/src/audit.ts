@@ -1,4 +1,4 @@
-import type { Logger } from "@dzajcarz/core";
+import { type Logger, withTimeout } from "@dzajcarz/core";
 import type { FinalWebAuditOutcome, WebAuditRepository } from "@dzajcarz/db";
 import type { BotResult } from "@dzajcarz/web-protocol";
 
@@ -12,6 +12,8 @@ export interface AuditContext {
 const ACTOR_HEADER = "x-authentik-username";
 const MAX_ACTOR_LENGTH = 255;
 const MAX_ERROR_LENGTH = 1_000;
+/** Longest an audit write may take; a stalled database must not hold the request until the proxy gives up. */
+const AUDIT_TIMEOUT_MS = 1_500;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point.
 const CONTROL_CHARACTERS = /[\x00-\x1f\x7f]/g;
 
@@ -57,9 +59,11 @@ export interface Auditor {
 export function createAuditor({
   repository,
   logger,
+  timeoutMs = AUDIT_TIMEOUT_MS,
 }: {
   repository: WebAuditRepository;
   logger: Logger;
+  timeoutMs?: number;
 }): Auditor {
   async function finish(
     id: number,
@@ -68,7 +72,10 @@ export function createAuditor({
     error: string | null,
   ) {
     try {
-      await repository.finish(id, outcome, error?.slice(0, MAX_ERROR_LENGTH) ?? null);
+      await withTimeout(
+        repository.finish(id, outcome, error?.slice(0, MAX_ERROR_LENGTH) ?? null),
+        timeoutMs,
+      );
     } catch (cause) {
       logger.error("Could not record the outcome in the audit log", {
         id,
@@ -88,13 +95,17 @@ export function createAuditor({
     ): Promise<AuditedResult<T>> {
       let id: number;
       try {
-        ({ id } = await repository.start({
-          actor: actorOf(request),
-          action,
-          guildId: context.guildId ?? null,
-          channelId: context.channelId ?? null,
-          payload: context.payload ?? {},
-        }));
+        // A row that lands after the timeout stays pending, which is true: the action never ran.
+        ({ id } = await withTimeout(
+          repository.start({
+            actor: actorOf(request),
+            action,
+            guildId: context.guildId ?? null,
+            channelId: context.channelId ?? null,
+            payload: context.payload ?? {},
+          }),
+          timeoutMs,
+        ));
       } catch (cause) {
         logger.error("Could not write the audit log; the action did not run", {
           action,

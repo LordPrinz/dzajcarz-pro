@@ -81,7 +81,7 @@ keepConnected(redis, logger);
 const redisStore = createTimedStore(createRedisStore(redis));
 // A subscribed connection accepts nothing but (un)subscribe, so the web panel's pub/sub gets its own.
 const redisSubscriber = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
-const pubsub = createRedisPubSub({ publisher: redis, subscriber: redisSubscriber });
+const pubsub = createRedisPubSub({ publisher: redis, subscriber: redisSubscriber, log: logger });
 keepConnected(redisSubscriber, logger, { onConnect: pubsub.resubscribe });
 
 const guildSettings = createGuildSettingsRepository(sql);

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createMemoryPubSub, type PubSub } from "@dzajcarz/kv";
-import { COMMAND_CHANNEL } from "./channels.ts";
+import { COMMAND_CHANNEL, EVENT_CHANNEL, replyChannel } from "./channels.ts";
 import { createBotClient } from "./client.ts";
 import { createCommandServer } from "./server.ts";
 import { recordingLogger } from "./testing.ts";
@@ -124,6 +124,7 @@ describe("createBotClient", () => {
         throw new Error("redis down");
       },
       subscribe: async () => async () => {},
+      isSubscribed: () => true,
     };
     const { client } = setup(pubsub);
     await client.start();
@@ -135,10 +136,53 @@ describe("createBotClient", () => {
     const pubsub: PubSub = {
       publish: () => new Promise(() => {}),
       subscribe: async () => async () => {},
+      isSubscribed: () => true,
     };
     const { client } = setup(pubsub, 30);
     await client.start();
     expect(await client.request("guilds.list", {})).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  test("a request before the reply channel is subscribed is unavailable at once and publishes nothing", async () => {
+    let published = 0;
+    const pubsub: PubSub = {
+      publish: async () => {
+        published += 1;
+        return 1;
+      },
+      subscribe: async () => async () => {},
+      isSubscribed: () => false,
+    };
+    const { client } = setup(pubsub, 1_000);
+    await client.start();
+    const started = Date.now();
+    expect(await client.request("guilds.list", {})).toEqual({ ok: false, reason: "unavailable" });
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(published).toBe(0);
+    expect(client.pendingCount()).toBe(0);
+  });
+
+  test("a request before start is unavailable, not a timeout", async () => {
+    const { client, pubsub } = setup(undefined, 1_000);
+    await withServer(pubsub, async () => [guild]);
+    expect(await client.request("guilds.list", {})).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  test("stop unsubscribes from the reply and event channels", async () => {
+    const pubsub = createMemoryPubSub();
+    const instanceId = crypto.randomUUID();
+    const client = createBotClient({
+      pubsub,
+      instanceId,
+      timeoutMs: 50,
+      logger: recordingLogger(),
+    });
+    await client.start();
+    expect(pubsub.isSubscribed(replyChannel(instanceId))).toBe(true);
+    expect(pubsub.isSubscribed(EVENT_CHANNEL)).toBe(true);
+    await client.stop();
+    expect(pubsub.isSubscribed(replyChannel(instanceId))).toBe(false);
+    expect(pubsub.isSubscribed(EVENT_CHANNEL)).toBe(false);
   });
 
   test("an invalid request is rejected before anything is published", async () => {

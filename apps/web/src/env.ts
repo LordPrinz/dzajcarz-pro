@@ -10,6 +10,9 @@ const connectionUrl = (protocol: RegExp) =>
     )
     .pipe(z.url({ protocol }));
 
+/** What compose can write into the Redis config unquoted, so the same rule holds for WEB_REDIS_PASSWORD. */
+const REDIS_PASSWORD = /^[A-Za-z0-9._~-]+$/;
+
 const emptyIsUnset = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
 
@@ -29,15 +32,21 @@ export const Env = z.object({
   // The panel's own, least-privileged logins (ADR 9): the `dzajcarz_web` Postgres role and the `web` Redis
   // user. Not the bot's DATABASE_URL and REDIS_URL, so the panel never runs as the bot.
   WEB_DATABASE_URL: connectionUrl(/^postgres(ql)?$/),
-  WEB_REDIS_URL: connectionUrl(/^rediss?$/).refine(
-    (value) => ["", "/", "/0"].includes(new URL(value).pathname),
-    "use database 0 (or none): the panel's Redis user may not run SELECT",
-  ),
+  WEB_REDIS_URL: connectionUrl(/^rediss?$/)
+    .refine(
+      (value) => ["", "/", "/0"].includes(new URL(value).pathname),
+      "use database 0 (or none): the panel's Redis user may not run SELECT",
+    )
+    .refine((value) => {
+      const { password } = new URL(value);
+      return password === "" || REDIS_PASSWORD.test(password);
+    }, "the password may hold only letters, digits and . _ ~ - (compose writes it into the Redis config); `openssl rand -hex 32` fits"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  // How long the panel waits for the bot to answer a command.
+  // How long the panel waits for the bot to answer a command. At most 25 s: the bot drops a command whose
+  // deadline is more than 30 s ahead, and the rest is headroom for clock skew between the two hosts.
   BOT_REQUEST_TIMEOUT_MS: z.preprocess(
     emptyIsUnset,
-    z.coerce.number().int().min(500).max(30_000).default(3_000),
+    z.coerce.number().int().min(500).max(25_000).default(3_000),
   ),
 });
 export type Env = z.infer<typeof Env>;

@@ -1,5 +1,5 @@
 # ACL rules of the `web` Redis user, the web panel's login (ADR 9). The redis service appends them to
-# `user web on >$WEB_REDIS_PASSWORD` when it writes its config; packages/kv/src/web-acl.test.ts checks them
+# `user web on >$WEB_REDIS_PASSWORD` when it writes its config; apps/web/src/redis-acl.test.ts checks them
 # against a real Redis. Only the panel's pub/sub channels and PING (the health check), no keys at all.
 # HELLO and AUTH need no permission; SELECT is not allowed, so WEB_REDIS_URL must name database 0 (or none).
 resetchannels &dzajcarz:web:* resetkeys -@all +publish +subscribe +unsubscribe +ping

@@ -136,44 +136,14 @@ policy starts a clean instance.
 
 ### Web panel
 
-`apps/web` is the owner's web panel (epic #143). It is its own process and container, decided in
-[ADR 9](adr/0009-web-panel-as-a-separate-process.md); what it may do with mentions is in
-[ADR 10](adr/0010-mentions-from-the-web-panel.md).
-
-- **Process split.** The bot holds the Discord gateway; the panel never does. It reads Postgres directly for
-  data it owns and talks to the bot over Redis pub/sub. Modules do not know the panel exists: the bot side
-  is one adapter, `apps/bot/src/web-bridge.ts`, built in the composition root.
-- **Protocol.** `packages/web-protocol` holds the channel names, the envelopes and one zod schema per
-  command and event, imported by both sides. The panel calls `request("guilds.list", {})` and gets
-  `{ ok: true, data }` or `{ ok: false, reason: "unavailable" | "timeout" | "error" }`; it never throws to the
-  HTTP layer. A command carries a correlation id, a `deadline` and the reply channel; the bot drops a command
-  whose deadline has passed and a reply channel outside `dzajcarz:web:reply:<uuid>`. `PUBLISH` returns the
-  number of receivers, so no subscriber means "bot unavailable" at once; a silent bot ends in a timeout after
-  `BOT_REQUEST_TIMEOUT_MS` (default 3 s). Both are `503` and read "Bot niedostępny" in the page.
-- **Events.** The bot publishes `bot.status` on ready and every 15 s. The panel treats the bot as offline
-  after 45 s without one. Events are fire and forget.
-- **Trust model.** No login of its own: Authentik forward auth on the reverse proxy. The container publishes
-  no port and sits on the `dzajcarz-panel` network with the proxy. Every API, WebSocket and health request
-  needs a `Host` that matches `WEB_PUBLIC_ORIGIN` (or loopback on `WEB_PORT`), else `421`. State-changing
-  requests and WebSocket upgrades need an exact `Origin` (`403`), and bodies must be JSON (`415`). The guard
-  wraps every route handler, the page and its assets included, and a test fails when one is not wrapped.
-  Every response carries a strict `Content-Security-Policy`, `X-Content-Type-Options: nosniff` and
-  `Referrer-Policy: no-referrer`; the page is read into memory at startup and served by plain handlers,
-  because Bun's HTML-import routes take no headers.
-- **Health.** `GET /health` probes Postgres and Redis (the bot being down is not a readiness failure) and
-  `GET /health/live` answers whenever the process does. `GET /api/status` reports the cached heartbeat.
-- **WebSocket.** `GET /api/ws` upgrades through the same Host and Origin checks. Every socket joins the `bot`
-  topic and receives the last known status on open; later tickets add per-channel topics.
-- **Audit.** Every state-changing action writes a `pending` row to `web_audit` (actor from
-  `X-authentik-username`, action, guild and channel, payload) before it runs, and its outcome afterwards. If
-  the row cannot be written the action does not run (`503 audit_unavailable`). The header attributes actions;
-  it never authorises them.
-- **Least privilege.** The panel logs in as its own Postgres role `dzajcarz_web` (`WEB_DATABASE_URL`) and its
-  own Redis user `web` (`WEB_REDIS_URL`). The role may read and insert `web_audit` rows and set their
-  outcome, nothing else; the Redis user may only publish and subscribe on `dzajcarz:web:*` and ping. Only the
-  bot migrates.
-- **Running it.** `bun run web:dev` locally against the compose Postgres and Redis; `docker-compose.prod.yml`
-  has the `web` service ([deployment](DEPLOYMENT.md)).
+`apps/web` is the owner's web panel (epic #143): its own process and container, behind a reverse proxy with
+Authentik, with a JSON API, a WebSocket and a React page. The bot keeps the Discord gateway; the panel reads
+the Postgres data it owns (`web_audit`) and talks to the bot over Redis pub/sub, each with its own
+least-privileged login. Modules do not know the panel exists: the bot side is one adapter,
+`apps/bot/src/web-bridge.ts`, and the commands and events both sides share live in `packages/web-protocol`.
+The decisions behind it (trust model, protocol, audit log) are in
+[ADR 9](adr/0009-web-panel-as-a-separate-process.md), mentions in
+[ADR 10](adr/0010-mentions-from-the-web-panel.md), running it in [deployment](DEPLOYMENT.md).
 
 ### Health endpoint
 

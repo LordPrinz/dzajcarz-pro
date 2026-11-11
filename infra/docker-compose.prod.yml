@@ -144,11 +144,17 @@ services:
     restart: unless-stopped
     networks: [data]
     # The password goes into a config file on a tmpfs, not onto the command line, where `ps` would show
-    # it (it is still in the container's environment for redis-cli). The image's entrypoint then starts redis-server as the redis user.
+    # it (it is still in the container's environment for redis-cli). The image's entrypoint then starts
+    # redis-server as the redis user. The passwords go into that file unquoted, so a character Redis's config
+    # parser reads differently (space, quote, backslash, ...) stops the start instead.
     command:
       - sh
       - -c
       - >-
+        for password in "$$REDISCLI_AUTH" "$$WEB_REDIS_PASSWORD"; do
+        case "$$password" in ''|*[!A-Za-z0-9._~-]*)
+        echo 'REDIS_PASSWORD and WEB_REDIS_PASSWORD may hold only letters, digits and . _ ~ -
+        (openssl rand -hex 32 fits)' >&2; exit 1;; esac; done &&
         umask 077 &&
         printf 'requirepass %s\nuser web on >%s %s\n' "$$REDISCLI_AUTH" "$$WEB_REDIS_PASSWORD"
         "$$(grep -v '^#' /web-user.acl | tr '\n' ' ')" > /tmp/redis.conf &&

@@ -216,6 +216,7 @@ describe("guardRoutes", () => {
         publicOrigin: PUBLIC_ORIGIN,
         port: 1,
         bot: { request: async () => ({ ok: false as const, reason: "unavailable" as const }) },
+        auditor: { audited: (_request, _action, _context, run) => run() },
         live: started.live,
         probes: { postgres: async () => true, redis: async () => true },
         logger: silentLogger,

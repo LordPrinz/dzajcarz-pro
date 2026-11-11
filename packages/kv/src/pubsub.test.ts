@@ -66,6 +66,16 @@ describe.each(adapters)("PubSub (%s)", (_name, make) => {
     await stopSecond();
   });
 
+  test("isSubscribed follows subscribe and unsubscribe", async () => {
+    const pubsub = make();
+    const channel = channelName();
+    expect(pubsub.isSubscribed(channel)).toBe(false);
+    const stop = await pubsub.subscribe(channel, () => {});
+    expect(pubsub.isSubscribed(channel)).toBe(true);
+    await stop();
+    expect(pubsub.isSubscribed(channel)).toBe(false);
+  });
+
   test("unsubscribing twice is harmless", async () => {
     const pubsub = make();
     const channel = channelName();
@@ -117,11 +127,8 @@ describe.skipIf(!redisUrl)("createRedisPubSub", () => {
     expect(await numSub(channel)).toBe(0);
   });
 
-  /** A subscriber with its own connection and `keepConnected`, as the apps build it. */
-  async function connected() {
-    if (!redisUrl || !publisher) throw new Error("unreachable");
-    const own = new RedisClient(redisUrl, { enableOfflineQueue: false });
-    const pubsub = createRedisPubSub({ publisher, subscriber: own });
+  /** Starts `keepConnected` with `resubscribe` as its hook and counts the hook's completed runs. */
+  function reconnect(own: RedisClient, pubsub: ReturnType<typeof createRedisPubSub>): () => number {
     let resubscribed = 0;
     keepConnected(
       own,
@@ -134,12 +141,17 @@ describe.skipIf(!redisUrl)("createRedisPubSub", () => {
         },
       },
     );
-    await waitFor(() => resubscribed === 1);
-    return {
-      own,
-      pubsub,
-      resubscribed: () => resubscribed,
-    };
+    return () => resubscribed;
+  }
+
+  /** A subscriber with its own connection and `keepConnected`, as the apps build it. */
+  async function connected() {
+    if (!redisUrl || !publisher) throw new Error("unreachable");
+    const own = new RedisClient(redisUrl, { enableOfflineQueue: false });
+    const pubsub = createRedisPubSub({ publisher, subscriber: own });
+    const resubscribed = reconnect(own, pubsub);
+    await waitFor(() => resubscribed() === 1);
+    return { own, pubsub, resubscribed };
   }
 
   test("after the subscriber reconnects through keepConnected a message arrives exactly once", async () => {
@@ -160,30 +172,70 @@ describe.skipIf(!redisUrl)("createRedisPubSub", () => {
   test("a channel subscribed while the connection is down is subscribed once it connects", async () => {
     if (!redisUrl || !publisher) throw new Error("unreachable");
     const own = new RedisClient(redisUrl, { enableOfflineQueue: false });
-    const pubsub = createRedisPubSub({ publisher, subscriber: own });
     const channel = channelName();
     const received: string[] = [];
-    // Not connected yet: the native subscribe fails, the listener stays registered.
-    await expect(pubsub.subscribe(channel, (message) => received.push(message))).rejects.toThrow();
-    let resubscribed = 0;
-    keepConnected(
-      own,
-      { warn() {} },
-      {
-        retryMs: 20,
-        onConnect: async () => {
-          await pubsub.resubscribe();
-          resubscribed += 1;
-        },
-      },
-    );
-    await waitFor(() => resubscribed === 1);
+    const logged: string[] = [];
+    const pubsub = createRedisPubSub({
+      publisher,
+      subscriber: own,
+      log: { debug: (message) => void logged.push(message) },
+    });
+    // Not connected yet: the native subscribe fails, the listener stays registered and a handle comes back.
+    await pubsub.subscribe(channel, (message) => received.push(message));
+    expect(pubsub.isSubscribed(channel)).toBe(false);
+    expect(logged).toEqual(["Could not subscribe yet; will retry on reconnect"]);
+    const resubscribed = reconnect(own, pubsub);
+    await waitFor(() => resubscribed() === 1);
+    expect(pubsub.isSubscribed(channel)).toBe(true);
     expect(await publisher.publish(channel, "once")).toBe(1);
     await waitFor(() => received.length === 1);
     await Bun.sleep(50);
     expect(received).toEqual(["once"]);
     own.onclose = null;
     own.close();
+  });
+
+  test("a channel subscribed and dropped while the connection is down stays unsubscribed", async () => {
+    if (!redisUrl || !publisher) throw new Error("unreachable");
+    const own = new RedisClient(redisUrl, { enableOfflineQueue: false });
+    const pubsub = createRedisPubSub({ publisher, subscriber: own });
+    const channel = channelName();
+    const received: string[] = [];
+    const stop = await pubsub.subscribe(channel, (message) => received.push(message));
+    await stop();
+    const resubscribed = reconnect(own, pubsub);
+    await waitFor(() => resubscribed() === 1);
+    expect(await numSub(channel)).toBe(0);
+    expect(await publisher.publish(channel, "nobody")).toBe(0);
+    await Bun.sleep(50);
+    expect(received).toEqual([]);
+    own.onclose = null;
+    own.close();
+  });
+
+  test("overlapping resubscribes register a channel once", async () => {
+    const { own, pubsub } = await connected();
+    const channel = channelName();
+    const received: string[] = [];
+    await pubsub.subscribe(channel, (message) => received.push(message));
+    await Promise.all([pubsub.resubscribe(), pubsub.resubscribe(), pubsub.resubscribe()]);
+    expect(await numSub(channel)).toBe(1);
+    expect(await publisher?.publish(channel, "once")).toBe(1);
+    await waitFor(() => received.length === 1);
+    await Bun.sleep(50);
+    expect(received).toEqual(["once"]);
+    own.onclose = null;
+    own.close();
+  });
+
+  test("isSubscribed is false while the subscriber connection is down", async () => {
+    const { own, pubsub } = await connected();
+    const channel = channelName();
+    await pubsub.subscribe(channel, () => {});
+    expect(pubsub.isSubscribed(channel)).toBe(true);
+    own.onclose = null;
+    own.close();
+    expect(pubsub.isSubscribed(channel)).toBe(false);
   });
 
   test("after Bun's own auto-reconnect a message arrives exactly once", async () => {

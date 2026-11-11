@@ -13,7 +13,6 @@ export interface GuardConfig {
 }
 
 export interface Guard {
-  /** Normalised with `normalizeHost`. */
   hosts: ReadonlySet<string>;
   /** The port a Host may leave out: 443 for an https public origin, 80 for http. */
   defaultPort: string;

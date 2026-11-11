@@ -36,7 +36,7 @@ const redis = new RedisClient(env.WEB_REDIS_URL, { enableOfflineQueue: false });
 keepConnected(redis, logger);
 // A subscribed connection accepts nothing but (un)subscribe, so pub/sub gets its own.
 const redisSubscriber = new RedisClient(env.WEB_REDIS_URL, { enableOfflineQueue: false });
-const pubsub = createRedisPubSub({ publisher: redis, subscriber: redisSubscriber });
+const pubsub = createRedisPubSub({ publisher: redis, subscriber: redisSubscriber, log: logger });
 keepConnected(redisSubscriber, logger, { onConnect: pubsub.resubscribe });
 
 const bot = createBotClient({
@@ -47,8 +47,7 @@ const bot = createBotClient({
 await bot.start();
 
 const live = createLiveState();
-// No endpoint changes state yet; #145 to #148 call `audited` from theirs.
-export const auditor = createAuditor({
+const auditor = createAuditor({
   repository: createWebAuditRepository(sql),
   logger: logger.child({ component: "audit" }),
 });
@@ -59,6 +58,7 @@ const server = Bun.serve({
     publicOrigin: env.WEB_PUBLIC_ORIGIN,
     port: env.WEB_PORT,
     bot,
+    auditor,
     live,
     probes: {
       postgres: async () => {

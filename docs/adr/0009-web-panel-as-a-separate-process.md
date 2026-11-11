@@ -16,8 +16,9 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
 - It talks to the bot over Redis pub/sub through `@dzajcarz/web-protocol`. Commands go to
   `dzajcarz:web:command` with a correlation id, a `deadline` and the web instance's reply channel; the bot
   checks that the reply channel matches `dzajcarz:web:reply:<uuid>`, drops commands past their deadline,
-  and answers on that channel. The web side waits up to `BOT_REQUEST_TIMEOUT_MS` (3 s). When `PUBLISH`
-  reaches no subscriber or Redis is down, it answers `bot_unavailable` at once; a silent bot ends in
+  and answers on that channel. The web side waits up to `BOT_REQUEST_TIMEOUT_MS` (3 s, at most 25 s to leave
+  room for clock skew under the 30 s deadline limit). When `PUBLISH` reaches no subscriber, Redis is down or
+  the panel's own reply channel is not subscribed, it answers `bot_unavailable` at once; a silent bot ends in
   `bot_timeout`. Both are 503 and both read "Bot niedostępny" in the panel; the audit log keeps them apart.
   Live events go to `dzajcarz:web:event`, fire and forget; the bot publishes `bot.status` every 15 s and
   the panel treats it as offline after 45 s without one. Every command and event has a zod schema in the
@@ -35,14 +36,19 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
 - Least privilege. The panel never uses the bot's credentials:
   - Postgres: its own role `dzajcarz_web`. Migration 0014 creates it without a login (roles are
     cluster-wide, so it tolerates one that exists) and grants `SELECT, INSERT` on `web_audit`, `UPDATE` of
-    only `outcome` and `error`, and the sequence and schema usage. No password lives in a migration: the
-    one-shot compose step `web-db-role` runs `infra/postgres/web-role.sql` as the owner on every start and
-    sets `LOGIN PASSWORD` from `WEB_POSTGRES_PASSWORD`, which works on an existing volume where initdb scripts
-    never run. #145 and #146 add `SELECT` on the archive tables in their own migrations.
+    only `outcome` and `error`, and schema usage. On a managed Postgres where the bot's user lacks
+    CREATEROLE, the migration logs a NOTICE and skips the role and its grants; the operator creates the role
+    once ([deployment](../DEPLOYMENT.md#managed-postgres-without-createrole)). No password lives in a
+    migration: the one-shot compose step `web-db-role` runs `infra/postgres/web-role.sql` as the owner on
+    every start and sets `LOGIN PASSWORD` from `WEB_POSTGRES_PASSWORD`, which works on an existing volume
+    where initdb scripts never run. #145 and #146 add `SELECT` on the archive tables in their own migrations.
   - Redis: its own ACL user `web`, limited by `infra/redis/web-user.acl` to `PUBLISH`, `SUBSCRIBE`,
     `UNSUBSCRIBE` and `PING` on `dzajcarz:web:*`, with no keys. The redis service writes it into the config
     on its tmpfs from `WEB_REDIS_PASSWORD`, next to `requirepass` for the bot. `SELECT` is not allowed, so
     `WEB_REDIS_URL` uses database 0.
+  - The `web` user may publish on every `dzajcarz:web:*` channel, so a compromised panel could also forge
+    events and replies, not only commands. This is accepted under the trust model below: the panel already
+    holds the owner's full command rights, and events and replies only reach panel instances.
 - Trust model:
   - The panel has no login. Authentik forward auth on the reverse proxy authenticates the owner.
   - The container publishes no port. It sits on a dedicated Docker network `dzajcarz-panel` that only the
@@ -60,20 +66,29 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     applied by wrapping every route handler, and a test fails if a handler is not wrapped.
   - Every response carries `Content-Security-Policy: default-src 'self'; img-src 'self'
     https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';
-    form-action 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Bun's
+    form-action 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`; API, health
+    and error answers also carry `Cache-Control: no-store`. Bun's
     HTML-import routes take no response headers, so the page and its assets are read into memory at
     startup (from the compiled binary, or built with `Bun.build` when run from source) and served by plain
     handlers that go through the guard like every other route.
-  - Every input is validated with zod. Every state-changing action first writes a `pending` row to
-    `web_audit` with `X-authentik-username` when present (control characters stripped, at most 255
-    characters); if that write fails the action does not run and the answer is `503 audit_unavailable`
-    (fail closed). The outcome is written afterwards; if only that write fails it is logged and the row stays
-    `pending`. The header is used for attribution only, never to authorise.
-  - The protocol limits what a forged message can do: a command's `deadline` lies at most 30 s after its
-    `sentAt` and after the bot's clock, its name matches `^[a-z]+(\.[a-z_]+)+$` (at most 64 characters), the
-    bot remembers handled ids until their deadline and drops a replay, and both sides drop a raw message over
-    64 KB before parsing it. Guild icons must be `https://cdn.discordapp.com` URLs. A WebSocket message over
-    4 KB closes the socket.
+  - Every input is validated with zod.
+  - The audit log, `web_audit`:
+    - Every state-changing action first writes a `pending` row with `X-authentik-username` when present
+      (control characters stripped, at most 255 characters).
+    - If that write fails or takes too long, the action does not run and the answer is
+      `503 audit_unavailable` (fail closed).
+    - The outcome is written afterwards; if only that write fails it is logged and the row stays `pending`.
+    - A trigger stops any role from rewriting a row: it is inserted as `pending`, and one update sets its
+      outcome and error. The panel's role cannot delete rows; the table owner (the bot's role) still can,
+      and can disable the trigger.
+    - The header is used for attribution only, never to authorise.
+  - The protocol limits what a forged message can do:
+    - a command's `deadline` lies at most 30 s after its `sentAt` and after the bot's clock;
+    - its name matches `^[a-z]+(\.[a-z_]+)+$` (at most 64 characters);
+    - the bot remembers handled ids until their deadline and drops a replay;
+    - both sides drop a raw message over 64 KB before parsing it;
+    - guild icons must be `https://cdn.discordapp.com` URLs;
+    - a WebSocket message over 4 KB closes the socket.
 
 ## Drivers
 

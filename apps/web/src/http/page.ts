@@ -50,26 +50,49 @@ export async function loadPage(): Promise<PageFiles> {
   return page;
 }
 
-/** One GET handler per file, with ETag revalidation. */
+/**
+ * Whether an `If-None-Match` value names `etag`: `*`, or a comma-separated list compared weakly (RFC 9110
+ * 13.1.2), so `W/"x"` matches `"x"`.
+ */
+export function etagMatches(header: string | null, etag: string): boolean {
+  if (header === null) return false;
+  if (header.trim() === "*") return true;
+  const opaque = (tag: string) => tag.trim().replace(/^W\//, "");
+  return header.split(",").some((tag) => opaque(tag) === opaque(etag));
+}
+
+type PageHandler = (request: Request) => Response;
+
+/** GET and HEAD handlers per file, with ETag revalidation. */
 export function pageRoutes(
   page: PageFiles,
-): Record<string, { GET: (request: Request) => Response }> {
+): Record<string, { GET: PageHandler; HEAD: PageHandler }> {
   return Object.fromEntries(
-    [...page].map(([path, file]) => [
-      path,
-      {
-        GET(request: Request) {
-          const headers = {
-            "Content-Type": file.type,
-            ETag: file.etag,
-            "Cache-Control": file.immutable ? "public, max-age=31536000, immutable" : "no-cache",
-          };
-          if (request.headers.get("if-none-match") === file.etag) {
-            return new Response(null, { status: 304, headers });
-          }
-          return new Response(file.body, { headers });
+    [...page].map(([path, file]) => {
+      const headers = {
+        "Content-Type": file.type,
+        ETag: file.etag,
+        "Cache-Control": file.immutable ? "public, max-age=31536000, immutable" : "no-cache",
+      };
+      const answer = (request: Request, withBody: boolean) => {
+        if (etagMatches(request.headers.get("if-none-match"), file.etag)) {
+          return new Response(null, { status: 304, headers });
+        }
+        return new Response(withBody ? file.body : null, {
+          headers: { ...headers, "Content-Length": String(file.body.byteLength) },
+        });
+      };
+      return [
+        path,
+        {
+          GET(request: Request) {
+            return answer(request, true);
+          },
+          HEAD(request: Request) {
+            return answer(request, false);
+          },
         },
-      },
-    ]),
+      ];
+    }),
   );
 }

@@ -23,8 +23,8 @@ ping a person or a role.
 
 ## Alternatives considered
 
-- **A global env flag** that allows mentions for every panel message: one forgotten setting pings people
-  for good, and the owner cannot choose per message.
+- **A global env flag** that allows mentions for every panel message: a forgotten setting leaves mentions
+  on for every message, and the owner cannot choose per message.
 - **Explicit id lists** (`users: [...]`, `roles: [...]`) per message: the safest, but the panel would need
   to parse the text or ask for ids, which is more UI than the use case needs. Revisit if a leak shows up.
 

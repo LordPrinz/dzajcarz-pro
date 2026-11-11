@@ -34,7 +34,7 @@ ENV NODE_ENV=production \
     WEB_HOSTNAME=0.0.0.0
 USER nonroot
 EXPOSE 3000
-# start-period covers the migrations before /health can report ready.
+# start-period gives the panel time to reach Postgres and Redis before /health can report ready.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 CMD ["/app/web", "healthcheck"]
 ENTRYPOINT ["/app/web"]
 

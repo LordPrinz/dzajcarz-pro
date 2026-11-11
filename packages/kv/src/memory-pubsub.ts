@@ -17,6 +17,7 @@ export function createMemoryPubSub(): PubSub {
       // Redis counts subscribed connections, so one process listening twice is still one receiver.
       return 1;
     },
+    isSubscribed: (channel) => (channels.get(channel)?.size ?? 0) > 0,
     async subscribe(channel, listener) {
       let listeners = channels.get(channel);
       if (!listeners) {

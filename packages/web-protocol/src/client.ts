@@ -55,7 +55,8 @@ const unavailable = { ok: false, reason: "unavailable" } as const;
 
 /**
  * The web side of the protocol. `PUBLISH` returns how many bots received the command, so no receiver means
- * "unavailable" at once; a bot that received it and stays silent ends in "timeout".
+ * "unavailable" at once; a bot that received it and stays silent ends in "timeout". A request sent while the
+ * reply channel is not subscribed (yet) is "unavailable" too, since its reply could not arrive.
  */
 export function createBotClient({
   pubsub,
@@ -143,10 +144,10 @@ export function createBotClient({
 
   async function subscribeTo(channel: string, listener: (raw: string) => void): Promise<void> {
     try {
+      // A connection that is down does not reject: the adapter subscribes again when it comes back.
       stops.push(await pubsub.subscribe(channel, listener));
     } catch (error) {
-      // The adapter keeps the listener and subscribes again when the connection comes back.
-      logger.debug("Could not subscribe yet; will retry on reconnect", { channel, error });
+      logger.warn("Could not subscribe", { channel, error });
     }
   }
 
@@ -164,6 +165,11 @@ export function createBotClient({
           reason: "error",
           message: "The request does not match the command",
         });
+      }
+      // Without the reply channel a bot's answer would be lost and the request would end in a timeout.
+      if (!pubsub.isSubscribed(ownReplyChannel)) {
+        logger.debug("Not subscribed to the reply channel yet", { command: name });
+        return Promise.resolve(unavailable);
       }
       const id = crypto.randomUUID();
       const sentAt = now();

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
+import { MIGRATIONS } from "./migrations.ts";
 import { createTestDatabase } from "./testing.ts";
 import type { WebAuditRow } from "./types.ts";
 import {
@@ -118,6 +119,26 @@ describe.skipIf(!sql)("web audit repository", () => {
     ).rejects.toThrow();
   });
 
+  test("not even the owner can change a finished row or anything but the outcome of a pending one", async () => {
+    if (!sql) return;
+    const repository = createWebAuditRepository(sql);
+    const { id: finished } = await repository.start(entry());
+    await repository.finish(finished, "failed", "nope");
+    await expect(sql`UPDATE web_audit SET error = NULL WHERE id = ${finished}`).rejects.toThrow(
+      /finished and cannot change/,
+    );
+    const { id: pending } = await repository.start(entry());
+    await expect(
+      sql`UPDATE web_audit SET payload = '{"forged": true}'::jsonb WHERE id = ${pending}`,
+    ).rejects.toThrow(/only the outcome and error/);
+    await expect(sql`UPDATE web_audit SET actor = 'someone' WHERE id = ${pending}`).rejects.toThrow(
+      /only the outcome and error/,
+    );
+    await expect(
+      sql`INSERT INTO web_audit (action, outcome) VALUES ('message.send', 'timeout')`,
+    ).rejects.toThrow(/starts as pending/);
+  });
+
   test("webAuditTableExists sees the migrated table", async () => {
     if (!sql) return;
     expect(await webAuditTableExists(sql)).toBe(true);
@@ -155,6 +176,39 @@ describe.skipIf(!sql)("the web panel's database role", () => {
     );
   });
 
+  test("cannot rewrite a finished row", async () => {
+    const id = await asWeb(async (tx) => {
+      const repository = createWebAuditRepository(tx);
+      const started = await repository.start(entry());
+      await repository.finish(started.id, "ok");
+      return started.id;
+    });
+    await expect(
+      asWeb((tx) => tx`UPDATE web_audit SET outcome = 'failed', error = 'later' WHERE id = ${id}`),
+    ).rejects.toThrow(/finished and cannot change/);
+    await expect(
+      asWeb((tx) => tx`UPDATE web_audit SET outcome = 'pending' WHERE id = ${id}`),
+    ).rejects.toThrow(/finished and cannot change/);
+    expect(await asWeb((tx) => rowOf(tx, id))).toMatchObject({ outcome: "ok", error: null });
+  });
+
+  test("cannot update a pending row without giving it an outcome", async () => {
+    const id = await asWeb(async (tx) => (await createWebAuditRepository(tx).start(entry())).id);
+    await expect(
+      asWeb((tx) => tx`UPDATE web_audit SET error = 'again' WHERE id = ${id}`),
+    ).rejects.toThrow(/must give web_audit row/);
+    expect(await asWeb((tx) => rowOf(tx, id))).toMatchObject({ outcome: "pending", error: null });
+  });
+
+  test("cannot insert a row that is not pending", async () => {
+    await expect(
+      asWeb(
+        (tx) =>
+          tx`INSERT INTO web_audit (actor, action, outcome) VALUES ('x', 'message.send', 'ok')`,
+      ),
+    ).rejects.toThrow(/starts as pending/);
+  });
+
   test("cannot read or write the bot's tables", async () => {
     await expect(asWeb((tx) => tx`SELECT * FROM guild_settings`)).rejects.toThrow(
       /permission denied/,
@@ -171,5 +225,31 @@ describe.skipIf(!sql)("the web panel's database role", () => {
     await expect(asWeb((tx) => tx`CREATE TABLE web_extra (id int)`)).rejects.toThrow(
       /permission denied/,
     );
+  });
+});
+
+describe.skipIf(!sql)("migration 0014 on a managed Postgres", () => {
+  test("without CREATEROLE and without the role it skips the role and its grants instead of failing", async () => {
+    if (!sql) return;
+    const migration = MIGRATIONS.find(({ name }) => name === "0014_web_audit.sql");
+    if (!migration) throw new Error("0014 is missing");
+    // A role name nobody has, so the shared role is left alone; everything is rolled back at the end.
+    const name = `test_web_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    const rolledBack = new Error("rolled back");
+    const outcome = sql.begin(async (tx) => {
+      await tx.unsafe(`CREATE ROLE ${name}_owner NOLOGIN NOCREATEROLE`);
+      await tx.unsafe(`CREATE SCHEMA ${name} AUTHORIZATION ${name}_owner`);
+      await tx.unsafe(`SET LOCAL search_path = ${name}`);
+      await tx.unsafe(`SET LOCAL ROLE ${name}_owner`);
+      await tx.unsafe(migration.content.replaceAll(WEB_ROLE, name));
+      const [role] = await tx<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM pg_roles WHERE rolname = ${name}`;
+      expect(role?.n).toBe(0);
+      expect(await tx`SELECT to_regclass('web_audit') IS NOT NULL AS present`).toEqual([
+        { present: true },
+      ]);
+      throw rolledBack;
+    });
+    await expect(outcome).rejects.toBe(rolledBack);
   });
 });

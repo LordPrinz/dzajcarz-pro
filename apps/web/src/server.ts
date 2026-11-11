@@ -1,6 +1,6 @@
 import type { Logger } from "@dzajcarz/core";
 import type { BotClient } from "@dzajcarz/web-protocol";
-import type { AuditedResult } from "./audit.ts";
+import type { AuditedResult, Auditor } from "./audit.ts";
 import { createHealth, type Probes } from "./health.ts";
 import { createGuard, guarded, guardRoutes } from "./http/guard.ts";
 import { withSecurityHeaders } from "./http/headers.ts";
@@ -12,11 +12,11 @@ import { BOT_TOPIC, type LiveState } from "./live.ts";
 export const MAX_WS_MESSAGE_BYTES = 4 * 1024;
 
 export interface WebServerDeps {
-  /** `WEB_PUBLIC_ORIGIN`. */
   publicOrigin: string;
-  /** `WEB_PORT`. */
   port: number;
   bot: Pick<BotClient, "request">;
+  /** Every state-changing endpoint runs its action through `audited`. */
+  auditor: Auditor;
   live: LiveState;
   probes: Probes;
   logger: Logger;

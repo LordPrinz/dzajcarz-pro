@@ -59,14 +59,19 @@ bun run prod:up
 ```
 
 Production reads the same `.env` as local development, but only the values the bot needs on a server: the
-token, the client id, the passwords, `BOT_PREFIX`, `RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`, `LOG_LEVEL`, the scheduled song
-settings and `HEALTH_PUBLISH_PORT`. The web panel adds `WEB_PUBLIC_ORIGIN`, `WEB_POSTGRES_PASSWORD`, `WEB_REDIS_PASSWORD` (all required) and `BOT_REQUEST_TIMEOUT_MS`. Compose passes each one to the container by name, so `DATABASE_URL`,
-`REDIS_URL`, `WEB_DATABASE_URL`, `WEB_REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID`, the test bot's `DISCORD_DEV_TOKEN` and `DISCORD_DEV_CLIENT_ID`, and the `TEST_*` URLs in the file never reach the
+token, the client id, the passwords, `BOT_PREFIX`, `RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`, `LOG_LEVEL`,
+the scheduled song settings and `HEALTH_PUBLISH_PORT`. The web panel adds `WEB_PUBLIC_ORIGIN`,
+`WEB_POSTGRES_PASSWORD`, `WEB_REDIS_PASSWORD` (all required) and `BOT_REQUEST_TIMEOUT_MS` (at most 25000).
+Compose passes each one to the container by name, so `DATABASE_URL`, `REDIS_URL`, `WEB_DATABASE_URL`,
+`WEB_REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID`, the test bot's `DISCORD_DEV_TOKEN` and
+`DISCORD_DEV_CLIENT_ID`, and the `TEST_*` URLs in the file never reach the
 production container. Without a dev guild the bot deploys its slash commands globally. The production stack
 is a separate compose project with its own volumes, so it does not share data with `bun run infra:up`.
 
 The passwords end up inside `DATABASE_URL` and `REDIS_URL`. The bot refuses to start when one of them breaks
-the URL (an unencoded `@`, `/`, `?` or `#`), so stick to hex passwords. On the first start
+the URL (an unencoded `@`, `/`, `?` or `#`), so stick to hex passwords. `REDIS_PASSWORD` and
+`WEB_REDIS_PASSWORD` also go into the Redis config unquoted: the redis service refuses to start when they hold
+anything but letters, digits and `. _ ~ -`, which `openssl rand -hex 32` satisfies. On the first start
 `lavalink-plugins-init` downloads the YouTube plugin, so music can take a minute to come up. It checks the jar
 against `infra/lavalink/youtube-plugin.sha256` and stops the stack before Lavalink starts if the hash differs
 ([ADR 4](adr/0004-lavalink-for-audio.md#youtube-setup-dzaj-50)). Its log says why:
@@ -85,57 +90,65 @@ prod exec postgres psql -U dzajcarz -c "ALTER USER dzajcarz PASSWORD '<new hex p
 ## Web panel
 
 The panel ([ADR 9](adr/0009-web-panel-as-a-separate-process.md)) is the `web` service, built from the same
-`Dockerfile` (`--target web`). It has **no login of its own**: it must only ever be reachable through a reverse
-proxy that has Authentik forward auth in front of it. It publishes no host port. The proxy reaches it over the
-`dzajcarz-panel` network, which only `web` and the proxy may join, since anything on that network talks to the
-panel without Authentik. The panel does not wait for the bot; it starts alone and says "Bot niedostępny"
-until the bot answers.
+`Dockerfile` (`--target web`). It has **no login of its own**: only ever expose it through a reverse proxy
+with Authentik forward auth in front of it. It publishes no host port; the proxy reaches it over the
+`dzajcarz-panel` network, and nothing but `web` and the proxy may join that network. The panel does not wait
+for the bot: it starts alone and says "Bot niedostępny" until the bot answers.
 
-Set `WEB_PUBLIC_ORIGIN` in `.env` to the public URL, as a bare origin (`https://panel.example.com`, no path,
-no trailing slash). Compose refuses to start without it. The panel compares every `Host` and `Origin` with it.
+1. Set `WEB_PUBLIC_ORIGIN` in `.env` to the public URL as a bare origin (`https://panel.example.com`, no
+   path, no trailing slash), and `WEB_POSTGRES_PASSWORD` and `WEB_REDIS_PASSWORD` (`openssl rand -hex 32`).
+   Compose refuses to start without them.
+2. Run `bun run prod:up`. The bot's migration creates the Postgres role `dzajcarz_web` and grants it the
+   audit log; the one-shot `web-db-role` service
+   ([`infra/postgres/web-role.sql`](../infra/postgres/web-role.sql)) gives it its login and password on
+   every start, so a changed password takes effect on the next `prod:up`.
+   The redis service creates the `web` user from `WEB_REDIS_PASSWORD` the same way. On the very first deploy
+   the panel restarts until the bot has created `web_audit`.
+3. Attach the proxy, in its own compose project, to the `dzajcarz-panel` network and point it at
+   `web:3000`. The network is internal, so the proxy keeps reaching the internet through its other networks:
 
-The panel has its own logins and never uses the bot's, so a bug in it cannot touch the bot's data:
+   ```yaml
+   services:
+     proxy:
+       networks: [panel] # plus whatever it already uses
 
-- **Postgres:** the role `dzajcarz_web`, which may only read and add `web_audit` rows and set their outcome.
-  The bot's migration creates it without a login and grants that; the one-shot `web-db-role` service then
-  runs [`infra/postgres/web-role.sql`](../infra/postgres/web-role.sql) as `dzajcarz` on every
-  `bun run prod:up` and sets its password from `WEB_POSTGRES_PASSWORD`. This works on an existing volume
-  too, and changing the password in `.env` takes effect on the next `prod:up`. The panel never migrates: on
-  the very first deploy it restarts until the bot has created `web_audit`.
-- **Redis:** the ACL user `web`, limited by [`infra/redis/web-user.acl`](../infra/redis/web-user.acl) to
-  publishing and subscribing on `dzajcarz:web:*` and `PING`. The redis service writes it into its config
-  on the tmpfs from `WEB_REDIS_PASSWORD`, so it is recreated (with the new password) on every start.
+   networks:
+     panel:
+       name: dzajcarz-panel
+       external: true
+   ```
 
-Every response carries a strict `Content-Security-Policy` (scripts, styles and data from the panel itself,
-images also from `cdn.discordapp.com`, no framing), `X-Content-Type-Options: nosniff` and
-`Referrer-Policy: no-referrer`. A proxy that adds its own policy must not loosen it.
+4. Configure the proxy to:
+   - authenticate every request with Authentik forward auth before it reaches the panel;
+   - **overwrite** the `X-authentik-*` request headers with the ones from the auth response and never pass
+     client-sent values through: the panel writes `X-authentik-username` into its audit log;
+   - forward the original `Host` header (nginx: `proxy_set_header Host $host;`; Caddy and Traefik do it by
+     default), since the panel answers `421` to any other `Host`;
+   - pass WebSocket upgrades on `/api/ws` (nginx: `Upgrade` and `Connection` headers);
+   - leave the panel's `Content-Security-Policy` as it is (a policy of its own must not loosen it).
 
-`dzajcarz-panel` is an internal network: the panel has no route out. In the proxy's own compose project,
-attach it to the network and point it at `web:3000`; the proxy keeps reaching the internet through its other
-networks:
+`docker ps` shows the container's health through `web healthcheck` (Postgres and Redis; the bot being down
+does not count). Logs: `prod logs -f web`.
 
-```yaml
-services:
-  proxy:
-    networks: [panel] # plus whatever it already uses
+### Managed Postgres without CREATEROLE
 
-networks:
-  panel:
-    name: dzajcarz-panel
-    external: true
+When the bot's database user may not create roles, migration 0014 only logs a NOTICE and skips the role and
+its grants. Create the role once as an admin, **before** the bot first runs that migration:
+
+```sql
+CREATE ROLE dzajcarz_web NOLOGIN;
 ```
 
-The proxy has to:
+If the migration already ran without it, grant the rights by hand too (as the owner of `web_audit`):
 
-- authenticate every request with Authentik forward auth before it reaches the panel;
-- **overwrite** the `X-authentik-*` request headers with the ones from the auth response and never pass
-  client-sent values through: the panel writes `X-authentik-username` into its audit log;
-- forward the original `Host` header (nginx: `proxy_set_header Host $host;`; Caddy and Traefik do it by
-  default). The panel answers `421` to any other `Host`, so a proxy that rewrites it breaks every request;
-- pass WebSocket upgrades on `/api/ws` (nginx: `Upgrade` and `Connection` headers).
+```sql
+GRANT SELECT, INSERT ON web_audit TO dzajcarz_web;
+GRANT UPDATE (outcome, error) ON web_audit TO dzajcarz_web;
+GRANT USAGE ON SCHEMA public TO dzajcarz_web;
+```
 
-`docker ps` shows the container's health through `web healthcheck`, which asks the panel's own `/health`
-(Postgres and Redis; the bot being down does not count). Logs: `prod logs -f web`.
+Setting the login and password needs those rights as well; when the `web-db-role` step lacks them, run
+`ALTER ROLE dzajcarz_web WITH LOGIN PASSWORD '<WEB_POSTGRES_PASSWORD>'` as the admin instead.
 
 ## Release
 

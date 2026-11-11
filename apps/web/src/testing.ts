@@ -50,6 +50,8 @@ export async function startTestServer(
       publicOrigin: PUBLIC_ORIGIN,
       port,
       live,
+      // Runs the action without recording it; the auditor has its own tests.
+      auditor: { audited: (_request, _action, _context, run) => run() },
       probes: { postgres: async () => true, redis: async () => true },
       logger: silentLogger,
       page: await testPage(),

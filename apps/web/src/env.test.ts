@@ -72,6 +72,17 @@ describe("Env", () => {
     expect(Env.safeParse({ ...REQUIRED, WEB_REDIS_URL: url }).success).toBe(accepted);
   });
 
+  test.each([
+    ["redis://web:0123456789abcdef@redis:6379", true],
+    ["redis://web:a.b_c~d-E@redis:6379", true],
+    ["redis://web:pa%20ss@redis:6379", false],
+    ["redis://web:pa%22ss@redis:6379", false],
+    ["redis://web:pa$ss@redis:6379", false],
+    ["redis://web:pa+ss@redis:6379", false],
+  ])("WEB_REDIS_URL password in %s is accepted: %p", (url, accepted) => {
+    expect(Env.safeParse({ ...REQUIRED, WEB_REDIS_URL: url }).success).toBe(accepted);
+  });
+
   test("the URLs must use their own scheme", () => {
     expect(Env.safeParse({ ...REQUIRED, WEB_DATABASE_URL: "redis://localhost" }).success).toBe(
       false,
@@ -84,8 +95,8 @@ describe("Env", () => {
   test.each([
     ["499", false],
     ["500", true],
-    ["30000", true],
-    ["30001", false],
+    ["25000", true],
+    ["25001", false],
     ["abc", false],
     ["1500.5", false],
   ])("BOT_REQUEST_TIMEOUT_MS %p is valid: %p", (value, valid) => {

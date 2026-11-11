@@ -14,17 +14,24 @@ const request = (headers: Record<string, string> = {}) =>
 
 type Row = NewWebAuditEntry & { outcome: WebAuditOutcome; error: string | null };
 
-function setup({ failStart = false, failFinish = false } = {}) {
+function setup({
+  failStart = false,
+  failFinish = false,
+  hangStart = false,
+  hangFinish = false,
+} = {}) {
   const rows: Row[] = [];
   const errors: string[] = [];
   const repository: WebAuditRepository = {
     async start(entry) {
       if (failStart) throw new Error("db down");
+      if (hangStart) await new Promise(() => {});
       rows.push({ ...entry, outcome: "pending", error: null });
       return { id: rows.length };
     },
     async finish(id: number, outcome: FinalWebAuditOutcome, error: string | null = null) {
       if (failFinish) throw new Error("db down");
+      if (hangFinish) await new Promise(() => {});
       const row = rows[id - 1];
       if (row) Object.assign(row, { outcome, error });
     },
@@ -32,6 +39,7 @@ function setup({ failStart = false, failFinish = false } = {}) {
   const auditor = createAuditor({
     repository,
     logger: { ...silentLogger, error: (message) => void errors.push(message) },
+    timeoutMs: 30,
   });
   return { auditor, rows, errors };
 }
@@ -111,6 +119,25 @@ describe("audited", () => {
     expect(result).toEqual({ ok: false, reason: "audit_unavailable" });
     expect(ran).toBe(false);
     expect(errors).toEqual(["Could not write the audit log; the action did not run"]);
+  });
+
+  test("a pending row that is not written in time is audit_unavailable and the action never runs", async () => {
+    const { auditor, errors } = setup({ hangStart: true });
+    let ran = false;
+    const result = await auditor.audited(request(), "message.send", {}, async () => {
+      ran = true;
+      return { ok: true as const, data: 1 };
+    });
+    expect(result).toEqual({ ok: false, reason: "audit_unavailable" });
+    expect(ran).toBe(false);
+    expect(errors).toEqual(["Could not write the audit log; the action did not run"]);
+  });
+
+  test("a final write that hangs is given up on and the result still comes back", async () => {
+    const { auditor, errors } = setup({ hangFinish: true });
+    const result = await auditor.audited(request(), "message.send", {}, okAction);
+    expect(result).toEqual({ ok: true, data: 1 });
+    expect(errors).toEqual(["Could not record the outcome in the audit log"]);
   });
 
   test("a failing final write is logged and does not change the result", async () => {

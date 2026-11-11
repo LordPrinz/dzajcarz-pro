@@ -148,8 +148,9 @@ export function createCommandServer({
           );
         });
       } catch (error) {
-        // The adapter keeps the listener and subscribes again when the connection comes back.
-        logger.debug("Could not subscribe yet; will retry on reconnect", { error });
+        // A connection that is down does not reject (the adapter subscribes again when it comes back), so
+        // this is something else, such as a refused permission.
+        logger.warn("Could not subscribe to commands", { error });
       }
     },
 

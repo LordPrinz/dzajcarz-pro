@@ -10,7 +10,13 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   "Referrer-Policy": "no-referrer",
 };
 
+/**
+ * Adds the security headers, and `Cache-Control: no-store` to any response that sets no caching of its own:
+ * API, health and error answers hold live guild data that neither the browser nor a proxy should keep. The
+ * page and its hashed assets set their own.
+ */
 export function withSecurityHeaders(response: Response): Response {
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.headers.set(name, value);
+  if (!response.headers.has("Cache-Control")) response.headers.set("Cache-Control", "no-store");
   return response;
 }

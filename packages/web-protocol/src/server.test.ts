@@ -54,6 +54,14 @@ function setup(handler: () => Promise<unknown> = async () => [guild], now = Date
 }
 
 describe("createCommandServer", () => {
+  test("stop unsubscribes from the command channel", async () => {
+    const t = setup();
+    await t.server.start();
+    expect(t.pubsub.isSubscribed(COMMAND_CHANNEL)).toBe(true);
+    await t.server.stop();
+    expect(t.pubsub.isSubscribed(COMMAND_CHANNEL)).toBe(false);
+  });
+
   test("runs the handler and replies with its result", async () => {
     const t = setup();
     await t.server.start();

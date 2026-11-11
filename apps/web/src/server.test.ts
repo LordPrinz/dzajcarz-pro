@@ -203,6 +203,52 @@ describe("security headers", () => {
   });
 
   test.each([
+    ["a list", (etag: string) => `"other", ${etag}`],
+    ["a weak tag", (etag: string) => `W/${etag}`],
+    ["a wildcard", () => "*"],
+  ])("If-None-Match with %s is a 304", async (_label, header) => {
+    started = await startTestServer();
+    const etag = (await fetch(`${started.url}/`)).headers.get("etag") ?? "";
+    const again = await fetch(`${started.url}/`, { headers: { "If-None-Match": header(etag) } });
+    expect(again.status).toBe(304);
+  });
+
+  test("If-None-Match without the current tag gets the page", async () => {
+    started = await startTestServer();
+    const again = await fetch(`${started.url}/`, {
+      headers: { "If-None-Match": '"old", W/"older"' },
+    });
+    expect(again.status).toBe(200);
+  });
+
+  test.each([
+    ["the guild list", "/api/guilds", {}],
+    ["the bot status", "/api/status", {}],
+    ["readiness", "/health", {}],
+    ["liveness", "/health/live", {}],
+    ["a 404", "/nope", {}],
+    ["a 421", "/api/status", { Host: "evil.example" }],
+    ["a 500", "/api/boom", {}],
+  ])("%s is never cached", async (_label, path, headers) => {
+    started = await startTestServer({ extraRoutes: { "/api/boom": { GET: boom } } });
+    const response = await fetch(`${started.url}${path}`, { headers });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("HEAD on the page answers its headers without a body", async () => {
+    started = await startTestServer();
+    const get = await fetch(`${started.url}/`);
+    const body = await get.arrayBuffer();
+    const head = await fetch(`${started.url}/`, { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(head.headers.get("etag")).toBe(get.headers.get("etag"));
+    expect(head.headers.get("content-type")).toBe(get.headers.get("content-type"));
+    expect(head.headers.get("content-length")).toBe(String(body.byteLength));
+    expect((await head.arrayBuffer()).byteLength).toBe(0);
+    expectSecurityHeaders(head);
+  });
+
+  test.each([
     ["an API answer", "/api/status", {}, 200],
     ["a 404", "/nope", {}, 404],
     ["a 421", "/api/status", { Host: "evil.example" }, 421],
