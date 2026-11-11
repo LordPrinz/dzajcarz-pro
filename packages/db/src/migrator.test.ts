@@ -70,6 +70,7 @@ describe.skipIf(!sql)("migrator", () => {
       "scheduled_song_config",
       "scheduled_song_exclusion",
       "schema_migrations",
+      "web_audit",
       "welcome_config",
     ]);
   });

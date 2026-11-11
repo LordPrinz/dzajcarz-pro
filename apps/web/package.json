@@ -1,0 +1,25 @@
+{
+  "name": "@dzajcarz/web",
+  "version": "5.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env --hot src/index.ts",
+    "start": "bun --env-file=../../.env src/index.ts",
+    "build": "bun build src/index.ts --compile --minify --sourcemap --outfile dist/web",
+    "typecheck": "tsc -p . && tsc -p src/ui && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@dzajcarz/core": "workspace:*",
+    "@dzajcarz/db": "workspace:*",
+    "@dzajcarz/kv": "workspace:*",
+    "@dzajcarz/web-protocol": "workspace:*",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  }
+}

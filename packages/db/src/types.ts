@@ -99,3 +99,19 @@ export interface ScheduledMessageOptOutRow {
   guild_id: string | null;
   created_at: Date;
 }
+
+/** `pending` while the action runs; one of the others once it finished. */
+export type WebAuditOutcome = "pending" | "ok" | "failed" | "unavailable" | "timeout" | "rejected";
+
+export interface WebAuditRow {
+  /** bigint comes back from Bun.SQL as a string. */
+  id: string;
+  actor: string | null;
+  action: string;
+  guild_id: string | null;
+  channel_id: string | null;
+  payload: unknown;
+  outcome: WebAuditOutcome;
+  error: string | null;
+  created_at: Date;
+}

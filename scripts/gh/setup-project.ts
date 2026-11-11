@@ -82,6 +82,7 @@ const SELECT_FIELDS: Record<string, Option[]> = {
       description: "Per-guild settings",
       label: "area:settings",
     },
+    { name: "Web", color: "GREEN", description: "Web panel", label: "area:web" },
     { name: "Docs", color: "GRAY", description: "DESIGN.md, ADRs", label: "area:docs" },
   ],
   Priority: [

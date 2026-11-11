@@ -82,14 +82,43 @@ export interface ConnectionLog {
   warn(message: string, fields?: Record<string, unknown>): void;
 }
 
+export interface KeepConnectedOptions {
+  /** How long to wait before reconnecting after Bun gave up. */
+  retryMs?: number;
+  /**
+   * Runs on every connect: the first one, `keepConnected`'s own retries and Bun's internal reconnects. When it
+   * throws, the connection is closed so the retry path connects again and runs it again.
+   */
+  onConnect?: () => void | Promise<void>;
+}
+
 /**
  * Connects and reconnects forever. Pair it with `enableOfflineQueue: false`, so commands fail fast
  * while Redis is down instead of hanging requests. Bun calls `onclose` after a failed connect too.
+ * A number as `options` is `retryMs`.
  */
-export function keepConnected(client: RedisClient, log: ConnectionLog, retryMs = 5_000): void {
+export function keepConnected(
+  client: RedisClient,
+  log: ConnectionLog,
+  options: number | KeepConnectedOptions = {},
+): void {
+  const { retryMs = 5_000, onConnect } =
+    typeof options === "number" ? { retryMs: options } : options;
   client.onclose = (error) => {
     log.warn("Redis connection closed; retrying", { error: error.message, retryMs });
     setTimeout(() => client.connect().catch(() => {}), retryMs);
   };
+  if (onConnect) {
+    client.onconnect = () => {
+      Promise.resolve()
+        .then(onConnect)
+        .catch((error: unknown) => {
+          log.warn("Redis connect hook failed; reconnecting", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          client.close();
+        });
+    };
+  }
   client.connect().catch(() => {});
 }

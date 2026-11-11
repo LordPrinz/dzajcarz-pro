@@ -18,7 +18,7 @@ import {
   createWelcomeRepository,
 } from "@dzajcarz/db";
 import { migrate } from "@dzajcarz/db/migrator";
-import { createRedisStore, createTimedStore, keepConnected } from "@dzajcarz/kv";
+import { createRedisPubSub, createRedisStore, createTimedStore, keepConnected } from "@dzajcarz/kv";
 import { DZAJCO_GIF } from "@dzajcarz/module-dzajco";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
@@ -40,6 +40,7 @@ import {
 import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { createScheduleVoice } from "./discord/schedule.ts";
+import { createGuildList } from "./discord/web-guilds.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleEnabled } from "./event-scope.ts";
@@ -57,6 +58,7 @@ import { createPrefixResolver } from "./prefix-resolver.ts";
 import { createPrefixSettings } from "./prefix-settings.ts";
 import { createRiotStats } from "./riot/stats.ts";
 import { createTimeZones } from "./time-zones.ts";
+import { startWebBridge } from "./web-bridge.ts";
 
 // `bot healthcheck` is the container HEALTHCHECK: it needs no token or database, so it runs before loadEnv.
 if (process.argv[2] === "healthcheck") process.exit(await runHealthcheck(Bun.env));
@@ -77,6 +79,10 @@ try {
 const redis = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
 keepConnected(redis, logger);
 const redisStore = createTimedStore(createRedisStore(redis));
+// A subscribed connection accepts nothing but (un)subscribe, so the web panel's pub/sub gets its own.
+const redisSubscriber = new RedisClient(env.REDIS_URL, { enableOfflineQueue: false });
+const pubsub = createRedisPubSub({ publisher: redis, subscriber: redisSubscriber });
+keepConnected(redisSubscriber, logger, { onConnect: pubsub.resubscribe });
 
 const guildSettings = createGuildSettingsRepository(sql);
 // Replaced by DEFAULT_TIME_ZONE and /timezone; a leftover value would otherwise be dropped without a word.
@@ -233,7 +239,17 @@ client.on(
   ),
 );
 
+const startedAt = new Date().toISOString();
+// A failed subscribe is retried when Redis reconnects, so the bridge never blocks login.
+const webBridge = await startWebBridge({
+  pubsub,
+  listGuilds: createGuildList(client),
+  botStatus: () => ({ guilds: client.guilds.cache.size, startedAt }),
+  logger: logger.child({ component: "web-bridge" }),
+});
+
 client.once(Events.ClientReady, (ready) => {
+  webBridge.onReady();
   logger.info("Logged in", {
     app: env.DISCORD_APP,
     user: ready.user.tag,
@@ -299,6 +315,7 @@ async function shutdown(signal: string): Promise<void> {
   let exitCode = 0;
   try {
     await healthServer?.stop(true);
+    await webBridge.stop();
     for (const module of modules) {
       try {
         await module.dispose?.();
@@ -314,6 +331,7 @@ async function shutdown(signal: string): Promise<void> {
     });
     await client.destroy();
     redis.close();
+    redisSubscriber.close();
     await sql.close();
   } catch (error) {
     exitCode = 1;

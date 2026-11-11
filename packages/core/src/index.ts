@@ -15,3 +15,4 @@ export * from "./registry.ts";
 export * from "./scheduler.ts";
 export * from "./time-zone.ts";
 export * from "./timeout.ts";
+export * from "./url.ts";

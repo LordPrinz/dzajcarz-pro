@@ -53,14 +53,15 @@ of this repository: the image is built from it, and Lavalink mounts `infra/laval
 ```bash
 git clone git@github.com:LordPrinz/dzajcarz-pro.git dzajcarz && cd dzajcarz   # main is the default branch
 cp .env.example .env && chmod 600 .env
-# fill in DISCORD_TOKEN, DISCORD_CLIENT_ID and the three passwords (openssl rand -hex 32 for each)
+# fill in DISCORD_TOKEN, DISCORD_CLIENT_ID, the five passwords (openssl rand -hex 32 for each)
+# and WEB_PUBLIC_ORIGIN (the public URL of the web panel, see below)
 bun run prod:up
 ```
 
 Production reads the same `.env` as local development, but only the values the bot needs on a server: the
-token, the client id, the three passwords, `BOT_PREFIX`, `RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`, `LOG_LEVEL`, the scheduled song
-settings and `HEALTH_PUBLISH_PORT`. Compose passes each one to the bot by name, so `DATABASE_URL`,
-`REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID`, the test bot's `DISCORD_DEV_TOKEN` and `DISCORD_DEV_CLIENT_ID`, and the `TEST_*` URLs in the file never reach the
+token, the client id, the passwords, `BOT_PREFIX`, `RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`, `LOG_LEVEL`, the scheduled song
+settings and `HEALTH_PUBLISH_PORT`. The web panel adds `WEB_PUBLIC_ORIGIN`, `WEB_POSTGRES_PASSWORD`, `WEB_REDIS_PASSWORD` (all required) and `BOT_REQUEST_TIMEOUT_MS`. Compose passes each one to the container by name, so `DATABASE_URL`,
+`REDIS_URL`, `WEB_DATABASE_URL`, `WEB_REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID`, the test bot's `DISCORD_DEV_TOKEN` and `DISCORD_DEV_CLIENT_ID`, and the `TEST_*` URLs in the file never reach the
 production container. Without a dev guild the bot deploys its slash commands globally. The production stack
 is a separate compose project with its own volumes, so it does not share data with `bun run infra:up`.
 
@@ -80,6 +81,61 @@ change it in the database first, then in `.env`, then run `bun run prod:up`:
 ```bash
 prod exec postgres psql -U dzajcarz -c "ALTER USER dzajcarz PASSWORD '<new hex password>'"
 ```
+
+## Web panel
+
+The panel ([ADR 9](adr/0009-web-panel-as-a-separate-process.md)) is the `web` service, built from the same
+`Dockerfile` (`--target web`). It has **no login of its own**: it must only ever be reachable through a reverse
+proxy that has Authentik forward auth in front of it. It publishes no host port. The proxy reaches it over the
+`dzajcarz-panel` network, which only `web` and the proxy may join, since anything on that network talks to the
+panel without Authentik. The panel does not wait for the bot; it starts alone and says "Bot niedostępny"
+until the bot answers.
+
+Set `WEB_PUBLIC_ORIGIN` in `.env` to the public URL, as a bare origin (`https://panel.example.com`, no path,
+no trailing slash). Compose refuses to start without it. The panel compares every `Host` and `Origin` with it.
+
+The panel has its own logins and never uses the bot's, so a bug in it cannot touch the bot's data:
+
+- **Postgres:** the role `dzajcarz_web`, which may only read and add `web_audit` rows and set their outcome.
+  The bot's migration creates it without a login and grants that; the one-shot `web-db-role` service then
+  runs [`infra/postgres/web-role.sql`](../infra/postgres/web-role.sql) as `dzajcarz` on every
+  `bun run prod:up` and sets its password from `WEB_POSTGRES_PASSWORD`. This works on an existing volume
+  too, and changing the password in `.env` takes effect on the next `prod:up`. The panel never migrates: on
+  the very first deploy it restarts until the bot has created `web_audit`.
+- **Redis:** the ACL user `web`, limited by [`infra/redis/web-user.acl`](../infra/redis/web-user.acl) to
+  publishing and subscribing on `dzajcarz:web:*` and `PING`. The redis service writes it into its config
+  on the tmpfs from `WEB_REDIS_PASSWORD`, so it is recreated (with the new password) on every start.
+
+Every response carries a strict `Content-Security-Policy` (scripts, styles and data from the panel itself,
+images also from `cdn.discordapp.com`, no framing), `X-Content-Type-Options: nosniff` and
+`Referrer-Policy: no-referrer`. A proxy that adds its own policy must not loosen it.
+
+`dzajcarz-panel` is an internal network: the panel has no route out. In the proxy's own compose project,
+attach it to the network and point it at `web:3000`; the proxy keeps reaching the internet through its other
+networks:
+
+```yaml
+services:
+  proxy:
+    networks: [panel] # plus whatever it already uses
+
+networks:
+  panel:
+    name: dzajcarz-panel
+    external: true
+```
+
+The proxy has to:
+
+- authenticate every request with Authentik forward auth before it reaches the panel;
+- **overwrite** the `X-authentik-*` request headers with the ones from the auth response and never pass
+  client-sent values through: the panel writes `X-authentik-username` into its audit log;
+- forward the original `Host` header (nginx: `proxy_set_header Host $host;`; Caddy and Traefik do it by
+  default). The panel answers `421` to any other `Host`, so a proxy that rewrites it breaks every request;
+- pass WebSocket upgrades on `/api/ws` (nginx: `Upgrade` and `Connection` headers).
+
+`docker ps` shows the container's health through `web healthcheck`, which asks the panel's own `/health`
+(Postgres and Redis; the bot being down does not count). Logs: `prod logs -f web`.
 
 ## Release
 

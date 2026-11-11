@@ -21,9 +21,9 @@ export const GUILD_TABLES = [
 /**
  * Tables with a `guild_id` that survive the bot leaving. An opt-out from a server's scheduled DMs is the
  * member's own choice, not the server's data; deleting it would let that server DM them again after
- * re-adding the bot.
+ * re-adding the bot. `web_audit` is the owner's record of what the web panel did, not the server's data.
  */
-export const KEPT_GUILD_TABLES = ["scheduled_message_opt_out"] as const;
+export const KEPT_GUILD_TABLES = ["scheduled_message_opt_out", "web_audit"] as const;
 
 export type GuildTable = (typeof GUILD_TABLES)[number];
 
