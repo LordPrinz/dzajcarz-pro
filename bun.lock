@@ -84,6 +84,7 @@
         "@dzajcarz/core": "workspace:*",
       },
       "devDependencies": {
+        "@dzajcarz/kv": "workspace:*",
         "discord.js": "14.28.1",
       },
     },
@@ -154,6 +155,9 @@
     "packages/kv": {
       "name": "@dzajcarz/kv",
       "version": "0.0.0",
+      "dependencies": {
+        "@dzajcarz/core": "workspace:*",
+      },
     },
   },
   "packages": {

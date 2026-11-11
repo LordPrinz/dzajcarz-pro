@@ -8,7 +8,12 @@ import {
   silentLogger,
 } from "@dzajcarz/core";
 import { createFakeContext, replyText } from "@dzajcarz/core/testing";
-import { createMemoryStore, type KeyValueStore } from "@dzajcarz/kv";
+import {
+  createMemoryStore,
+  createStalledStore,
+  createTimedStore,
+  type KeyValueStore,
+} from "@dzajcarz/kv";
 import {
   BOT_TARGET,
   HIGHER_THAN_ACTOR,
@@ -381,6 +386,15 @@ describe("warn", () => {
     expect(text(ctx.replies)).toBe(
       `Ostrzeżenie dla <@${TARGET}> (ostrzeżenie nr 2). Powód: bez spamu`,
     );
+  });
+
+  test("a DM limit that never answers does not hold the warning past the limit", async () => {
+    const { run, calls, entries } = setup({}, {}, createTimedStore(createStalledStore(), 20));
+    const started = performance.now();
+    await run("warn", { user: TARGET, reason: "bez spamu" });
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(entries[0]).toMatchObject({ action: "warn", targetId: TARGET });
+    expect(calls).toHaveLength(1);
   });
 
   test("a member whose role is above the bot's can still be warned", async () => {

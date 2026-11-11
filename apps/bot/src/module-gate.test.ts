@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { silentLogger } from "@dzajcarz/core";
 import type { DisabledModule } from "@dzajcarz/db";
-import { createMemoryStore, type KeyValueStore } from "@dzajcarz/kv";
+import {
+  createMemoryStore,
+  createStalledStore,
+  createTimedStore,
+  type KeyValueStore,
+} from "@dzajcarz/kv";
 import { createModuleGate } from "./module-gate.ts";
 
 const GUILD = "100000000000000001";
@@ -162,6 +167,30 @@ describe("module gate", () => {
       timeoutMs: 20,
     });
     expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(true);
+  });
+
+  test("a cache that never answers still answers from Postgres within the limit", async () => {
+    const gate = createModuleGate({
+      toggles: { listDisabled: async () => [{ module: "music", channelId: null }] },
+      cache: createTimedStore(createStalledStore(), 20),
+      logger: silentLogger,
+    });
+    const started = performance.now();
+    expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(false);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  test("only a timeout is logged as one", async () => {
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (message: string) => void warnings.push(message) };
+    const gate = createModuleGate({
+      toggles: { listDisabled: () => new Promise(() => {}) },
+      cache: createMemoryStore(),
+      logger,
+      timeoutMs: 20,
+    });
+    await gate.isEnabled(GUILD, CHANNEL, "music");
+    expect(warnings).toEqual(["Module toggle lookup timed out; treating modules as enabled"]);
   });
 
   test("forget does not throw when Redis is down", async () => {
