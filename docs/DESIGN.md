@@ -238,8 +238,9 @@ same for their recipient.
 ### Dżajco
 
 The `dzajco` module answers a message that says "what" in any language with an egg reaction and the DŻAJCO
-gif. The word list comes from the old bot (111 entries); `normalizeWords` strips zero-width spaces, folds to
-NFC lowercase and drops repeats, which leaves 104. Short common words (`me`, `co`, `que`) stay on purpose.
+gif. The word list comes from the old bot, minus the words that are everyday English, German, Spanish or French
+(`was`, `me`, `mit`, `que`, ...), which left 100 entries; `normalizeWords` strips zero-width spaces, folds to
+NFC lowercase and drops repeats, which leaves 94. The Polish `co` and the deliberate misspellings stay.
 
 `createWhatMatcher` compiles the list into one regex, once. Every character of a word may repeat (`whaaat`)
 and inner whitespace is any run of whitespace. Words in scripts written without spaces (Han, kana, Thai, Lao,

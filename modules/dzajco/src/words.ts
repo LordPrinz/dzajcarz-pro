@@ -1,6 +1,8 @@
 /**
- * The words that trigger Dżajco, copied in order from the old bot's `data/allowedWords.json` (111 entries,
- * several of them duplicates). One entry carries a zero-width space, written as an escape so it stays visible.
+ * The words that trigger Dżajco, taken in order from the old bot's `data/allowedWords.json` (several entries
+ * are duplicates). Words that are everyday English, German, Spanish or French (`was`, `me`, `mit`, `que`,
+ * `quelle`, ...) were dropped because they answered ordinary sentences. One entry carries a zero-width space,
+ * written as an escape so it stays visible.
  */
 export const SOURCE_WORDS: readonly string[] = [
   "wat",
@@ -25,14 +27,10 @@ export const SOURCE_WORDS: readonly string[] = [
   "mida",
   "Ano",
   "mitä",
-  "quel",
-  "quelle",
-  "que",
   "τι",
   "τις",
   "რა",
   "શું",
-  "me",
   "He aha",
   "מה",
   "क्या",
@@ -52,9 +50,7 @@ export const SOURCE_WORDS: readonly string[] = [
   "ਕੀ",
   "چی",
   "Co",
-  "que",
   "Какие",
-  "ce",
   "o le a",
   "Шта",
   "អ្វី",
@@ -68,7 +64,6 @@ export const SOURCE_WORDS: readonly string[] = [
   "무엇",
   "waa maxay",
   "chì",
-  "eng",
   "Kisa",
   "nini",
   "çi",
@@ -90,10 +85,8 @@ export const SOURCE_WORDS: readonly string[] = [
   "apa",
   "ఏమి",
   "inona",
-  "ne",
   "xiex",
   "näme",
-  "aha",
   "نېمە",
   "काय",
   "що",
@@ -103,8 +96,6 @@ export const SOURCE_WORDS: readonly string[] = [
   "nima",
   "wat",
   "beth",
-  "was",
-  "mit",
   "chani",
   "gì",
   "hva",
