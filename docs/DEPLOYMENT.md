@@ -130,6 +130,13 @@ for the bot: it starts alone and says "Bot niedostępny" until the bot answers.
 `docker ps` shows the container's health through `web healthcheck` (Postgres and Redis; the bot being down
 does not count). Logs: `prod logs -f web`.
 
+The panel shows images, video and custom emoji from Discord's media hosts (`cdn.discordapp.com`,
+`media.discordapp.net`): the viewer's browser loads them from Discord directly, so the proxy needs nothing for
+them. Live messages reach the panel over Redis pub/sub. The redis service disconnects a subscriber that falls
+more than 8 MB behind (`client-output-buffer-limit pubsub 8mb 2mb 60`); the panel resubscribes on its own and
+misses only the events in between. The limit is part of the redis command, so the first `prod:up` after the
+change recreates the redis container (its data is kept on the volume).
+
 ### Managed Postgres without CREATEROLE
 
 When the bot's database user may not create roles, migration 0014 only logs a NOTICE and skips the role and
@@ -148,6 +155,8 @@ GRANT USAGE ON SCHEMA public TO dzajcarz_web;
 -- Message archive (migration 0015): read only.
 GRANT SELECT ON archive_settings, archive_dm_settings, archived_message, archived_message_version
   TO dzajcarz_web;
+-- Migration 0017: the panel's queries end after 5 s.
+ALTER ROLE dzajcarz_web SET statement_timeout = '5s';
 ```
 
 Setting the login and password needs those rights as well; when the `web-db-role` step lacks them, run

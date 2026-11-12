@@ -68,9 +68,12 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     `WEB_PUBLIC_ORIGIN`, and request bodies must be JSON; anything else is rejected. The checks are
     applied by wrapping every route handler, and a test fails if a handler is not wrapped.
   - Every response carries `Content-Security-Policy: default-src 'self'; img-src 'self'
-    https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';
+    https://cdn.discordapp.com https://media.discordapp.net; media-src https://cdn.discordapp.com
+    https://media.discordapp.net; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';
     form-action 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`; API, health
-    and error answers also carry `Cache-Control: no-store`. Bun's
+    and error answers also carry `Cache-Control: no-store`. The two Discord hosts serve avatars, icons,
+    custom emoji, attachments and Discord's proxy copies of embed images (#146); an image or video anywhere
+    else is shown as a link, so opening a message never makes the browser contact a host a sender picked. Bun's
     HTML-import routes take no response headers, so the page and its assets are read into memory at
     startup (from the compiled binary, or built with `Bun.build` when run from source) and served by plain
     handlers that go through the guard like every other route.
@@ -111,8 +114,58 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
   - Backfill goes back from the oldest stored message only. Messages sent while the bot was down, after
     archiving began, are not filled in.
   - Attachment URLs point at Discord's CDN and are signed with an expiry; the archive keeps the link and
-    metadata, not the file. Showing them in the panel needs `media-src`/`img-src` for the attachment hosts,
-    which #146 decides together with the reading view.
+    metadata, not the file. Once a link has expired the panel shows a broken image; refreshing links through
+    the bot is left for later.
+- Reading (#146):
+  - An archived channel (its server archived and neither it nor its thread parent excluded, or a DM while
+    the DM switch is on) is read from Postgres, 50 messages a page, keyed on `(created_at, message_id)`.
+    Paging forward and opening a page around a message (a search result) always read the archive. Any other
+    channel is read live through `channel.messages` (discord.js with `cache: false`) and stored nowhere.
+    The reading endpoints change nothing, so they are not audited. Migration 0016 only adds an index on
+    `archived_message (author_id, created_at)` for the author lookups; no new table, so no new grant.
+  - Every archive read of a channel (a page in any direction, a jump to a message, the versions of a
+    message) checks the archive settings first, with the server taken from the stored messages rather than
+    from the request; a channel no longer archived answers `409 not_archived`. A thread's parent still comes
+    from the request, since the archive does not store it, so a wrong one can only hide or show a thread of
+    an archived server. Search is the exception: it covers everything stored, also channels whose archive
+    has been switched off since, because those messages stay in Postgres until someone deletes them.
+  - A page asks for the source of the pages already shown (`source=archive|live`), so one view never mixes
+    the two when the settings change while it is open.
+  - Cost ceiling: migration 0017 (and `infra/postgres/web-role.sql`) sets `statement_timeout = 5s` on
+    `dzajcarz_web`, and a query cut off by it answers `503 query_timeout`. A search needs at least one word
+    that is not excluded (`-word` alone would match nearly every message), else it is a 400.
+  - Replies that hold messages must fit in 64 KB: `channel.messages` cuts a message that is too big on its
+    own (embed text first, then embeds, content, attachments; marked `truncated`) and then drops the oldest
+    messages of the page (`hasMore` stays true). The same applies to every message event. `dms.list` holds at
+    most 50 channels, `names.resolve` at most 50 ids of each kind with names cut to 50 characters; tests
+    build the worst case of each.
+  - Names for mentions: `names.resolve` answers from the bot's caches only, never calling Discord, so it is
+    fast and cannot hit a rate limit. For the archive the panel fills the users the bot does not know from
+    the authors' latest stored names, and skips the bot while its heartbeat is missing.
+  - An edit of a message discord.js has not cached arrives partial; the bot does not fetch it for the live
+    view (the archive already fetches it when it stores it), so such an edit shows after a reload.
+  - Live events: the bot publishes every message it sees (`message.created`, `message.updated`,
+    `message.deleted`) on `dzajcarz:web:event`, archived or not, and the panel forwards each only to the
+    WebSockets subscribed to `channel:<id>`. A socket subscribes with `{"type":"subscribe","channelId":…}`
+    (zod, strict, a snowflake id), at most 10 channels per socket; anything else closes it with 1008. The
+    other way, the panel telling the bot which channels are watched, would publish less but needs a watch
+    list with expiry on the bot and a resync after either side restarts; for a friends' bot the traffic is
+    small and a `PUBLISH` that reaches no subscriber costs nothing. Either way the messages travel only
+    through Redis inside the trust boundary and are stored nowhere.
+  - Slow consumers: Bun closes a socket that has more than 1 MB queued (`backpressureLimit`,
+    `closeOnBackpressureLimit`), and the page reconnects. Redis disconnects a subscriber that falls 8 MB
+    behind, or 2 MB for a minute (`client-output-buffer-limit pubsub 8mb 2mb 60` in both compose files); the
+    panel resubscribes and misses the events in between, which a live view can afford.
+  - The DM list is the union of the archived DMs and the DM channels discord.js has cached. Discord gives a
+    bot no list of its DMs, so after a restart a conversation outside the archive appears only once a
+    message arrives in it.
+  - Message text is rendered by our own small Discord-markdown renderer into React elements, never through
+    `dangerouslySetInnerHTML`; links only from `https:` URLs, with `rel="noopener noreferrer nofollow"`. It
+    scans in linear time (inline code and fences use `indexOf`, not a backtracking regex; a test bounds
+    hostile input at 50 ms), and a spoiler keeps its links `inert` until it is opened.
+  - After the WebSocket reconnects, an open channel at its latest end fetches the latest page and joins
+    it (or replaces the view when more than a page was missed); a view opened around a search result says
+    to refresh instead.
 
 ## Drivers
 
@@ -157,12 +210,12 @@ configured origin are stateless and fail closed.
   reads a new table needs a grant in its migration.
 - `bun run web:dev` loses Bun's hot module reload for the page: `--hot` reloads the process instead.
 - A reply larger than 64 KB is dropped, so a command whose answer could grow (a long list) must page.
+- Every message the bot sees passes through Redis as an event, also while no panel is open. Nothing keeps
+  it, but anyone who can subscribe on the `web` or the bot's Redis user can read the server's messages live.
 
 ## Follow-ups
 
-- #146 live channel/DM events and WebSocket topics per channel, with a zod-validated subscribe message.
-  Message streams make slow subscribers matter: set Redis `client-output-buffer-limit pubsub` deliberately
-  and drop slow WebSocket clients (Bun backpressure) there.
+- Refreshing expired attachment links through the bot (Discord's `attachments/refresh-urls`).
 - #147 send-as-bot commands and the mentions adapter ([ADR 10](0010-mentions-from-the-web-panel.md)).
 - #148 music commands and events.
 - Consider extracting the health probe runner shared by both apps if a third process appears.

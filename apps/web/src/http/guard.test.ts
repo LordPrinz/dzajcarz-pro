@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { silentLogger } from "@dzajcarz/core";
-import { PUBLIC_ORIGIN, startTestServer, type TestServer, testPage } from "../testing.ts";
+import {
+  emptyArchive,
+  PUBLIC_ORIGIN,
+  startTestServer,
+  type TestServer,
+  testPage,
+} from "../testing.ts";
 import {
   allowedHosts,
   createGuard,
@@ -217,7 +223,12 @@ describe("guardRoutes", () => {
         port: 1,
         bot: { request: async () => ({ ok: false as const, reason: "unavailable" as const }) },
         auditor: { audited: (_request, _action, _context, run) => run() },
-        archiveSettings: { listGuilds: async () => [], dmEnabled: async () => false },
+        archiveSettings: {
+          listGuilds: async () => [],
+          dmEnabled: async () => false,
+          findGuild: async () => null,
+        },
+        archive: emptyArchive,
         live: started.live,
         probes: { postgres: async () => true, redis: async () => true },
         logger: silentLogger,

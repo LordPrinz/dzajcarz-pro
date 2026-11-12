@@ -1,8 +1,9 @@
 import type { Logger } from "@dzajcarz/core";
 import type { ArchiveSettingsRepository } from "@dzajcarz/db";
-import { type BotClient, COMMANDS, Snowflake } from "@dzajcarz/web-protocol";
+import { type BotClient, COMMANDS } from "@dzajcarz/web-protocol";
 import type { AuditedResult, Auditor } from "./audit.ts";
 import { readJson } from "./http/json.ts";
+import { idParam, invalidId } from "./http/params.ts";
 
 export interface ArchiveRouteDeps {
   bot: Pick<BotClient, "request">;
@@ -17,15 +18,6 @@ export interface ArchiveRouteDeps {
 const GuildSettingsBody = COMMANDS["archive.guild.set"].request.omit({ guildId: true });
 const DmBody = COMMANDS["archive.dm.set"].request;
 const BackfillBody = COMMANDS["archive.backfill"].request.omit({ channelId: true });
-
-/** A path parameter that must be a Discord id; undefined when it is not. */
-function idParam(request: Request, name: string): string | undefined {
-  const value = (request as Request & { params?: Record<string, string> }).params?.[name];
-  const parsed = Snowflake.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
-}
-
-const invalidId = () => Response.json({ error: "invalid_id" }, { status: 400 });
 
 /**
  * The archive endpoints (#145). Settings are read from Postgres; every change goes to the bot (which stores

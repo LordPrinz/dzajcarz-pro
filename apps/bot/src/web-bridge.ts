@@ -4,6 +4,7 @@ import {
   type CommandHandlers,
   type CommandResponse,
   createCommandServer,
+  type EventName,
   type EventPayload,
   type GuildSummary,
   HEARTBEAT_INTERVAL_MS,
@@ -18,11 +19,19 @@ export interface ArchiveControl {
   backfill: CommandHandlers["archive.backfill"];
 }
 
+/** The reading commands of the panel (#146). */
+export interface ReadingControl {
+  channelMessages: CommandHandlers["channel.messages"];
+  dmList: CommandHandlers["dms.list"];
+  resolveNames: CommandHandlers["names.resolve"];
+}
+
 export interface WebBridgeOptions {
   pubsub: PubSub;
   listGuilds: () => GuildSummary[];
   listChannels: (guildId: string) => CommandResponse<"guilds.channels">;
   archive: ArchiveControl;
+  reading: ReadingControl;
   /** What `bot.status` carries; read on every heartbeat. */
   botStatus: () => EventPayload<"bot.status">;
   logger: Logger;
@@ -32,6 +41,8 @@ export interface WebBridgeOptions {
 export interface WebBridge {
   /** Publishes `bot.status` now and then every heartbeat interval. Call it once the gateway is ready. */
   onReady(): void;
+  /** Fire and forget; never rejects. */
+  publishEvent<N extends EventName>(name: N, payload: EventPayload<N>): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -45,6 +56,7 @@ export async function startWebBridge({
   listGuilds,
   listChannels,
   archive,
+  reading,
   botStatus,
   logger,
   heartbeatMs = HEARTBEAT_INTERVAL_MS,
@@ -58,6 +70,9 @@ export async function startWebBridge({
       "archive.guild.set": archive.setGuild,
       "archive.dm.set": archive.setDm,
       "archive.backfill": archive.backfill,
+      "channel.messages": reading.channelMessages,
+      "dms.list": reading.dmList,
+      "names.resolve": reading.resolveNames,
     },
   });
   await server.start();
@@ -72,6 +87,7 @@ export async function startWebBridge({
       timer = setInterval(beat, heartbeatMs);
       timer.unref();
     },
+    publishEvent: (name, payload) => server.publishEvent(name, payload),
     async stop() {
       clearInterval(timer);
       timer = undefined;

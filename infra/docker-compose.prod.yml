@@ -146,7 +146,9 @@ services:
     # The password goes into a config file on a tmpfs, not onto the command line, where `ps` would show
     # it (it is still in the container's environment for redis-cli). The image's entrypoint then starts
     # redis-server as the redis user. The passwords go into that file unquoted, so a character Redis's config
-    # parser reads differently (space, quote, backslash, ...) stops the start instead.
+    # parser reads differently (space, quote, backslash, ...) stops the start instead. A pub/sub subscriber
+    # (the web panel) that falls behind by 8 MB, or by 2 MB for a minute, is disconnected and resubscribes; it
+    # misses those events, which is fine for a live view (ADR 9).
     command:
       - sh
       - -c
@@ -161,6 +163,7 @@ services:
         chown redis:redis /tmp/redis.conf &&
         exec docker-entrypoint.sh redis-server /tmp/redis.conf
         --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
+        --client-output-buffer-limit pubsub 8mb 2mb 60
     environment:
       # Read by the command above and by redis-cli in the health check.
       REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}

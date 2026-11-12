@@ -5,14 +5,22 @@ import { createBotClient, createCommandServer, type GuildSummary } from "@dzajca
 import { commandHandlers } from "@dzajcarz/web-protocol/testing";
 import { SECURITY_HEADERS } from "./http/headers.ts";
 import { createLiveState } from "./live.ts";
-import { failure } from "./server.ts";
-import { PUBLIC_ORIGIN, startTestServer, type TestServer } from "./testing.ts";
+import { failure, WS_BACKPRESSURE_LIMIT } from "./server.ts";
+import {
+  emptyArchive,
+  PUBLIC_ORIGIN,
+  startTestServer,
+  type TestServer,
+  testPage,
+} from "./testing.ts";
 
 const guilds: GuildSummary[] = [
   { id: "100000000000000001", name: "Alfa", iconUrl: null, memberCount: 3 },
 ];
 const PUBLIC_HOST = "panel.example.com";
 const STATUS = { guilds: 1, startedAt: "2026-11-11T10:00:00.000Z" };
+const WATCHED = "200000000000000001";
+const UNWATCHED = "200000000000000002";
 
 const change = () => Response.json({ changed: true });
 const boom = () => {
@@ -85,6 +93,23 @@ describe("GET /api/guilds", () => {
 });
 
 describe("other routes", () => {
+  test("the page links its SVG icon, and /favicon.ico answers with it too", async () => {
+    started = await startTestServer();
+    const page = await (await fetch(`${started.url}/`)).text();
+    const linked = /<link rel="icon" href="\.?(\/favicon-[^"]+\.svg)"/.exec(page)?.[1];
+    expect(linked).toBeDefined();
+    const icon = await fetch(`${started.url}${linked}`);
+    const fallback = await fetch(`${started.url}/favicon.ico`);
+    for (const response of [icon, fallback]) {
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toStartWith("image/svg+xml");
+      expect(response.headers.get("content-security-policy")).toBe(
+        SECURITY_HEADERS["Content-Security-Policy"] ?? "",
+      );
+    }
+    expect(await fallback.text()).toBe(await icon.text());
+  });
+
   test("an unknown path is 404 JSON", async () => {
     started = await startTestServer();
     const response = await fetch(`${started.url}/nope`);
@@ -168,9 +193,11 @@ describe("security headers", () => {
     }
   };
 
-  test("the CSP allows only the page's own origin and Discord's CDN for images", () => {
+  test("the CSP allows only the page's own origin, and Discord's media hosts for images and video", () => {
     expect(SECURITY_HEADERS["Content-Security-Policy"]).toBe(
-      "default-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; " +
+      "default-src 'self'; " +
+        "img-src 'self' https://cdn.discordapp.com https://media.discordapp.net; " +
+        "media-src https://cdn.discordapp.com https://media.discordapp.net; connect-src 'self'; " +
         "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     );
     expect(SECURITY_HEADERS["X-Content-Type-Options"]).toBe("nosniff");
@@ -348,12 +375,73 @@ describe("WebSocket /api/ws", () => {
     await until(() => messages.length === 2);
     expect(messages[1]).toMatchObject({ payload: { guilds: 5 } });
 
-    // Whatever the client sends is ignored: no reply, no error, the socket stays open.
+    // Anything but a valid subscribe or unsubscribe closes the socket.
+    const closed = new Promise<number>((resolve) => {
+      socket.onclose = (event) => resolve(event.code);
+    });
     socket.send("subscribe everything");
+    expect(await closed).toBe(1008);
+  });
+
+  test("message events reach only the sockets watching their channel", async () => {
+    const pubsub = createMemoryPubSub();
+    const bot = createBotClient({ pubsub, timeoutMs: 50, logger: silentLogger });
+    await bot.start();
+    cleanups.push(() => bot.stop());
+    const commands = createCommandServer({
+      pubsub,
+      logger: silentLogger,
+      handlers: commandHandlers(),
+    });
+    started = await startTestServer({ bot });
+    const watching = open(started, { Origin: PUBLIC_ORIGIN, Host: PUBLIC_HOST });
+    const other = open(started, { Origin: PUBLIC_ORIGIN, Host: PUBLIC_HOST });
+    await Promise.all([watching.opened, other.opened]);
+    await until(() => watching.messages.length === 1 && other.messages.length === 1);
+    watching.socket.send(JSON.stringify({ type: "subscribe", channelId: WATCHED }));
+    other.socket.send(JSON.stringify({ type: "subscribe", channelId: UNWATCHED }));
     await Bun.sleep(30);
-    expect(messages).toHaveLength(2);
-    expect(socket.readyState).toBe(WebSocket.OPEN);
-    socket.close();
+
+    const deleted = (channelId: string) =>
+      commands.publishEvent("message.deleted", { guildId: null, channelId, ids: [WATCHED] });
+    await deleted(WATCHED);
+    await until(() => watching.messages.length === 2);
+    expect(watching.messages[1]).toEqual({
+      event: "message.deleted",
+      payload: { guildId: null, channelId: WATCHED, ids: [WATCHED] },
+    });
+    await Bun.sleep(30);
+    expect(other.messages).toHaveLength(1);
+
+    watching.socket.send(JSON.stringify({ type: "unsubscribe", channelId: WATCHED }));
+    await Bun.sleep(30);
+    await deleted(WATCHED);
+    await Bun.sleep(30);
+    expect(watching.messages).toHaveLength(2);
+    watching.socket.close();
+    other.socket.close();
+  });
+
+  test("the socket settings close a client that stops reading", async () => {
+    started = await startTestServer();
+    const { websocket } = (await import("./server.ts")).createWebServer({
+      publicOrigin: PUBLIC_ORIGIN,
+      port: 1,
+      bot: { request: async () => ({ ok: false as const, reason: "unavailable" as const }) },
+      auditor: { audited: (_request, _action, _context, run) => run() },
+      archiveSettings: {
+        listGuilds: async () => [],
+        dmEnabled: async () => false,
+        findGuild: async () => null,
+      },
+      archive: emptyArchive,
+      live: started.live,
+      probes: { postgres: async () => true, redis: async () => true },
+      logger: silentLogger,
+      page: await testPage(),
+    });
+    expect(websocket.backpressureLimit).toBe(WS_BACKPRESSURE_LIMIT);
+    expect(websocket.closeOnBackpressureLimit).toBe(true);
   });
 
   test("a fresh page with no heartbeat yet sees an offline status", async () => {

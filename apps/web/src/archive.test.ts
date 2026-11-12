@@ -55,7 +55,11 @@ describe("GET /api/archive/settings", () => {
     const guilds = [{ guildId: GUILD, enabled: true, excludedChannelIds: [CHANNEL] }];
     started = await startTestServer({
       bot,
-      archiveSettings: { listGuilds: async () => guilds, dmEnabled: async () => true },
+      archiveSettings: {
+        listGuilds: async () => guilds,
+        dmEnabled: async () => true,
+        findGuild: async () => null,
+      },
     });
     const response = await fetch(`${started.url}/api/archive/settings`);
     expect(response.status).toBe(200);
@@ -70,6 +74,7 @@ describe("GET /api/archive/settings", () => {
           throw new Error("down");
         },
         dmEnabled: async () => false,
+        findGuild: async () => null,
       },
     });
     const response = await fetch(`${started.url}/api/archive/settings`);

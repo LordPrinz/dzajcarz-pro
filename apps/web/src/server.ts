@@ -7,10 +7,16 @@ import { createGuard, guarded, guardRoutes } from "./http/guard.ts";
 import { withSecurityHeaders } from "./http/headers.ts";
 import { MAX_BODY_BYTES } from "./http/json.ts";
 import { type PageFiles, pageRoutes } from "./http/page.ts";
-import { BOT_TOPIC, type LiveState } from "./live.ts";
+import { BOT_TOPIC, createSubscriptions, type LiveState } from "./live.ts";
+import { type ReadingRouteDeps, readingRoutes } from "./reading.ts";
 
 /** Largest WebSocket message a client may send; the panel expects nothing bigger than a small JSON object. */
 export const MAX_WS_MESSAGE_BYTES = 4 * 1024;
+/**
+ * Bytes Bun may queue for one socket before it closes it: a tab that stops reading (asleep, slow link) must
+ * not make the server buffer every message event for it.
+ */
+export const WS_BACKPRESSURE_LIMIT = 1024 * 1024;
 
 export interface WebServerDeps {
   publicOrigin: string;
@@ -18,7 +24,8 @@ export interface WebServerDeps {
   bot: Pick<BotClient, "request">;
   /** Every state-changing endpoint runs its action through `audited`. */
   auditor: Auditor;
-  archiveSettings: ArchiveRouteDeps["archiveSettings"];
+  archiveSettings: ArchiveRouteDeps["archiveSettings"] & ReadingRouteDeps["archiveSettings"];
+  archive: ReadingRouteDeps["archive"];
   live: LiveState;
   probes: Probes;
   logger: Logger;
@@ -72,6 +79,15 @@ export function createWebServer(
     return Response.json(report, { status: report.ok ? 200 : 503 });
   };
   const liveness = () => Response.json({ ok: true });
+  // The page links its bundled icon; this answers browsers that ask for /favicon.ico anyway.
+  const icon = [...deps.page].find(([path]) => path.startsWith("/favicon"))?.[1];
+  const favicon = () =>
+    icon
+      ? new Response(icon.body, {
+          headers: { "Content-Type": icon.type, "Cache-Control": "public, max-age=86400" },
+        })
+      : new Response(null, { status: 404 });
+  const subscriptions = createSubscriptions();
   const upgrade = (request: Request, server: Bun.Server<undefined>) =>
     server.upgrade(request)
       ? undefined
@@ -85,10 +101,19 @@ export function createWebServer(
       "/health": { GET: readiness },
       "/health/live": { GET: liveness },
       "/api/ws": { GET: upgrade },
+      "/favicon.ico": { GET: favicon },
       ...archiveRoutes({
         bot,
         auditor: deps.auditor,
         archiveSettings: deps.archiveSettings,
+        logger,
+        failure,
+      }),
+      ...readingRoutes({
+        bot,
+        archive: deps.archive,
+        archiveSettings: deps.archiveSettings,
+        botOnline: () => live.status().online,
         logger,
         failure,
       }),
@@ -109,12 +134,16 @@ export function createWebServer(
     websocket: {
       // A bigger message closes the socket (1009).
       maxPayloadLength: MAX_WS_MESSAGE_BYTES,
+      backpressureLimit: WS_BACKPRESSURE_LIMIT,
+      closeOnBackpressureLimit: true,
       open(ws: Bun.ServerWebSocket<undefined>) {
         ws.subscribe(BOT_TOPIC);
         ws.send(JSON.stringify(live.status()));
       },
-      // No client-to-server protocol yet: #146 adds a validated subscribe message.
-      message() {},
+      // Subscribe and unsubscribe to one channel's message events; anything else closes the socket.
+      message(ws: Bun.ServerWebSocket<undefined>, raw: string | Buffer) {
+        subscriptions.handle(ws, raw);
+      },
     },
   };
 }

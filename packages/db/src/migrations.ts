@@ -16,6 +16,8 @@ import m0012 from "../migrations/0012_dzajco_dm.sql" with { type: "text" };
 import m0013 from "../migrations/0013_scheduled_message_last_sent.sql" with { type: "text" };
 import m0014 from "../migrations/0014_web_audit.sql" with { type: "text" };
 import m0015 from "../migrations/0015_message_archive.sql" with { type: "text" };
+import m0016 from "../migrations/0016_archive_author_index.sql" with { type: "text" };
+import m0017 from "../migrations/0017_web_statement_timeout.sql" with { type: "text" };
 
 export interface Migration {
   /** File name, e.g. `0001_init.sql`: the key in `schema_migrations`. */
@@ -41,4 +43,6 @@ export const MIGRATIONS: readonly Migration[] = [
   { name: "0013_scheduled_message_last_sent.sql", content: m0013 },
   { name: "0014_web_audit.sql", content: m0014 },
   { name: "0015_message_archive.sql", content: m0015 },
+  { name: "0016_archive_author_index.sql", content: m0016 },
+  { name: "0017_web_statement_timeout.sql", content: m0017 },
 ];

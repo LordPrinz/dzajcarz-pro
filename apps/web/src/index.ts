@@ -1,6 +1,7 @@
 // Composition root of the web panel: creates the real adapters once and starts the server.
 import { createJsonLogger } from "@dzajcarz/core";
 import {
+  createArchiveReader,
   createArchiveSettingsRepository,
   createDb,
   createWebAuditRepository,
@@ -65,6 +66,7 @@ const server = Bun.serve({
     bot,
     auditor,
     archiveSettings: createArchiveSettingsRepository(sql),
+    archive: createArchiveReader(sql),
     live,
     probes: {
       postgres: async () => {

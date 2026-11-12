@@ -13,6 +13,11 @@ class FakeSocket {
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onclose: (() => void) | null = null;
   closed = false;
+  readyState = 0;
+  sent: string[] = [];
+  send(data: string) {
+    this.sent.push(data);
+  }
   close() {
     this.closed = true;
   }
@@ -22,12 +27,14 @@ function setup(isExpired: () => Promise<boolean> = async () => false) {
   const sockets: FakeSocket[] = [];
   const states: ConnectionState[] = [];
   const statuses: StatusMessage[] = [];
+  const events: unknown[] = [];
   const delays: number[] = [];
   let pending: (() => void) | undefined;
   const options: SocketOptions = {
     url: "ws://x/api/ws",
     onStatus: (message) => statuses.push(message),
     onState: (state) => states.push(state),
+    onEvent: (data) => events.push(data),
     createSocket: () => {
       const socket = new FakeSocket();
       sockets.push(socket);
@@ -39,8 +46,11 @@ function setup(isExpired: () => Promise<boolean> = async () => false) {
       pending = callback;
     },
   };
+  const socket = connectSocket(options);
   return {
-    stop: connectSocket(options),
+    stop: socket.stop,
+    watch: socket.watch,
+    events,
     sockets,
     states,
     statuses,
@@ -60,7 +70,7 @@ describe("backoffDelay", () => {
 });
 
 describe("connectSocket", () => {
-  test("passes status messages on and ignores anything else", () => {
+  test("passes status messages on, other JSON to onEvent, and ignores what is not JSON", () => {
     const t = setup();
     const message: StatusMessage = {
       event: "bot.status",
@@ -73,7 +83,41 @@ describe("connectSocket", () => {
     t.sockets[0]?.onmessage?.({ data: "not json" });
     t.sockets[0]?.onmessage?.({ data: JSON.stringify({ event: "other" }) });
     expect(t.statuses).toEqual([message]);
+    expect(t.events).toEqual([{ event: "other" }]);
     expect(t.states).toEqual(["connecting", "open"]);
+  });
+
+  test("watch subscribes one channel at a time and again after a reconnect", async () => {
+    const t = setup();
+    const first = t.sockets[0];
+    if (!first) throw new Error("no socket");
+    // Not open yet: nothing is sent, the open sends it.
+    t.watch("200000000000000001");
+    expect(first.sent).toEqual([]);
+    first.readyState = 1;
+    first.onopen?.();
+    t.watch("200000000000000002");
+    t.watch("200000000000000002");
+    expect(first.sent.map((raw) => JSON.parse(raw))).toEqual([
+      { type: "subscribe", channelId: "200000000000000001" },
+      { type: "unsubscribe", channelId: "200000000000000001" },
+      { type: "subscribe", channelId: "200000000000000002" },
+    ]);
+    first.onclose?.();
+    await flush();
+    t.fire();
+    const second = t.sockets[1];
+    if (!second) throw new Error("no second socket");
+    second.readyState = 1;
+    second.onopen?.();
+    expect(second.sent.map((raw) => JSON.parse(raw))).toEqual([
+      { type: "subscribe", channelId: "200000000000000002" },
+    ]);
+    t.watch(null);
+    expect(JSON.parse(second.sent.at(-1) ?? "")).toEqual({
+      type: "unsubscribe",
+      channelId: "200000000000000002",
+    });
   });
 
   test("reconnects with a doubling delay, and a successful open starts the count again", async () => {

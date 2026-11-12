@@ -1,6 +1,14 @@
 import { z } from "zod";
+import {
+  MAX_PAGE_MESSAGES,
+  MAX_RESOLVED,
+  PanelAuthor,
+  PanelMessage,
+  Resolved,
+} from "./messages.ts";
+import { Snowflake } from "./snowflake.ts";
 
-export const Snowflake = z.string().regex(/^\d{17,20}$/, "expected a Discord id (17-20 digits)");
+export { Snowflake };
 
 export const GuildSummary = z.object({
   id: Snowflake,
@@ -66,6 +74,34 @@ export const BackfillResult = z.discriminatedUnion("status", [
 ]);
 export type BackfillResult = z.infer<typeof BackfillResult>;
 
+/** At most this many DM channels in one `dms.list` reply. */
+export const MAX_DM_CHANNELS = 50;
+
+export const DmChannel = z.object({
+  channelId: Snowflake,
+  /** null: discord.js has not cached the other side yet. */
+  recipient: PanelAuthor.omit({ bot: true }).nullable(),
+  /** Where the conversation was last active; null when unknown. */
+  lastMessageId: Snowflake.nullable(),
+});
+export type DmChannel = z.infer<typeof DmChannel>;
+
+export const ChannelMessages = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("ok"),
+    /** Oldest first. */
+    messages: z.array(PanelMessage).max(MAX_PAGE_MESSAGES),
+    resolved: Resolved,
+    /** Discord may have older messages than the first one here. */
+    hasMore: z.boolean(),
+  }),
+  z.object({ status: z.literal("unknown_channel") }),
+  z.object({ status: z.literal("no_access") }),
+]);
+export type ChannelMessages = z.infer<typeof ChannelMessages>;
+
+const MentionedIds = z.array(Snowflake).max(MAX_RESOLVED);
+
 /** Every command the panel can send: a schema for the request and one for the response. */
 export const COMMANDS = {
   "guilds.list": {
@@ -91,6 +127,40 @@ export const COMMANDS = {
   "archive.backfill": {
     request: z.object({ channelId: Snowflake, before: Snowflake.optional() }).strict(),
     response: BackfillResult,
+  },
+  /** The latest messages of a channel outside the archive, read from Discord and never stored. */
+  "channel.messages": {
+    request: z
+      .object({
+        channelId: Snowflake,
+        before: Snowflake.optional(),
+        limit: z.number().int().min(1).max(MAX_PAGE_MESSAGES),
+      })
+      .strict(),
+    response: ChannelMessages,
+  },
+  /**
+   * The DM channels discord.js has cached, most recent first. Discord gives a bot no list of its DMs: after
+   * a restart this holds only conversations that were active since.
+   */
+  "dms.list": {
+    request: z.object({}).strict(),
+    response: z.object({
+      channels: z.array(DmChannel).max(MAX_DM_CHANNELS),
+      truncated: z.boolean(),
+    }),
+  },
+  /** Names for mentioned ids, from the bot's caches only (no Discord calls); unknown ids are left out. */
+  "names.resolve": {
+    request: z
+      .object({
+        guildId: Snowflake.nullable(),
+        users: MentionedIds,
+        roles: MentionedIds,
+        channels: MentionedIds,
+      })
+      .strict(),
+    response: Resolved,
   },
 } as const;
 

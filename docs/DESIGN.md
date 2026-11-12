@@ -166,6 +166,35 @@ the guild prefix (`createGuildSettingCache`); the panel changes them only throug
 (`archive.guild.set`, `archive.dm.set`), which refreshes its cache, so a change applies to the next message.
 The panel reads the archive and the settings straight from Postgres with `SELECT` rights only.
 
+### Reading in the panel
+
+The panel's main view (#146) is a sidebar with the servers, their channels and threads (`guilds.channels`) and
+the DM conversations, next to one open channel. An archived channel is read from Postgres in pages of 50,
+keyed on `(created_at, message_id)`, so it reads while the bot is down; at the start of the archive,
+"Wczytaj starsze z Discorda" runs the backfill. Any other channel is read live from Discord through the bot
+(`channel.messages`) and stored nowhere. A page carries a small map of names for the users, roles and
+channels its messages mention: from the bot's caches when it is up, and for users from the archive's author
+snapshots otherwise.
+
+The bot publishes every message it sees as an event (`message.created`, `message.updated`,
+`message.deleted`), archived or not. The panel forwards an event only to the WebSockets subscribed to that
+channel, so the open channel updates live in both cases; a deletion keeps the message on screen, marked.
+Edited archived messages show their earlier versions from `archived_message_version`.
+
+Search is Postgres full text over the archive's `search` column (`websearch_to_tsquery('simple', …)`), newest
+first, 25 per page, with filters for server or DMs, channel, author and date range. A result opens its channel
+around that message. Search covers everything stored, but reading a channel needs it to be archived now. The
+panel's database role has a 5 s statement timeout (migration 0017).
+
+Message text goes through a small Discord-markdown renderer in the page (`apps/web/src/ui/markdown.tsx`) that
+builds React elements only: no HTML from a message ever reaches the DOM, links are made only from `https:`
+URLs, and images and video load only from Discord's media hosts. Long channels use a small virtualised list
+of our own (`VirtualList.tsx`), so only the rows near the viewport are in the DOM.
+
+The DM list is the union of the DMs in the archive and the DM channels discord.js has cached (`dms.list`).
+Discord gives a bot no list of its conversations, so after a restart a DM outside the archive shows up only
+once a message arrives in it.
+
 ### Health endpoint
 
 The bot serves a small HTTP endpoint (`Bun.serve`) on `HEALTH_HOSTNAME:HEALTH_PORT` (default

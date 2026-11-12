@@ -1,4 +1,11 @@
 import { z } from "zod";
+import { PanelMessage, Resolved } from "./messages.ts";
+import { Snowflake } from "./snowflake.ts";
+
+/** Bulk deletes cover at most 100 messages. */
+export const MAX_DELETED_IDS = 100;
+
+const MessageEvent = z.object({ message: PanelMessage, resolved: Resolved });
 
 /** How often the bot publishes `bot.status`. */
 export const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -10,6 +17,17 @@ export const EVENTS = {
   "bot.status": z.object({
     guilds: z.number().int().nonnegative(),
     startedAt: z.iso.datetime(),
+  }),
+  /**
+   * Every message the bot sees, archived or not; the panel passes each on only to the sockets watching its
+   * channel. Nothing is stored on the way.
+   */
+  "message.created": MessageEvent,
+  "message.updated": MessageEvent,
+  "message.deleted": z.object({
+    guildId: Snowflake.nullable(),
+    channelId: Snowflake,
+    ids: z.array(Snowflake).min(1).max(MAX_DELETED_IDS),
   }),
 } as const;
 
