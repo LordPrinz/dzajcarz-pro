@@ -46,7 +46,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Build
-        run: docker build --build-arg REVISION=${{ github.sha }} -t dzajcarz-bot:ci .
+        run: |
+          docker build --build-arg REVISION=${{ github.sha }} --target bot -t dzajcarz-bot:ci .
+          docker build --build-arg REVISION=${{ github.sha }} --target web -t dzajcarz-web:ci .
       # The bundle has to load on the runtime image: with valid settings and no network, the bot gets as far
       # as the first migration and exits 1 with "Migration failed". A broken bundle dies before that line.
       - name: Binary starts
@@ -63,6 +65,21 @@ jobs:
           echo "$output"
           test "$status" -eq 1
           grep -q '"msg":"Migration failed"' <<< "$output"
+      # Same check for the panel. It checks the database before it listens and this job has none, so it
+      # cannot assert that `/` is served; the bundle test and the compiled-binary check cover that.
+      - name: Web binary starts
+        run: |
+          set +e
+          output=$(docker run --rm --network none \
+            -e WEB_DATABASE_URL=postgres://ci:ci@127.0.0.1:1/ci \
+            -e WEB_REDIS_URL=redis://127.0.0.1:1/0 \
+            -e WEB_PUBLIC_ORIGIN=https://panel.example.com \
+            dzajcarz-web:ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          test "$status" -eq 1
+          grep -q '"msg":"Could not reach the database"' <<< "$output"
       - name: Production compose is valid
         run: docker compose -f infra/docker-compose.prod.yml config --quiet
         env:
@@ -72,3 +89,6 @@ jobs:
           POSTGRES_PASSWORD: ci
           REDIS_PASSWORD: ci
           LAVALINK_PASSWORD: ci
+          WEB_PUBLIC_ORIGIN: https://panel.example.com
+          WEB_POSTGRES_PASSWORD: ci
+          WEB_REDIS_PASSWORD: ci

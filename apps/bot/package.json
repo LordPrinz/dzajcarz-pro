@@ -26,6 +26,7 @@
     "@dzajcarz/module-settings": "workspace:*",
     "@dzajcarz/module-status": "workspace:*",
     "@dzajcarz/module-welcome": "workspace:*",
+    "@dzajcarz/web-protocol": "workspace:*",
     "discord.js": "14.28.1",
     "lavalink-client": "2.11.0",
     "wrapper-valorant-api": "3.0.1",

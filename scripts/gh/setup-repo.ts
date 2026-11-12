@@ -34,6 +34,7 @@ const LABELS = [
   { name: "area:riot", color: "d93f0b", description: "Riot account linking and stats" },
   { name: "area:dzajco", color: "fbca04", description: '"What" to gif replies' },
   { name: "area:settings", color: "c5b3f5", description: "Per-guild settings" },
+  { name: "area:web", color: "0e8a16", description: "Web panel" },
   { name: "area:docs", color: "bfdadc", description: "DESIGN.md, ADRs" },
   { name: "priority:P0", color: "b60205", description: "Blocks other work" },
   { name: "priority:P1", color: "fbca04", description: "Needed this sprint" },

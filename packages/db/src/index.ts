@@ -13,4 +13,5 @@ export * from "./party.ts";
 export * from "./scheduled-messages.ts";
 export * from "./scheduled-songs.ts";
 export * from "./types.ts";
+export * from "./web-audit.ts";
 export * from "./welcome.ts";

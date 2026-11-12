@@ -1,9 +1,10 @@
-# Production: the bot image plus Postgres, Redis, Lavalink and yt-cipher. See docs/DEPLOYMENT.md.
+# Production: the bot and the web panel plus Postgres, Redis, Lavalink and yt-cipher. See docs/DEPLOYMENT.md.
 #   bun run prod:up
-# Nothing is published except the bot's health endpoint on 127.0.0.1. The services reach each other by
+# Nothing is published except the bot's health endpoint on 127.0.0.1; the panel publishes no port at all. The services reach each other by
 # name, so the bot's connection URLs are built here, not in the env file. Two networks: `data` (Postgres,
 # Redis) has no route out, `music` (Lavalink, yt-cipher) does; the bot is on both and reaches Discord
-# through `music`.
+# through `music`. A third, `panel`, joins the web panel and the reverse proxy and has no route out either
+# (ADR 9).
 name: dzajcarz-prod
 
 # Docker's default json-file log never rotates; the bot logs a JSON line per event.
@@ -62,6 +63,42 @@ services:
     stop_grace_period: 30s
     logging: *logging
 
+  # The web panel (ADR 9): no login of its own, so it only ever sits behind the reverse proxy with Authentik,
+  # which joins the `panel` network from its own compose project. Not published on any host port. It does
+  # not wait for the bot: the panel has to work, and say so, while the bot is down.
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: web
+      args:
+        REVISION: ${BOT_REVISION:?run bun run prod:up, or set BOT_REVISION to git rev-parse --short HEAD}
+    image: dzajcarz-web:${BOT_REVISION:?run bun run prod:up, or set BOT_REVISION to git rev-parse --short HEAD}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web-db-role:
+        condition: service_completed_successfully
+    environment:
+      WEB_PUBLIC_ORIGIN: ${WEB_PUBLIC_ORIGIN:?set WEB_PUBLIC_ORIGIN in .env to the public URL of the panel}
+      # Its own logins, never the bot's: the dzajcarz_web role and the web Redis user (ADR 9).
+      WEB_DATABASE_URL: postgres://dzajcarz_web:${WEB_POSTGRES_PASSWORD:?set WEB_POSTGRES_PASSWORD in .env}@postgres:5432/dzajcarz
+      WEB_REDIS_URL: redis://web:${WEB_REDIS_PASSWORD:?set WEB_REDIS_PASSWORD in .env}@redis:6379/0
+      BOT_REQUEST_TIMEOUT_MS: ${BOT_REQUEST_TIMEOUT_MS:-3000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks: [data, panel]
+    # No `ports:` on purpose.
+    read_only: true
+    tmpfs:
+      - /tmp:uid=65532,gid=65532,mode=0700,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 15s
+    logging: *logging
+
   postgres:
     # Images pinned by the digest of their multi-arch index; Dependabot refreshes them.
     image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
@@ -80,29 +117,60 @@ services:
       retries: 10
     logging: *logging
 
+  # One-shot step on every start: gives the web panel's database role (ADR 9) its login and the password
+  # from WEB_POSTGRES_PASSWORD. The bot's migrations grant what the role may touch.
+  web-db-role:
+    image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+    networks: [data]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    user: "70:70"
+    entrypoint:
+      ["psql", "-h", "postgres", "-U", "dzajcarz", "-d", "dzajcarz", "-q", "-f", "/web-role.sql"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      WEB_POSTGRES_PASSWORD: ${WEB_POSTGRES_PASSWORD:?set WEB_POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./postgres/web-role.sql:/web-role.sql:ro
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
   # Caches, cooldowns and other state that may be lost (ADR 0003).
   redis:
     image: redis:8-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
     restart: unless-stopped
     networks: [data]
     # The password goes into a config file on a tmpfs, not onto the command line, where `ps` would show
-    # it (it is still in the container's environment for redis-cli). The image's entrypoint then starts redis-server as the redis user.
+    # it (it is still in the container's environment for redis-cli). The image's entrypoint then starts
+    # redis-server as the redis user. The passwords go into that file unquoted, so a character Redis's config
+    # parser reads differently (space, quote, backslash, ...) stops the start instead.
     command:
       - sh
       - -c
       - >-
+        for password in "$$REDISCLI_AUTH" "$$WEB_REDIS_PASSWORD"; do
+        case "$$password" in ''|*[!A-Za-z0-9._~-]*)
+        echo 'REDIS_PASSWORD and WEB_REDIS_PASSWORD may hold only letters, digits and . _ ~ -
+        (openssl rand -hex 32 fits)' >&2; exit 1;; esac; done &&
         umask 077 &&
-        printf 'requirepass %s\n' "$$REDISCLI_AUTH" > /tmp/redis.conf &&
+        printf 'requirepass %s\nuser web on >%s %s\n' "$$REDISCLI_AUTH" "$$WEB_REDIS_PASSWORD"
+        "$$(grep -v '^#' /web-user.acl | tr '\n' ' ')" > /tmp/redis.conf &&
         chown redis:redis /tmp/redis.conf &&
         exec docker-entrypoint.sh redis-server /tmp/redis.conf
         --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
     environment:
       # Read by the command above and by redis-cli in the health check.
       REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      # The web panel's own user, limited to its pub/sub channels by infra/redis/web-user.acl (ADR 9).
+      WEB_REDIS_PASSWORD: ${WEB_REDIS_PASSWORD:?set WEB_REDIS_PASSWORD in .env}
     tmpfs:
       - /tmp:mode=0755,size=1m
     volumes:
       - redis-data:/data
+      - ./redis/web-user.acl:/web-user.acl:ro
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -181,6 +249,12 @@ networks:
   data:
     internal: true
   music:
+  # Only the web panel and the reverse proxy join it: whatever is on this network reaches the panel without
+  # Authentik. Internal, so the panel has no route out at all; the proxy's own compose project still attaches
+  # to it (`external: true`) and reaches the internet through its other networks.
+  panel:
+    name: dzajcarz-panel
+    internal: true
 
 volumes:
   postgres-data:

@@ -1,6 +1,6 @@
 # 3. Redis for ephemeral shared state
 
-- **Status:** accepted
+- **Status:** accepted, amended by [ADR 9](0009-web-panel-as-a-separate-process.md) (`PubSub` port)
 - **Date:** 2026-11-06
 
 ## Context

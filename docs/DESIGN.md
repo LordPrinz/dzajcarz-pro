@@ -17,15 +17,20 @@ Discord gateway ──▶ apps/bot ──▶ registry ──▶ modules (general
                       ├──▶ Postgres (guild settings, warnings, …)
                       ├──▶ Redis (prefix cache, cooldowns)
                       └──▶ Lavalink ──▶ YouTube, Bandcamp, …  (music only)
+
+Browser ──▶ reverse proxy (Authentik) ──▶ apps/web ──▶ Redis pub/sub ──▶ apps/bot
+                                             └──────▶ Postgres (web_audit, archive)
 ```
 
-| Package     | Depends on                  | Notes                                                                                                                |
-| ----------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `core`      | discord.js (event types)    | Command and module model, registry, prefix parser, dispatcher, logger, helpers modules share (`helpers.ts`). No I/O. |
-| `db`        | `Bun.SQL`                   | Plain SQL migrations, a small migration runner, repositories, row types.                                             |
-| `kv`        | Bun `RedisClient`           | `KeyValueStore` port, Redis adapter, in-memory fake, shared contract tests.                                          |
-| `modules/*` | `core` + ports they declare | One feature each. Never import `apps/bot`, `db` clients or another module.                                           |
-| `apps/bot`  | all of the above            | Composition root and the only place that touches discord.js objects at runtime.                                      |
+| Package        | Depends on                                | Notes                                                                                                                |
+| -------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `core`         | discord.js (event types)                  | Command and module model, registry, prefix parser, dispatcher, logger, helpers modules share (`helpers.ts`). No I/O. |
+| `db`           | `Bun.SQL`                                 | Plain SQL migrations, a small migration runner, repositories, row types.                                             |
+| `kv`           | Bun `RedisClient`                         | `KeyValueStore` and `PubSub` ports, Redis adapters, in-memory fakes, shared contract tests.                          |
+| `web-protocol` | `kv` (`PubSub`), zod                      | Commands and events between the panel and the bot: zod schemas, `createBotClient`, `createCommandServer`.            |
+| `modules/*`    | `core` + ports they declare               | One feature each. Never import `apps/bot`, `db` clients or another module.                                           |
+| `apps/bot`     | all of the above                          | Composition root and the only place that touches discord.js objects at runtime.                                      |
+| `apps/web`     | `core`, `db`, `kv`, `web-protocol`, React | The web panel: its own process with a JSON API, a WebSocket and a React page. Never imports discord.js.              |
 
 ## Key decisions
 
@@ -128,6 +133,17 @@ only logged). A prefix reply cannot be ephemeral, so it is a normal reply. Event
 failing module cannot take the process down. An unhandled rejection is logged and the process keeps
 running; an uncaught exception is logged and the process exits with code 1, so the container's restart
 policy starts a clean instance.
+
+### Web panel
+
+`apps/web` is the owner's web panel (epic #143): its own process and container, behind a reverse proxy with
+Authentik, with a JSON API, a WebSocket and a React page. The bot keeps the Discord gateway; the panel reads
+the Postgres data it owns (`web_audit`) and talks to the bot over Redis pub/sub, each with its own
+least-privileged login. Modules do not know the panel exists: the bot side is one adapter,
+`apps/bot/src/web-bridge.ts`, and the commands and events both sides share live in `packages/web-protocol`.
+The decisions behind it (trust model, protocol, audit log) are in
+[ADR 9](adr/0009-web-panel-as-a-separate-process.md), mentions in
+[ADR 10](adr/0010-mentions-from-the-web-panel.md), running it in [deployment](DEPLOYMENT.md).
 
 ### Health endpoint
 

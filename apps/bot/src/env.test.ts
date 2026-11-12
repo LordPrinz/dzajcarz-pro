@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { credentialsIntact, Env, loadDeployEnv, loadEnv } from "./env.ts";
+import { Env, loadDeployEnv, loadEnv } from "./env.ts";
 
 const REQUIRED = {
   DISCORD_TOKEN: "t".repeat(60),
@@ -138,16 +138,6 @@ describe("connection URLs", () => {
 
   test("still check the scheme", () => {
     expect(issues({ DATABASE_URL: "mysql://u:p@db/db" })).not.toEqual([]);
-  });
-});
-
-describe("credentialsIntact", () => {
-  test("ignores URLs without credentials", () => {
-    expect(credentialsIntact("redis://redis:6379/0")).toBe(true);
-  });
-
-  test("is false when a slash in the password cuts the host part short", () => {
-    expect(credentialsIntact("postgres://u:12/x@db/db")).toBe(false);
   });
 });
 

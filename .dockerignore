@@ -1,4 +1,4 @@
-# An allowlist: only what `bun install` and the bot's bundle need goes into the build context.
+# An allowlist: only what `bun install` and the bot and web bundles need goes into the build context.
 *
 !package.json
 !bun.lock
@@ -12,4 +12,5 @@
 **/dist
 **/coverage
 **/*.test.ts
+**/*.test.tsx
 **/.DS_Store

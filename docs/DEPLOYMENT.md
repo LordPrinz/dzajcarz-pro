@@ -53,19 +53,25 @@ of this repository: the image is built from it, and Lavalink mounts `infra/laval
 ```bash
 git clone git@github.com:LordPrinz/dzajcarz-pro.git dzajcarz && cd dzajcarz   # main is the default branch
 cp .env.example .env && chmod 600 .env
-# fill in DISCORD_TOKEN, DISCORD_CLIENT_ID and the three passwords (openssl rand -hex 32 for each)
+# fill in DISCORD_TOKEN, DISCORD_CLIENT_ID, the five passwords (openssl rand -hex 32 for each)
+# and WEB_PUBLIC_ORIGIN (the public URL of the web panel, see below)
 bun run prod:up
 ```
 
 Production reads the same `.env` as local development, but only the values the bot needs on a server: the
-token, the client id, the three passwords, `BOT_PREFIX`, `RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`, `LOG_LEVEL`, the scheduled song
-settings and `HEALTH_PUBLISH_PORT`. Compose passes each one to the bot by name, so `DATABASE_URL`,
-`REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID`, the test bot's `DISCORD_DEV_TOKEN` and `DISCORD_DEV_CLIENT_ID`, and the `TEST_*` URLs in the file never reach the
+token, the client id, the passwords, `BOT_PREFIX`, `RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`, `LOG_LEVEL`,
+the scheduled song settings and `HEALTH_PUBLISH_PORT`. The web panel adds `WEB_PUBLIC_ORIGIN`,
+`WEB_POSTGRES_PASSWORD`, `WEB_REDIS_PASSWORD` (all required) and `BOT_REQUEST_TIMEOUT_MS` (at most 25000).
+Compose passes each one to the container by name, so `DATABASE_URL`, `REDIS_URL`, `WEB_DATABASE_URL`,
+`WEB_REDIS_URL`, `LAVALINK_URL`, `DISCORD_DEV_GUILD_ID`, the test bot's `DISCORD_DEV_TOKEN` and
+`DISCORD_DEV_CLIENT_ID`, and the `TEST_*` URLs in the file never reach the
 production container. Without a dev guild the bot deploys its slash commands globally. The production stack
 is a separate compose project with its own volumes, so it does not share data with `bun run infra:up`.
 
 The passwords end up inside `DATABASE_URL` and `REDIS_URL`. The bot refuses to start when one of them breaks
-the URL (an unencoded `@`, `/`, `?` or `#`), so stick to hex passwords. On the first start
+the URL (an unencoded `@`, `/`, `?` or `#`), so stick to hex passwords. `REDIS_PASSWORD` and
+`WEB_REDIS_PASSWORD` also go into the Redis config unquoted: the redis service refuses to start when they hold
+anything but letters, digits and `. _ ~ -`, which `openssl rand -hex 32` satisfies. On the first start
 `lavalink-plugins-init` downloads the YouTube plugin, so music can take a minute to come up. It checks the jar
 against `infra/lavalink/youtube-plugin.sha256` and stops the stack before Lavalink starts if the hash differs
 ([ADR 4](adr/0004-lavalink-for-audio.md#youtube-setup-dzaj-50)). Its log says why:
@@ -80,6 +86,69 @@ change it in the database first, then in `.env`, then run `bun run prod:up`:
 ```bash
 prod exec postgres psql -U dzajcarz -c "ALTER USER dzajcarz PASSWORD '<new hex password>'"
 ```
+
+## Web panel
+
+The panel ([ADR 9](adr/0009-web-panel-as-a-separate-process.md)) is the `web` service, built from the same
+`Dockerfile` (`--target web`). It has **no login of its own**: only ever expose it through a reverse proxy
+with Authentik forward auth in front of it. It publishes no host port; the proxy reaches it over the
+`dzajcarz-panel` network, and nothing but `web` and the proxy may join that network. The panel does not wait
+for the bot: it starts alone and says "Bot niedostępny" until the bot answers.
+
+1. Set `WEB_PUBLIC_ORIGIN` in `.env` to the public URL as a bare origin (`https://panel.example.com`, no
+   path, no trailing slash), and `WEB_POSTGRES_PASSWORD` and `WEB_REDIS_PASSWORD` (`openssl rand -hex 32`).
+   Compose refuses to start without them.
+2. Run `bun run prod:up`. The bot's migration creates the Postgres role `dzajcarz_web` and grants it the
+   audit log; the one-shot `web-db-role` service
+   ([`infra/postgres/web-role.sql`](../infra/postgres/web-role.sql)) gives it its login and password on
+   every start, so a changed password takes effect on the next `prod:up`.
+   The redis service creates the `web` user from `WEB_REDIS_PASSWORD` the same way. On the very first deploy
+   the panel restarts until the bot has created `web_audit`.
+3. Attach the proxy, in its own compose project, to the `dzajcarz-panel` network and point it at
+   `web:3000`. The network is internal, so the proxy keeps reaching the internet through its other networks:
+
+   ```yaml
+   services:
+     proxy:
+       networks: [panel] # plus whatever it already uses
+
+   networks:
+     panel:
+       name: dzajcarz-panel
+       external: true
+   ```
+
+4. Configure the proxy to:
+   - authenticate every request with Authentik forward auth before it reaches the panel;
+   - **overwrite** the `X-authentik-*` request headers with the ones from the auth response and never pass
+     client-sent values through: the panel writes `X-authentik-username` into its audit log;
+   - forward the original `Host` header (nginx: `proxy_set_header Host $host;`; Caddy and Traefik do it by
+     default), since the panel answers `421` to any other `Host`;
+   - pass WebSocket upgrades on `/api/ws` (nginx: `Upgrade` and `Connection` headers);
+   - leave the panel's `Content-Security-Policy` as it is (a policy of its own must not loosen it).
+
+`docker ps` shows the container's health through `web healthcheck` (Postgres and Redis; the bot being down
+does not count). Logs: `prod logs -f web`.
+
+### Managed Postgres without CREATEROLE
+
+When the bot's database user may not create roles, migration 0014 only logs a NOTICE and skips the role and
+its grants. Create the role once as an admin, **before** the bot first runs that migration:
+
+```sql
+CREATE ROLE dzajcarz_web NOLOGIN;
+```
+
+If the migration already ran without it, grant the rights by hand too (as the owner of `web_audit`):
+
+```sql
+GRANT SELECT, INSERT ON web_audit TO dzajcarz_web;
+GRANT UPDATE (outcome, error) ON web_audit TO dzajcarz_web;
+GRANT USAGE ON SCHEMA public TO dzajcarz_web;
+```
+
+Setting the login and password needs those rights as well; when the `web-db-role` step lacks them, run
+`ALTER ROLE dzajcarz_web WITH LOGIN PASSWORD '<WEB_POSTGRES_PASSWORD>'` as the admin instead.
 
 ## Release
 
