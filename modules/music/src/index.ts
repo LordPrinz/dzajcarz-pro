@@ -42,6 +42,8 @@ import type {
   VoiceChannels,
 } from "./ports.ts";
 
+/** The query rules of `/play`, for other entry points (the web panel) that must accept the same links. */
+export { parseQuery } from "./format.ts";
 export * from "./ports.ts";
 
 export interface MusicModuleDeps {
@@ -219,8 +221,6 @@ export function createMusicModule({
       if (!state || state.current?.byBot) await player.join(guildId, channelId, textChannelId);
       await player.enqueue(guildId, accepted);
       const startsNow = !state?.current;
-      // A new track redraws the panel by itself; otherwise only its queue count changed.
-      if (!startsNow) void inOrder(guildId, () => showPanel(guildId));
       void reviewIdle(guildId);
       return { accepted, startsNow, position: queued };
     });
@@ -254,9 +254,10 @@ export function createMusicModule({
       const guildId = guildOf(ctx);
       const state = await requireControl(guildId, ctx.user.id);
       refuseSongControl(state);
-      if (state.paused) await player.resume(guildId);
-      else await player.pause(guildId);
-      await updatePanelFromClick(ctx, guildId);
+      await fromClick(ctx, guildId, async () => {
+        if (state.paused) await player.resume(guildId);
+        else await player.pause(guildId);
+      });
     },
   });
 
@@ -309,13 +310,14 @@ export function createMusicModule({
     guildOnly: true,
     async run(ctx) {
       const guildId = guildOf(ctx);
-      // In the chain, so a double click reads the mode the first click set and moves on from there.
-      await oneAtATime(guildId, async () => {
-        const state = await requireControl(guildId, ctx.user.id);
-        refuseSongControl(state);
-        await player.setLoop(guildId, nextLoop(state.loop));
-      });
-      await updatePanelFromClick(ctx, guildId);
+      await fromClick(ctx, guildId, () =>
+        // In the chain, so a double click reads the mode the first click set and moves on from there.
+        oneAtATime(guildId, async () => {
+          const state = await requireControl(guildId, ctx.user.id);
+          refuseSongControl(state);
+          await player.setLoop(guildId, nextLoop(state.loop));
+        }),
+      );
     },
   });
 
@@ -326,8 +328,7 @@ export function createMusicModule({
     guildOnly: true,
     async run(ctx) {
       const guildId = guildOf(ctx);
-      await shuffleQueue(guildId, ctx.user.id);
-      await updatePanelFromClick(ctx, guildId);
+      await fromClick(ctx, guildId, () => shuffleQueue(guildId, ctx.user.id));
     },
   });
 
@@ -425,11 +426,72 @@ export function createMusicModule({
     await panels.delete(existing.channelId, existing.messageId);
   }
 
-  /** Pause and resume redraw the panel; a click on the panel edits it through the interaction. */
-  async function updatePanelFromClick(ctx: ComponentContext, guildId: string): Promise<void> {
-    const state = player.state(guildId);
-    const message = state && panelMessage(state, buttons);
-    if (message) await ctx.update(message);
+  /** Guilds with a redraw queued that has not started yet; another change before it starts adds nothing. */
+  const redrawQueued = new Set<string>();
+
+  /** Redraws the panel after a change, from whoever made it (a member, the web panel). */
+  function redrawPanel(guildId: string): void {
+    if (redrawQueued.has(guildId)) return;
+    redrawQueued.add(guildId);
+    void inOrder(guildId, () => {
+      redrawQueued.delete(guildId);
+      return showPanel(guildId);
+    });
+  }
+
+  /**
+   * Panel clicks being handled, per guild. `drawn` turns true once the click has read the state it draws;
+   * `held` records a change left to the click before that read, `missed` one that came after it.
+   */
+  interface Click {
+    drawn: boolean;
+    held: boolean;
+    missed: boolean;
+  }
+  const clicks = new Map<string, Set<Click>>();
+
+  /**
+   * Runs a panel button's change, then edits the clicked panel through the interaction. A `stateChanged`
+   * before the click reads the state is in that edit, so it is not redrawn; one after the read (another
+   * member, the web panel) gets a redraw once the click is done.
+   */
+  async function fromClick(
+    ctx: ComponentContext,
+    guildId: string,
+    change: () => Promise<void>,
+  ): Promise<void> {
+    const click: Click = { drawn: false, held: false, missed: false };
+    const active = clicks.get(guildId) ?? new Set();
+    clicks.set(guildId, active.add(click));
+    let updated = false;
+    try {
+      await change();
+      const state = player.state(guildId);
+      click.drawn = true;
+      const message = state && panelMessage(state, buttons);
+      if (message) await ctx.update(message);
+      updated = true;
+    } finally {
+      active.delete(click);
+      if (active.size === 0 && clicks.get(guildId) === active) clicks.delete(guildId);
+      // A refused click draws nothing, so what it held back is drawn here.
+      if (click.missed || (click.held && !updated)) redrawPanel(guildId);
+    }
+  }
+
+  /**
+   * Whether a click being handled takes care of this change: a click that has not read the state yet draws
+   * it, one that has redraws when it is done. Redrawing now could land before the click's own edit, which
+   * would then put the older state back.
+   */
+  function drawnByClick(guildId: string): boolean {
+    const active = clicks.get(guildId);
+    if (!active || active.size === 0) return false;
+    for (const click of active) {
+      if (click.drawn) click.missed = true;
+      else click.held = true;
+    }
+    return true;
   }
 
   const idleTimers = new Map<string, () => void>();
@@ -481,8 +543,11 @@ export function createMusicModule({
 
   const unsubscribe = player.subscribe({
     trackStart(guildId) {
-      void inOrder(guildId, () => showPanel(guildId));
+      redrawPanel(guildId);
       void reviewIdle(guildId);
+    },
+    stateChanged(guildId) {
+      if (!drawnByClick(guildId)) redrawPanel(guildId);
     },
     queueEnd(guildId) {
       void inOrder(guildId, () => removePanel(guildId));
@@ -742,7 +807,6 @@ export function createMusicModule({
       if (!state.current) throw new UserError(NOTHING_PLAYING);
       if (state.paused) throw new UserError("Muzyka już jest wstrzymana.");
       await player.pause(guildId);
-      void inOrder(guildId, () => showPanel(guildId));
       await ctx.reply("Wstrzymano.");
     },
   });
@@ -755,7 +819,6 @@ export function createMusicModule({
       const state = await requireControl(guildId, ctx.user.id);
       if (!state.paused) throw new UserError("Muzyka nie jest wstrzymana.");
       await player.resume(guildId);
-      void inOrder(guildId, () => showPanel(guildId));
       await ctx.reply("Wznowiono.");
     },
   });
@@ -780,8 +843,6 @@ export function createMusicModule({
       });
     },
   });
-
-  const redrawPanel = (guildId: string) => void inOrder(guildId, () => showPanel(guildId));
 
   const loop = defineCommand({
     name: "loop",
@@ -810,7 +871,6 @@ export function createMusicModule({
         refuseSongControl(await requireControl(guildId, ctx.user.id));
         await player.setLoop(guildId, mode);
       });
-      redrawPanel(guildId);
       await ctx.reply(`Powtarzanie: **${LOOP_LABELS[mode]}**.`);
     },
   });
@@ -821,7 +881,6 @@ export function createMusicModule({
     async run(ctx) {
       const guildId = guildOf(ctx);
       await shuffleQueue(guildId, ctx.user.id);
-      redrawPanel(guildId);
       await ctx.reply("Pomieszano kolejkę.");
     },
   });
@@ -855,7 +914,6 @@ export function createMusicModule({
           throw new UserError("Utwór zmienił się w międzyczasie, spróbuj jeszcze raz.");
         }
       });
-      redrawPanel(guildId);
       await ctx.reply(`Przewinięto do **${formatDuration(positionMs)}**.`);
     },
   });
@@ -881,7 +939,6 @@ export function createMusicModule({
       }
       await requireControl(guildId, ctx.user.id);
       await player.setVolume(guildId, percent);
-      redrawPanel(guildId);
       await ctx.reply(`Głośność: **${percent}%**.`);
     },
   });
@@ -918,7 +975,6 @@ export function createMusicModule({
         await requireControl(guildId, ctx.user.id);
         await player.setFilter(guildId, name);
       });
-      redrawPanel(guildId);
       await ctx.reply(name === "off" ? "Wyłączono efekty." : `Efekt: **${FILTER_LABELS[name]}**.`);
     },
   });
@@ -958,7 +1014,6 @@ export function createMusicModule({
         if (!taken) throw new UserError(queueChanged);
         return taken;
       });
-      redrawPanel(guildId);
       await ctx.reply(`Usunięto z kolejki: **${escapeMarkdown(removed.title)}**.`);
     },
   });
@@ -1009,7 +1064,6 @@ export function createMusicModule({
         await player.clear(guildId);
         return state.upcoming.length;
       });
-      redrawPanel(guildId);
       await ctx.reply(`Wyczyszczono kolejkę (${count} ${tracksWord(count)}).`);
     },
   });

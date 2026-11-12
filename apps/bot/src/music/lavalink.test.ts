@@ -69,6 +69,7 @@ class StubPlayer {
   position = 0;
   connected = false;
   repeatMode: "off" | "track" | "queue" = "off";
+  volume = 100;
   readonly ping = { lavalink: 0, ws: 0 };
   readonly calls: string[] = [];
   /** Runs while the player joins, before Discord answers (a member's /play landing meanwhile). */
@@ -89,6 +90,9 @@ class StubPlayer {
       return removed.length === 1 ? removed[0] : removed;
     },
     shiftPrevious: async () => this.queue.previous.shift() ?? null,
+    shuffle: async () => {
+      this.queue.tracks.reverse();
+    },
   };
   /** The client's real filter manager: what it sends goes to the stub node's `updatePlayer`. */
   readonly filterManager: FilterManager;
@@ -149,6 +153,10 @@ class StubPlayer {
 
   async pause() {
     this.paused = true;
+  }
+
+  async setVolume(volume: number) {
+    this.volume = volume;
   }
 
   async resume() {
@@ -288,15 +296,17 @@ function setup({ localFileGraceMs }: { localFileGraceMs?: number } = {}) {
   });
   const events: string[] = [];
   const failed: MusicTrack[] = [];
+  const changes: string[] = [];
   const listener: MusicListener = {
     trackStart: (guildId, track) => void events.push(`trackStart ${guildId} ${track.title}`),
     queueEnd: (guildId) => void events.push(`queueEnd ${guildId}`),
     playerDestroyed: (guildId) => void events.push(`playerDestroyed ${guildId}`),
     trackFailed: (_guildId, track) => void failed.push(track),
+    stateChanged: (guildId) => void changes.push(guildId),
   };
   music.subscribe(listener);
   const forwardRaw = (packet: unknown) => handlers.get("raw")?.(packet);
-  return { manager, music, gateway, events, failed, warnings, forwardRaw };
+  return { manager, music, gateway, events, failed, changes, warnings, forwardRaw };
 }
 
 /** Lets fire-and-forget recovery work finish. */
@@ -1016,6 +1026,107 @@ describe("lavalink music player", () => {
     });
   });
 
+  describe("changes for the panels", () => {
+    test("every control that changes the player tells the listeners", async () => {
+      const { manager, music, changes } = setup();
+      manager.playing(GUILD, song("A"), [song("B"), song("C")]);
+      await music.pause(GUILD);
+      await music.resume(GUILD);
+      await music.setLoop(GUILD, "queue");
+      await music.setVolume(GUILD, 50);
+      await music.setFilter(GUILD, "nightcore");
+      await music.shuffle(GUILD);
+      await music.seek(GUILD, 1000, "enc-A");
+      await music.enqueue(GUILD, []);
+      expect(changes).toEqual(Array(8).fill(GUILD));
+    });
+
+    test("a seek or removal that changes nothing tells nobody", async () => {
+      const { manager, music, changes } = setup();
+      manager.playing(GUILD, song("A"), [song("B")]);
+      expect(await music.seek(GUILD, 1000, "enc-B")).toBe(false);
+      expect(await music.remove(GUILD, 0, "enc-A")).toBeNull();
+      expect(changes).toEqual([]);
+    });
+
+    test("a fresh start is left to trackStart, not reported as a change", async () => {
+      const { manager, music, changes } = setup();
+      manager.response = { loadType: "search", data: [song("A"), song("B")] };
+      const result = await music.search({ kind: "search", text: "a" }, CALLER);
+      const tracks = result.kind === "tracks" ? result.tracks : [];
+      await music.join(GUILD, VOICE, TEXT);
+      await music.enqueue(GUILD, [tracks[0] as MusicTrack]);
+      expect(changes).toEqual([]);
+      await music.enqueue(GUILD, [tracks[1] as MusicTrack]);
+      expect(changes).toEqual([GUILD]);
+    });
+
+    test("controls that change nothing tell nobody", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"));
+      await music.resume(GUILD);
+      player.paused = true;
+      await music.pause(GUILD);
+      await music.clear(GUILD);
+      expect(changes).toEqual([]);
+    });
+
+    test("a move by someone else in Discord is reported too", () => {
+      const { manager, changes } = setup();
+      const player = manager.playing(GUILD, song("A"));
+      manager.emit("playerMove", player, VOICE, "400000000000000009");
+      expect(changes).toEqual([GUILD]);
+    });
+  });
+
+  describe("moving", () => {
+    test("moveTrack puts the track the caller saw at its new place", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B"), song("C"), song("D")]);
+      expect(await music.moveTrack(GUILD, 0, 2, "enc-B")).toBe(true);
+      expect(player.queue.tracks.map((t) => t.info.title)).toEqual(["C", "D", "B"]);
+      expect(await music.moveTrack(GUILD, 2, 0, "enc-B")).toBe(true);
+      expect(player.queue.tracks.map((t) => t.info.title)).toEqual(["B", "C", "D"]);
+      expect(changes).toEqual([GUILD, GUILD]);
+    });
+
+    test("moveTrack leaves a queue that moved meanwhile, or a place past the end, alone", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B"), song("C")]);
+      expect(await music.moveTrack(GUILD, 0, 1, "enc-C")).toBe(false);
+      expect(await music.moveTrack(GUILD, 0, 2, "enc-B")).toBe(false);
+      expect(await music.moveTrack(GUILD, 0, -1, "enc-B")).toBe(false);
+      expect(player.queue.tracks.map((t) => t.info.title)).toEqual(["B", "C"]);
+      expect(changes).toEqual([]);
+    });
+
+    test("moveToChannel moves a playing player with a voice state update, keeping its track", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B")]);
+      player.voiceChannelId = VOICE;
+      const target = "400000000000000009";
+      await music.moveToChannel(GUILD, target);
+      expect(player.calls).toEqual([`connect ${target}`]);
+      expect(music.state(GUILD)?.voiceChannelId).toBe(target);
+      expect(music.state(GUILD)?.current?.title).toBe("A");
+      expect(changes).toEqual([GUILD]);
+    });
+
+    test("moveToChannel to the channel the bot is in sends nothing", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"));
+      player.voiceChannelId = VOICE;
+      await music.moveToChannel(GUILD, VOICE);
+      expect(player.calls).toEqual([]);
+      expect(changes).toEqual([]);
+    });
+
+    test("moveToChannel without a player rejects", async () => {
+      const { music } = setup();
+      await expect(music.moveToChannel(GUILD, VOICE)).rejects.toThrow();
+    });
+  });
+
   describe("search", () => {
     test("an HTTP error does not carry the member's text into the error result", async () => {
       const { manager, music } = setup();
@@ -1050,6 +1161,148 @@ describe("lavalink music player", () => {
       manager.response = { loadType: "search", data: [broken, song("B")] };
       const result = await music.search({ kind: "search", text: "a" }, CALLER);
       expect(result.kind === "tracks" && result.tracks.map((track) => track.title)).toEqual(["B"]);
+    });
+  });
+
+  describe("queue edits and shutdown", () => {
+    test("remove takes the track the caller saw out of the queue and tells the listeners", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B"), song("C")]);
+      const removed = await music.remove(GUILD, 0, "enc-B");
+      expect(removed?.title).toBe("B");
+      expect(player.queue.tracks.map((track) => track.info.title)).toEqual(["C"]);
+      expect(changes).toEqual([GUILD]);
+    });
+
+    test("remove leaves the queue alone when the track at that place is another one", async () => {
+      const { manager, music } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B"), song("C")]);
+      expect(await music.remove(GUILD, 1, "enc-B")).toBeNull();
+      expect(player.queue.tracks).toHaveLength(2);
+    });
+
+    test("clear empties the queue but keeps the current track, and says nothing for an empty queue", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B"), song("C")]);
+      await music.clear(GUILD);
+      expect(player.queue.tracks).toEqual([]);
+      expect(music.state(GUILD)?.current?.title).toBe("A");
+      await music.clear(GUILD);
+      expect(changes).toEqual([GUILD]);
+    });
+
+    test("a jump whose skip fails can be tried again", async () => {
+      const { manager, music } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B"), song("C")]);
+      const skip = player.skip.bind(player);
+      player.skip = async () => {
+        throw new Error("node busy");
+      };
+      await expect(music.jump(GUILD, 1, "enc-C")).rejects.toThrow("node busy");
+      player.skip = skip;
+      expect(await music.jump(GUILD, 1, "enc-C")).toBe(true);
+      expect(player.calls).toEqual(["skip to 2"]);
+    });
+
+    test("jump refuses a track that is not at that place", async () => {
+      const { manager, music } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B")]);
+      expect(await music.jump(GUILD, 0, "enc-X")).toBe(false);
+      expect(player.calls).toEqual([]);
+    });
+
+    test("leave without a player does nothing", async () => {
+      const { music, events } = setup();
+      await music.leave(GUILD);
+      expect(events).toEqual([]);
+    });
+
+    test("destroy ends every player and closes the node, without telling the listeners", async () => {
+      const { manager, music, events, changes } = setup();
+      manager.playing(GUILD, song("A"));
+      manager.playing(OTHER_GUILD, song("B"));
+      const closed: string[] = [];
+      manager.node.destroy = (reason?: string) => void closed.push(String(reason));
+      await music.destroy();
+      expect(manager.players.size).toBe(0);
+      // Listeners are dropped first: a shutdown does not announce itself to the panels.
+      expect(events).toEqual([]);
+      expect(closed).toEqual(["shutdown"]);
+      manager.playing(GUILD, song("C"));
+      await music.pause(GUILD);
+      expect(changes).toEqual([]);
+    });
+
+    test("a listener that throws does not stop the others from hearing the change", async () => {
+      const { manager, music, changes } = setup();
+      manager.playing(GUILD, song("A"));
+      const heard: string[] = [];
+      music.subscribe({
+        trackStart() {},
+        queueEnd() {},
+        playerDestroyed() {},
+        trackFailed() {},
+        stateChanged() {
+          throw new Error("panel gone");
+        },
+      });
+      music.subscribe({
+        trackStart() {},
+        queueEnd() {},
+        playerDestroyed() {},
+        trackFailed() {},
+        stateChanged: (guildId) => void heard.push(guildId),
+      });
+      await music.pause(GUILD);
+      expect(changes).toEqual([GUILD]);
+      expect(heard).toEqual([GUILD]);
+    });
+
+    test("an unsubscribed listener hears nothing more", async () => {
+      const { manager, music } = setup();
+      manager.playing(GUILD, song("A"));
+      const heard: string[] = [];
+      const off = music.subscribe({
+        trackStart() {},
+        queueEnd() {},
+        playerDestroyed() {},
+        trackFailed() {},
+        stateChanged: (guildId) => void heard.push(guildId),
+      });
+      await music.pause(GUILD);
+      off();
+      await music.resume(GUILD);
+      expect(heard).toEqual([GUILD]);
+    });
+
+    test("a track found long ago falls out of the cache and must be decoded by the node", async () => {
+      const { manager, music } = setup();
+      manager.playing(GUILD, song("A"));
+      manager.response = {
+        loadType: "search",
+        data: Array.from({ length: 2001 }, (_, i) => song(`t${i}`)),
+      };
+      const result = await music.search({ kind: "search", text: "many" }, CALLER);
+      const tracks = result.kind === "tracks" ? result.tracks : [];
+      expect(tracks.length).toBeGreaterThan(0);
+      const first = tracks[0] as MusicTrack;
+      const last = tracks.at(-1) as MusicTrack;
+      // The newest is still cached; the oldest is not (the stub node cannot decode it).
+      await music.enqueue(GUILD, [last]);
+      await expect(music.enqueue(GUILD, [first])).rejects.toThrow("not cached");
+    });
+  });
+
+  describe("a scheduled song that fails to start", () => {
+    test("rejects, destroys the player and leaves the guild free for members' music", async () => {
+      const { manager, music } = setup();
+      manager.response = { loadType: "track", data: song("Lato z Radiem") };
+      manager.failPlay = true;
+      await expect(
+        music.playLocalFile(GUILD, VOICE, "/opt/Lavalink/music/lato_z_radiem.mp3"),
+      ).rejects.toThrow("Session not found");
+      expect(manager.players.size).toBe(0);
+      expect(music.isPlaying(GUILD)).toBe(false);
     });
   });
 });

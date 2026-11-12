@@ -17,6 +17,7 @@ export type Selection =
   | { kind: "search" }
   | { kind: "archive" }
   | { kind: "new-dm" }
+  | { kind: "music" }
   | { kind: "none" };
 
 export interface SidebarProps {
@@ -136,6 +137,14 @@ export function Sidebar(props: SidebarProps) {
           onClick={() => onSelect({ kind: "archive" })}
         >
           Ustawienia archiwum
+        </button>
+        <button
+          type="button"
+          className="side-item"
+          aria-current={selection.kind === "music" ? "page" : undefined}
+          onClick={() => onSelect({ kind: "music" })}
+        >
+          Muzyka
         </button>
       </div>
       <h2 className="side-heading">Serwery</h2>

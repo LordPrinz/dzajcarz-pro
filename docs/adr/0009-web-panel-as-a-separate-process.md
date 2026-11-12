@@ -215,6 +215,57 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     no further once 25 members are found, and leaves bots out; `dm.open` opens the DM channel with the
     member picked.
 
+- Music (#148):
+  - The panel drives the same `MusicPlayer` instance the music module uses (`apps/bot/src/web-music.ts`,
+    wired in the composition root), so the Discord panel and the web panel always show one state. The module
+    still knows nothing about the panel: the port gained a `stateChanged` listener event that the Lavalink
+    adapter emits after every change no track event reports (pause, loop, volume, filter, seek, queue edits,
+    a channel move, also one made by dragging the bot in Discord). The module redraws its panel on it and the
+    bridge publishes from it, so a change from either side shows on both. The port also gained
+    `moveTrack` and `moveToChannel` ([ADR 4](0004-lavalink-for-audio.md)).
+  - The panel acts as the owner. The member rules live in the module and the panel does not go through it:
+    no check that the caller sits in the bot's channel, no lock on the scheduled song (DZAJ-123), so the
+    panel may pause, seek, loop, skip or disconnect it, and it may move the bot to another channel while
+    people listen. No flag at the port level is needed, because the port never enforced the lock.
+  - Commands: `music.state` (the player and one page of 20 upcoming tracks from `offset`),
+    `music.voice_channels` (at most 50, with listeners and whether the bot may connect and speak),
+    `music.join` (joins, or moves the bot), `music.search`, `music.enqueue`, `music.queue.remove`,
+    `music.queue.move`, `music.queue.shuffle`, `music.queue.clear` and `music.control` (pause, resume,
+    skip, seek, loop, volume 0 to 150, filter, disconnect). Changes answer `ok` or `rejected` with a reason,
+    like the writing commands, and run through the audit log as `music.*`. The reads, the search included,
+    change nothing and are not audited.
+  - A track reaches the panel by a 16-hex-digit hash of the player's own id (a Lavalink encoded track can be
+    kilobytes), with its title cut to 150 characters, its author to 80 and its link kept only when it is
+    https and at most 512 characters. Remove, move, skip and seek carry the key of the track the panel saw
+    and are refused (`queue_changed`, `track_changed`) when another track sits there by now. Tests build
+    the worst case of each reply and event.
+  - Search results stay on the bot for 10 minutes (at most 50 searches) under a `searchId`; `music.enqueue`
+    picks from them (at most 100, a playlist's worth), so the panel never sends a track the bot did not load
+    itself. Links follow `/play`'s rules (the module exports its parser). The tracks are the bot's own
+    (requester: the bot) but not `byBot`, so they are ordinary members' music to the module. The queue cap
+    of 500 applies; the panel's changes run one at a time per guild in their own chain, apart from the
+    module's.
+  - Without a player, the bot joins the chosen channel and takes that voice channel's chat as the Discord
+    panel's channel, as the scheduled song does. So a channel counts as joinable only when the bot may also
+    Speak there and Send Messages and Embed Links in its chat. Adding tracks never moves the bot: an
+    enqueue naming another channel than the one the bot plays in is refused (`other_channel`); moving is
+    `music.join`'s job.
+  - A join or a move waits at most 12 s inside the guild's chain, so one that never answers cannot hold
+    up the server's other commands. A guild runs at most two searches at once; a third is refused
+    (`search_busy`), since each one is a YouTube lookup through the node. Queue places and offsets are
+    capped by the queue's 500 tracks (`MAX_MUSIC_QUEUE_LENGTH`, kept equal to the module's cap by a test).
+  - Joining, searching and enqueueing wait up to 15 s for the bot instead of `BOT_REQUEST_TIMEOUT_MS`
+    (`BotClient.request` takes a per-command timeout, capped at the 30 s deadline limit).
+  - Live state: the bot publishes `music.state` per guild after a change, at most one per 500 ms with the
+    last change of a burst always sent; the page moves the position on by itself from the moment it received
+    the snapshot (its own clock, so a clock that differs from the bot's does not matter), and drops a
+    snapshot older than the one it shows (an HTTP reply that loses a race with an event).
+    The panel forwards it to sockets on `music:<guildId>`, joined with `{"type":"subscribe","musicGuildId":…}`
+    and counted toward the 10 topics per socket. The bot reads `available()` every 2 s and publishes
+    `music.status` to every socket when the node comes or goes; the page then disables the controls and
+    says Lavalink is down. A bot offline disables them too.
+  - Track covers are not shown: YouTube's image hosts would need `img-src` widened, which is not worth it.
+
 ## Drivers
 
 1. Behaviour when the bot is down or slow: fast, explicit "unavailable", never a delayed replay.
@@ -266,5 +317,4 @@ configured origin are stateless and fail closed.
 ## Follow-ups
 
 - Refreshing expired attachment links through the bot (Discord's `attachments/refresh-urls`).
-- #148 music commands and events.
 - Consider extracting the health probe runner shared by both apps if a third process appears.

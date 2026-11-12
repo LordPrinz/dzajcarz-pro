@@ -65,6 +65,12 @@ export interface MusicListener {
   playerDestroyed(guildId: string): void;
   /** A track could not be played (load failure, stuck stream); the player moves on by itself. */
   trackFailed(guildId: string, track: MusicTrack): void;
+  /**
+   * Something else in the guild's player changed without a track starting or ending: paused or resumed, the
+   * loop, volume or filter, a seek, the queue (added, removed, moved, shuffled, cleared), or its voice channel.
+   * Whoever made the change (a member, the web panel), every listener hears it.
+   */
+  stateChanged(guildId: string): void;
 }
 
 /**
@@ -123,6 +129,13 @@ export interface MusicPlayer {
    * track, `"changed"` while a skip is on its way.
    */
   previous(guildId: string): Promise<MusicTrack | "none" | "changed">;
+  /**
+   * Moves `upcoming[from]` to place `to` (zero-based, counted after taking it out) if it still is
+   * `expectedTrackId`; false when that place holds another track by now or `to` is past the end.
+   */
+  moveTrack(guildId: string, from: number, to: number, expectedTrackId: string): Promise<boolean>;
+  /** Moves the guild's player to another voice channel; playback and the queue go on there. */
+  moveToChannel(guildId: string, voiceChannelId: string): Promise<void>;
   /** Empties the upcoming tracks; the current one keeps playing. */
   clear(guildId: string): Promise<void>;
   /** Stops playback, clears the queue and leaves the voice channel. */

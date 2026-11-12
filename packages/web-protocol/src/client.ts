@@ -26,10 +26,14 @@ export type BotEvent = {
 export interface BotClient {
   /** Subscribes to replies and events. Never throws: a subscription that fails is retried on reconnect. */
   start(): Promise<void>;
-  /** Never throws and never rejects; every failure is a `BotResult`. */
+  /**
+   * Never throws and never rejects; every failure is a `BotResult`. `timeoutMs` replaces the client's own
+   * wait for this one command (a slow one, such as a music search), at most `MAX_COMMAND_TTL_MS`.
+   */
   request<N extends CommandName>(
     name: N,
     payload: CommandRequest<N>,
+    options?: { timeoutMs?: number },
   ): Promise<BotResult<CommandResponse<N>>>;
   onEvent(listener: (event: BotEvent) => void): () => void;
   /** Requests still waiting for a reply. */
@@ -157,7 +161,7 @@ export function createBotClient({
       await subscribeTo(EVENT_CHANNEL, handleEvent);
     },
 
-    request(name, payload) {
+    request(name, payload, options = {}) {
       const parsed = COMMANDS[name].request.safeParse(payload);
       if (!parsed.success) {
         return Promise.resolve({
@@ -173,6 +177,7 @@ export function createBotClient({
       }
       const id = crypto.randomUUID();
       const sentAt = now();
+      const wait = Math.min(options.timeoutMs ?? timeoutMs, MAX_COMMAND_TTL_MS);
       const envelope = {
         v: 1,
         id,
@@ -180,7 +185,7 @@ export function createBotClient({
         command: name,
         payload: parsed.data,
         sentAt,
-        deadline: sentAt + timeoutMs,
+        deadline: sentAt + wait,
       };
       return new Promise((resolve) => {
         let published = false;
@@ -192,7 +197,7 @@ export function createBotClient({
         // A publish that never returns means Redis is not answering, which is "unavailable", not a slow bot.
         const timer = setTimeout(
           () => finish(published ? { ok: false, reason: "timeout" } : unavailable),
-          timeoutMs,
+          wait,
         );
         pending.set(id, { name, finish });
         pubsub.publish(COMMAND_CHANNEL, JSON.stringify(envelope)).then(

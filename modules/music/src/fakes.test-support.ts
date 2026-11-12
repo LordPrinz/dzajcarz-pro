@@ -59,6 +59,7 @@ export interface FakePlayer extends MusicPlayer {
   readonly skips: { guildId: string; expectedTrackId: string }[];
   readonly searches: { query: MusicQuery; requesterId: string }[];
   readonly joins: { guildId: string; voiceChannelId: string; textChannelId: string }[];
+  readonly moves: { guildId: string; voiceChannelId: string }[];
   readonly players: Map<string, GuildPlayer>;
   /** A skip was sent and the next track has not started yet: jump, previous and seek answer "changed". */
   skipInFlight: boolean;
@@ -86,6 +87,8 @@ export function createFakePlayer(): FakePlayer {
   const emit = (fn: (listener: MusicListener) => void) => {
     for (const listener of listeners) fn(listener);
   };
+
+  const changed = (guildId: string) => emit((listener) => listener.stateChanged(guildId));
 
   function failIfAsked(method: FailingCall): void {
     const error = failures.get(method);
@@ -137,6 +140,7 @@ export function createFakePlayer(): FakePlayer {
     skips: [],
     searches: [],
     joins: [],
+    moves: [],
     players,
     skipInFlight: false,
     available: () => fake.up,
@@ -180,6 +184,7 @@ export function createFakePlayer(): FakePlayer {
       const guild = need(guildId);
       guild.upcoming.push(...tracks);
       if (!guild.current) advance(guildId, guild);
+      else changed(guildId);
     },
     async skip(guildId, expectedTrackId) {
       fake.skips.push({ guildId, expectedTrackId });
@@ -188,17 +193,25 @@ export function createFakePlayer(): FakePlayer {
       if (guild.current?.id === expectedTrackId) advance(guildId, guild);
     },
     async pause(guildId) {
-      need(guildId).paused = true;
+      const guild = need(guildId);
+      if (guild.paused) return;
+      guild.paused = true;
+      changed(guildId);
     },
     async resume(guildId) {
-      need(guildId).paused = false;
+      const guild = need(guildId);
+      if (!guild.paused) return;
+      guild.paused = false;
+      changed(guildId);
     },
     async setLoop(guildId, mode) {
       need(guildId).loop = mode;
+      changed(guildId);
     },
     async shuffle(guildId) {
       fake.shuffles.push(guildId);
       need(guildId).upcoming.reverse();
+      changed(guildId);
     },
     async seek(guildId, positionMs, expectedTrackId) {
       const guild = need(guildId);
@@ -206,19 +219,41 @@ export function createFakePlayer(): FakePlayer {
       if (!guild.current.isSeekable) throw new Error("Current track is not seekable");
       // Seeking to the very end finishes the track, as on the node.
       if (positionMs >= guild.current.durationMs) finish(guildId, guild);
-      else guild.positionMs = positionMs;
+      else {
+        guild.positionMs = positionMs;
+        changed(guildId);
+      }
       return true;
     },
     async setVolume(guildId, percent) {
       need(guildId).volume = percent;
+      changed(guildId);
     },
     async setFilter(guildId, filter) {
       need(guildId).filter = filter;
+      changed(guildId);
     },
     async remove(guildId, index, expectedTrackId) {
       const guild = need(guildId);
       if (guild.upcoming[index]?.id !== expectedTrackId) return null;
-      return guild.upcoming.splice(index, 1)[0] ?? null;
+      const removed = guild.upcoming.splice(index, 1)[0] ?? null;
+      if (removed) changed(guildId);
+      return removed;
+    },
+    async moveTrack(guildId, from, to, expectedTrackId) {
+      const guild = need(guildId);
+      if (guild.upcoming[from]?.id !== expectedTrackId) return false;
+      if (to < 0 || to >= guild.upcoming.length) return false;
+      const [moved] = guild.upcoming.splice(from, 1);
+      if (!moved) return false;
+      guild.upcoming.splice(to, 0, moved);
+      changed(guildId);
+      return true;
+    },
+    async moveToChannel(guildId, voiceChannelId) {
+      fake.moves.push({ guildId, voiceChannelId });
+      need(guildId).voiceChannelId = voiceChannelId;
+      changed(guildId);
     },
     async jump(guildId, index, expectedTrackId) {
       const guild = need(guildId);
@@ -253,7 +288,10 @@ export function createFakePlayer(): FakePlayer {
       return back;
     },
     async clear(guildId) {
-      need(guildId).upcoming.length = 0;
+      const guild = need(guildId);
+      if (guild.upcoming.length === 0) return;
+      guild.upcoming.length = 0;
+      changed(guildId);
     },
     async leave(guildId) {
       fake.destroy(guildId);

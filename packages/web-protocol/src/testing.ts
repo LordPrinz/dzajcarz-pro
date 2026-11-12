@@ -31,6 +31,16 @@ export function commandHandlers(overrides: Partial<CommandHandlers> = {}): Comma
     "reaction.remove": notInThisTest("reaction.remove"),
     "members.search": notInThisTest("members.search"),
     "dm.open": notInThisTest("dm.open"),
+    "music.state": notInThisTest("music.state"),
+    "music.voice_channels": notInThisTest("music.voice_channels"),
+    "music.join": notInThisTest("music.join"),
+    "music.search": notInThisTest("music.search"),
+    "music.enqueue": notInThisTest("music.enqueue"),
+    "music.queue.remove": notInThisTest("music.queue.remove"),
+    "music.queue.move": notInThisTest("music.queue.move"),
+    "music.queue.shuffle": notInThisTest("music.queue.shuffle"),
+    "music.queue.clear": notInThisTest("music.queue.clear"),
+    "music.control": notInThisTest("music.control"),
     ...overrides,
   };
 }

@@ -6,6 +6,7 @@ import {
   PanelMessage,
   Resolved,
 } from "./messages.ts";
+import { MUSIC_COMMANDS } from "./music.ts";
 import { Snowflake } from "./snowflake.ts";
 import { WRITING_COMMANDS } from "./writing.ts";
 
@@ -164,6 +165,7 @@ export const COMMANDS = {
     response: Resolved,
   },
   ...WRITING_COMMANDS,
+  ...MUSIC_COMMANDS,
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

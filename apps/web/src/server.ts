@@ -8,6 +8,7 @@ import { withSecurityHeaders } from "./http/headers.ts";
 import { MAX_BODY_BYTES } from "./http/json.ts";
 import { type PageFiles, pageRoutes } from "./http/page.ts";
 import { BOT_TOPIC, createSubscriptions, type LiveState } from "./live.ts";
+import { musicRoutes } from "./music.ts";
 import { type ReadingRouteDeps, readingRoutes } from "./reading.ts";
 import { type WritingRouteDeps, writingRoutes } from "./writing.ts";
 
@@ -144,6 +145,7 @@ export function createWebServer(
         logger,
         failure,
       }),
+      ...musicRoutes({ bot, auditor: deps.auditor, failure }),
       ...mergeRoutes(
         readingRoutes({
           bot,
@@ -178,7 +180,8 @@ export function createWebServer(
         ws.subscribe(BOT_TOPIC);
         ws.send(JSON.stringify(live.status()));
       },
-      // Subscribe and unsubscribe to one channel's message events; anything else closes the socket.
+      // Subscribe and unsubscribe to one channel's message events or one server's music; anything else
+      // closes the socket.
       message(ws: Bun.ServerWebSocket<undefined>, raw: string | Buffer) {
         subscriptions.handle(ws, raw);
       },

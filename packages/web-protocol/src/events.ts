@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PanelMessage, Resolved } from "./messages.ts";
+import { MUSIC_EVENTS } from "./music.ts";
 import { Snowflake } from "./snowflake.ts";
 
 /** Bulk deletes cover at most 100 messages. */
@@ -29,6 +30,7 @@ export const EVENTS = {
     channelId: Snowflake,
     ids: z.array(Snowflake).min(1).max(MAX_DELETED_IDS),
   }),
+  ...MUSIC_EVENTS,
 } as const;
 
 export type EventName = keyof typeof EVENTS;

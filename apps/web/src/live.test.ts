@@ -8,6 +8,7 @@ import {
   createSubscriptions,
   fanOut,
   MAX_TOPICS_PER_SOCKET,
+  musicTopic,
 } from "./live.ts";
 
 const PAYLOAD = { guilds: 2, startedAt: "2026-11-11T10:00:00.000Z" };
@@ -76,6 +77,25 @@ describe("fanOut", () => {
     expect(fanOut({ event: "bot.status", payload: PAYLOAD, at: 1 }, live).topic).toBe(BOT_TOPIC);
     expect(live.status().lastSeen).toBe(5);
   });
+
+  test("a guild's music state goes to its music topic, the node's status to everyone", () => {
+    const live = createLiveState(() => 5);
+    const snapshot = {
+      guildId: "100000000000000001",
+      available: true,
+      at: "2026-11-12T10:00:00.000Z",
+      player: null,
+    };
+    expect(fanOut({ event: "music.state", payload: snapshot, at: 1 }, live)).toEqual({
+      topic: musicTopic("100000000000000001"),
+      message: JSON.stringify({ event: "music.state", payload: snapshot }),
+    });
+    expect(fanOut({ event: "music.status", payload: { available: false }, at: 1 }, live)).toEqual({
+      topic: BOT_TOPIC,
+      message: JSON.stringify({ event: "music.status", payload: { available: false } }),
+    });
+    expect(live.status().lastSeen).toBeNull();
+  });
 });
 
 describe("createSubscriptions", () => {
@@ -115,11 +135,45 @@ describe("createSubscriptions", () => {
     ["a topic smuggled as the id", send("subscribe", "1 channel:2")],
     ["extra keys", JSON.stringify({ type: "subscribe", channelId: id(1), topic: "bot" })],
     ["a JSON array", "[]"],
+    [
+      "a channel and a music guild in one message",
+      JSON.stringify({ type: "subscribe", channelId: id(1), musicGuildId: id(2) }),
+    ],
+    [
+      "a music guild that is not a snowflake",
+      JSON.stringify({ type: "subscribe", musicGuildId: "x" }),
+    ],
   ])("closes the socket on %s", (_label, raw) => {
     const ws = fakeSocket();
     createSubscriptions().handle(ws, raw);
     expect(ws.closed).toEqual([1008, "invalid message"]);
     expect(ws.topics.size).toBe(0);
+  });
+
+  test("subscribes and unsubscribes one server's music", () => {
+    const subscriptions = createSubscriptions();
+    const ws = fakeSocket();
+    const music = (type: string) => JSON.stringify({ type, musicGuildId: id(7) });
+    subscriptions.handle(ws, music("subscribe"));
+    subscriptions.handle(ws, send("subscribe", id(7)));
+    expect([...ws.topics].sort()).toEqual([channelTopic(id(7)), musicTopic(id(7))].sort());
+    subscriptions.handle(ws, music("unsubscribe"));
+    expect([...ws.topics]).toEqual([channelTopic(id(7))]);
+    expect(ws.closed).toBeNull();
+  });
+
+  test("music topics count toward the same per-socket limit", () => {
+    const subscriptions = createSubscriptions();
+    const ws = fakeSocket();
+    for (let i = 0; i < MAX_TOPICS_PER_SOCKET; i += 1)
+      subscriptions.handle(ws, send("subscribe", id(i)));
+    subscriptions.handle(ws, JSON.stringify({ type: "subscribe", musicGuildId: id(50) }));
+    expect(ws.topics.has(musicTopic(id(50)))).toBe(false);
+    expect(JSON.parse(ws.sent[0] ?? "")).toEqual({
+      event: "subscribe.rejected",
+      musicGuildId: id(50),
+      reason: "too_many",
+    });
   });
 
   test("refuses a subscription past the per-socket limit, sockets counted apart", () => {

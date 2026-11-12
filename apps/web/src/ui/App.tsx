@@ -10,6 +10,8 @@ import {
 } from "./api.ts";
 import { ChannelView } from "./ChannelView.tsx";
 import { GuildList } from "./GuildList.tsx";
+import { MusicView } from "./MusicView.tsx";
+import { type MusicEvent, parseMusicEvent } from "./music-api.ts";
 import { NewDm } from "./NewDm.tsx";
 import { type DmsState, fetchDms } from "./reading-api.ts";
 import { type SearchTarget, SearchView } from "./SearchView.tsx";
@@ -33,6 +35,7 @@ export function App() {
   const opened = useRef(false);
   const socket = useRef<PanelSocket | null>(null);
   const listeners = useRef(new Set<(event: LiveEvent) => void>());
+  const musicListeners = useRef(new Set<(event: MusicEvent) => void>());
 
   useEffect(() => {
     void fetchGuilds().then(setGuilds);
@@ -48,6 +51,11 @@ export function App() {
         opened.current = true;
       },
       onEvent: (data) => {
+        const music = parseMusicEvent(data);
+        if (music) {
+          for (const listener of musicListeners.current) listener(music);
+          return;
+        }
         const event = parseLiveEvent(data);
         if (event) for (const listener of listeners.current) listener(event);
       },
@@ -76,6 +84,14 @@ export function App() {
   const subscribe = useCallback((listener: (event: LiveEvent) => void) => {
     listeners.current.add(listener);
     return () => void listeners.current.delete(listener);
+  }, []);
+
+  const subscribeMusic = useCallback((listener: (event: MusicEvent) => void) => {
+    musicListeners.current.add(listener);
+    return () => void musicListeners.current.delete(listener);
+  }, []);
+  const watchMusic = useCallback((guildId: string | null) => {
+    socket.current?.watchMusic(guildId);
   }, []);
 
   const loadChannels = (guildId: string) => {
@@ -177,6 +193,14 @@ export function App() {
                 },
               });
             }}
+          />
+        ) : selection.kind === "music" ? (
+          <MusicView
+            guilds={readyGuilds}
+            botOnline={botOnline}
+            watch={watchMusic}
+            subscribe={subscribeMusic}
+            reconnects={reconnects}
           />
         ) : selection.kind === "archive" ? (
           <>

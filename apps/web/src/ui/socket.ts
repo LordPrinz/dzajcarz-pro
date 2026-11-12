@@ -67,6 +67,8 @@ function asStatus(value: unknown): StatusMessage | null {
 export interface PanelSocket {
   /** Watches one channel's live messages (null: none); kept across reconnects. */
   watch(channelId: string | null): void;
+  /** Watches one server's music player (null: none); kept across reconnects. */
+  watchMusic(guildId: string | null): void;
   stop(): void;
 }
 
@@ -84,9 +86,13 @@ export function connectSocket({
   let stopped = false;
   let current: SocketLike | undefined;
   let watched: string | null = null;
+  let watchedMusic: string | null = null;
 
   const sendTo = (socket: SocketLike | undefined, type: string, channelId: string) => {
     if (socket?.readyState === OPEN) socket.send(JSON.stringify({ type, channelId }));
+  };
+  const sendMusic = (socket: SocketLike | undefined, type: string, musicGuildId: string) => {
+    if (socket?.readyState === OPEN) socket.send(JSON.stringify({ type, musicGuildId }));
   };
 
   function open(): void {
@@ -98,6 +104,7 @@ export function connectSocket({
       onState("open");
       // A new socket starts with no channel: watch again what was watched.
       if (watched) sendTo(socket, "subscribe", watched);
+      if (watchedMusic) sendMusic(socket, "subscribe", watchedMusic);
     };
     socket.onmessage = (event) => {
       const value = parseJson(event.data);
@@ -132,6 +139,12 @@ export function connectSocket({
       if (watched) sendTo(current, "unsubscribe", watched);
       watched = channelId;
       if (watched) sendTo(current, "subscribe", watched);
+    },
+    watchMusic(guildId) {
+      if (guildId === watchedMusic) return;
+      if (watchedMusic) sendMusic(current, "unsubscribe", watchedMusic);
+      watchedMusic = guildId;
+      if (watchedMusic) sendMusic(current, "subscribe", watchedMusic);
     },
     stop() {
       stopped = true;
