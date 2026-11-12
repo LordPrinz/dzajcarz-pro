@@ -50,6 +50,7 @@ function setup(isExpired: () => Promise<boolean> = async () => false) {
   return {
     stop: socket.stop,
     watch: socket.watch,
+    watchMusic: socket.watchMusic,
     events,
     sockets,
     states,
@@ -117,6 +118,39 @@ describe("connectSocket", () => {
     expect(JSON.parse(second.sent.at(-1) ?? "")).toEqual({
       type: "unsubscribe",
       channelId: "200000000000000002",
+    });
+  });
+
+  test("watchMusic follows one server's player, next to the channel, also after a reconnect", async () => {
+    const t = setup();
+    const first = t.sockets[0];
+    if (!first) throw new Error("no socket");
+    first.readyState = 1;
+    first.onopen?.();
+    t.watch("200000000000000001");
+    t.watchMusic("100000000000000001");
+    t.watchMusic("100000000000000002");
+    expect(first.sent.map((raw) => JSON.parse(raw))).toEqual([
+      { type: "subscribe", channelId: "200000000000000001" },
+      { type: "subscribe", musicGuildId: "100000000000000001" },
+      { type: "unsubscribe", musicGuildId: "100000000000000001" },
+      { type: "subscribe", musicGuildId: "100000000000000002" },
+    ]);
+    first.onclose?.();
+    await flush();
+    t.fire();
+    const second = t.sockets[1];
+    if (!second) throw new Error("no second socket");
+    second.readyState = 1;
+    second.onopen?.();
+    expect(second.sent.map((raw) => JSON.parse(raw))).toEqual([
+      { type: "subscribe", channelId: "200000000000000001" },
+      { type: "subscribe", musicGuildId: "100000000000000002" },
+    ]);
+    t.watchMusic(null);
+    expect(JSON.parse(second.sent.at(-1) ?? "")).toEqual({
+      type: "unsubscribe",
+      musicGuildId: "100000000000000002",
     });
   });
 

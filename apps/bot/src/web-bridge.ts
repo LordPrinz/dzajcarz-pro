@@ -9,6 +9,7 @@ import {
   type GuildSummary,
   HEARTBEAT_INTERVAL_MS,
 } from "@dzajcarz/web-protocol";
+import type { MusicHandlers } from "./web-music.ts";
 
 /** The archive commands of the panel (#145). */
 export interface ArchiveControl {
@@ -46,6 +47,8 @@ export interface WebBridgeOptions {
   archive: ArchiveControl;
   reading: ReadingControl;
   writing: WritingControl;
+  /** The music commands (#148), on the player the music module uses. */
+  music: MusicHandlers;
   /** What `bot.status` carries; read on every heartbeat. */
   botStatus: () => EventPayload<"bot.status">;
   logger: Logger;
@@ -72,6 +75,7 @@ export async function startWebBridge({
   archive,
   reading,
   writing,
+  music,
   botStatus,
   logger,
   heartbeatMs = HEARTBEAT_INTERVAL_MS,
@@ -89,6 +93,7 @@ export async function startWebBridge({
       "dms.list": reading.dmList,
       "names.resolve": reading.resolveNames,
       ...writing,
+      ...music,
     },
   });
   await server.start();

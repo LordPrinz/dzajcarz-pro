@@ -195,6 +195,18 @@ The DM list is the union of the DMs in the archive and the DM channels discord.j
 Discord gives a bot no list of its conversations, so after a restart a DM outside the archive shows up only
 once a message arrives in it.
 
+### Music in the panel
+
+"Muzyka" in the panel (#148) is the player of `/music` for any server: pick a server and a voice channel,
+and the bot joins it or moves there, also while people listen. Search YouTube or paste a link (the links
+`/play` takes), add single results or a whole playlist, reorder the queue with up and down, remove, shuffle
+and clear it; pause, skip, seek on the progress bar, loop, filter, volume and disconnect. The panel acts as
+the owner: none of the member rules apply, so it also controls the scheduled song that members cannot pause
+or skip. It goes through the same `MusicPlayer` as the module, so the Discord panel and the web page always
+show the same state, and the page follows changes live over the WebSocket. While Lavalink is down, or the
+bot is offline, the page says so and the controls are disabled. Every change goes through the audit log.
+Details in [ADR 9](adr/0009-web-panel-as-a-separate-process.md).
+
 ### Writing as the bot
 
 Under the open channel the panel has a composer (#147): text up to 2000 characters, an optional reply to a
@@ -765,8 +777,9 @@ the client library can be swapped:
   skipped, so a double click skips one track), `pause`, `resume`, the controls `setLoop`, `shuffle`,
   `seek(guildId, position, expectedTrackId)`, `setVolume`, `setFilter`, `remove`/`jump` (zero-based place plus
   the id the module saw there, so a queue that moved meanwhile is left alone), `previous` (the track, `"none"`
-  or `"changed"`) and `clear`, `leave` (works without a node), and `subscribe` for `trackStart`, `queueEnd`,
-  `playerDestroyed` and `trackFailed`. `jump`, `previous` and `seek` also answer "changed" (false) while a
+  or `"changed"`), `moveTrack(guildId, from, to, expectedTrackId)`, `moveToChannel` and `clear`, `leave`
+  (works without a node), and `subscribe` for `trackStart`, `queueEnd`, `playerDestroyed`, `trackFailed` and
+  `stateChanged` (pause, loop, volume, filter, seek, queue edits or a channel move, whoever made them). `jump`, `previous` and `seek` also answer "changed" (false) while a
   skip is on its way, since the track they act on is about to end; the module tells the member to try again.
 - `VoiceChannels`: the member's voice channel and the number of people (bots excluded) in a channel, read
   from the gateway's voice state cache.
@@ -802,7 +815,11 @@ Other modules are unaffected and the bot starts without `LAVALINK_URL` or with t
 node offline (the module is then wired to a player that is never available).
 
 Now playing panel: one message per guild in the text channel where music was started, posted on the first
-`trackStart` and edited on the next ones (and when tracks are added or playback is paused). It shows the
+`trackStart` and edited on the next ones and on every `stateChanged`, so a change made from the web panel
+shows too. Changes that land before a redraw starts are drawn once, and a control that changes nothing
+(pausing a paused player, clearing an empty queue) emits nothing. A click on the panel's own buttons edits
+it through the interaction: a change before the click reads the state is in that edit, and one after it
+(another member, the web panel) is redrawn once the click is done. It shows the
 title (linked), author, cover, progress at that moment, who added the track and the queue length, with
 public buttons Pauza/Wznów, Dalej, Stop and Kolejka. The first three check the clicker against the bot's
 channel like the commands; Dalej and Stop acknowledge the click first (the skip waits for the node, and

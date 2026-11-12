@@ -140,6 +140,10 @@ export function createLavalinkMusicPlayer({
     }
   }
 
+  /** Tells every listener that the guild's player changed in a way no track event reports. */
+  const changed = (guildId: string) =>
+    emit("stateChanged", (listener) => listener.stateChanged(guildId));
+
   const cache = new Map<string, Track>();
   function remember(track: Track): void {
     if (!track.encoded) return;
@@ -297,6 +301,8 @@ export function createLavalinkMusicPlayer({
     emit("queueEnd", (listener) => listener.queueEnd(player.guildId));
   });
   manager.on("playerDestroy", (player, reason) => playerGone(player.guildId, reason));
+  // Someone dragged the bot to another channel, or moveToChannel landed: the client has the new channel.
+  manager.on("playerMove", (player) => changed(player.guildId));
   manager.on("playerDisconnect", (player) => {
     const resolve = rejoining.get(player.guildId);
     if (resolve) {
@@ -513,7 +519,9 @@ export function createLavalinkMusicPlayer({
       await player.queue.add(await Promise.all(tracks.map((track) => toTrack(player, track))));
       // `current` is set as soon as play() starts, unlike `playing`, which waits for the node. While a
       // local file is being started, it plays first and these tracks follow it.
+      // A fresh start is reported by trackStart; otherwise only the queue grew.
       if (!player.queue.current && !localPlays.has(guildId)) await player.play();
+      else changed(guildId);
     },
 
     isPlaying,
@@ -607,12 +615,16 @@ export function createLavalinkMusicPlayer({
 
     async pause(guildId) {
       const player = playerOf(guildId);
-      if (!player.paused) await player.pause();
+      if (player.paused) return;
+      await player.pause();
+      changed(guildId);
     },
 
     async resume(guildId) {
       const player = playerOf(guildId);
-      if (player.paused) await player.resume();
+      if (!player.paused) return;
+      await player.resume();
+      changed(guildId);
     },
 
     async setLoop(guildId, mode) {
@@ -621,21 +633,25 @@ export function createLavalinkMusicPlayer({
       // During a local file the mode waits for the tracks after it (finishLocal).
       if (local) local.loop = mode;
       else await player.setRepeatMode(mode);
+      changed(guildId);
     },
 
     async shuffle(guildId) {
       await playerOf(guildId).queue.shuffle();
+      changed(guildId);
     },
 
     async seek(guildId, positionMs, expectedTrackId) {
       const player = playerOf(guildId);
       if (player.queue.current?.encoded !== expectedTrackId || skipping.has(guildId)) return false;
       await player.seek(positionMs);
+      changed(guildId);
       return true;
     },
 
     async setVolume(guildId, percent) {
       await playerOf(guildId).setVolume(percent);
+      changed(guildId);
     },
 
     async setFilter(guildId, filter) {
@@ -645,6 +661,7 @@ export function createLavalinkMusicPlayer({
       filters.set(guildId, "off");
       await filterManager.applyPlayerFilters();
       filters.set(guildId, filter);
+      changed(guildId);
     },
 
     async remove(guildId, index, expectedTrackId) {
@@ -652,7 +669,31 @@ export function createLavalinkMusicPlayer({
       if (player.queue.tracks[index]?.encoded !== expectedTrackId) return null;
       const removed = await player.queue.splice(index, 1);
       const track = Array.isArray(removed) ? removed[0] : removed;
-      return track ? toMusicTrack(track) : null;
+      if (!track) return null;
+      changed(guildId);
+      return toMusicTrack(track);
+    },
+
+    async moveTrack(guildId, from, to, expectedTrackId) {
+      const { queue } = playerOf(guildId);
+      if (queue.tracks[from]?.encoded !== expectedTrackId) return false;
+      if (!Number.isInteger(to) || to < 0 || to >= queue.tracks.length) return false;
+      const [moved] = tracksOf(await queue.splice(from, 1));
+      if (!moved) return false;
+      // An index at or past the end appends.
+      await queue.add(moved, to);
+      changed(guildId);
+      return true;
+    },
+
+    async moveToChannel(guildId, voiceChannelId) {
+      await afterRecovery(guildId);
+      const player = playerOf(guildId);
+      if (player.voiceChannelId === voiceChannelId && player.connected) return;
+      // A plain voice state update moves the bot; the client follows Discord's answer (playerMove).
+      player.options.voiceChannelId = voiceChannelId;
+      await player.connect();
+      changed(guildId);
     },
 
     async jump(guildId, index, expectedTrackId) {
@@ -709,7 +750,9 @@ export function createLavalinkMusicPlayer({
 
     async clear(guildId) {
       const player = playerOf(guildId);
-      if (player.queue.tracks.length > 0) await player.queue.splice(0, player.queue.tracks.length);
+      if (player.queue.tracks.length === 0) return;
+      await player.queue.splice(0, player.queue.tracks.length);
+      changed(guildId);
     },
 
     async leave(guildId) {

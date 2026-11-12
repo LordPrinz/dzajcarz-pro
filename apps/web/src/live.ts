@@ -2,13 +2,16 @@ import type { BotClient, BotEvent, EventPayload } from "@dzajcarz/web-protocol";
 import { isBotOnline, Snowflake } from "@dzajcarz/web-protocol";
 import { z } from "zod";
 
-/** The WebSocket topic every socket is on: the bot's status. #148 adds `music:<guildId>`. */
+/** The WebSocket topic every socket is on: the bot's status, and whether music can play at all. */
 export const BOT_TOPIC = "bot";
 
 /** The topic of one channel's message events; a socket joins it by sending `subscribe`. */
 export const channelTopic = (channelId: string): string => `channel:${channelId}`;
 
-/** A socket watches at most this many channels at once; the panel shows one. */
+/** The topic of one server's music player; a socket joins it by sending `subscribe` with `musicGuildId`. */
+export const musicTopic = (guildId: string): string => `music:${guildId}`;
+
+/** A socket watches at most this many channels and players at once; the panel shows one of each. */
 export const MAX_TOPICS_PER_SOCKET = 10;
 
 /** What the panel sends over the socket and `/api/status` derives from. */
@@ -61,6 +64,16 @@ export function fanOut(event: BotEvent, live: LiveState): { topic: string; messa
         topic: channelTopic(event.payload.channelId),
         message: JSON.stringify({ event: event.event, payload: event.payload }),
       };
+    case "music.state":
+      return {
+        topic: musicTopic(event.payload.guildId),
+        message: JSON.stringify({ event: event.event, payload: event.payload }),
+      };
+    case "music.status":
+      return {
+        topic: BOT_TOPIC,
+        message: JSON.stringify({ event: event.event, payload: event.payload }),
+      };
   }
 }
 
@@ -79,10 +92,12 @@ export function attachLive(
   });
 }
 
-/** What a client may send over the socket. */
-export const ClientMessage = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("subscribe"), channelId: Snowflake }).strict(),
-  z.object({ type: z.literal("unsubscribe"), channelId: Snowflake }).strict(),
+const SubscriptionType = z.enum(["subscribe", "unsubscribe"]);
+
+/** What a client may send over the socket: one channel's messages, or one server's music player. */
+export const ClientMessage = z.union([
+  z.object({ type: SubscriptionType, channelId: Snowflake }).strict(),
+  z.object({ type: SubscriptionType, musicGuildId: Snowflake }).strict(),
 ]);
 
 /** The part of a Bun socket the subscription handling uses. */
@@ -94,9 +109,9 @@ export interface TopicSocket {
 }
 
 /**
- * Handles what a client sends: `subscribe`/`unsubscribe` to one channel's events. Anything that does not
- * match the schema closes the socket (1008); a subscribe past the per-socket limit is answered with
- * `subscribe.rejected` and leaves the socket as it was.
+ * Handles what a client sends: `subscribe`/`unsubscribe` to one channel's events or one server's music.
+ * Anything that does not match the schema closes the socket (1008); a subscribe past the per-socket limit
+ * (channels and players together) is answered with `subscribe.rejected` and leaves the socket as it was.
  */
 export function createSubscriptions() {
   const topics = new WeakMap<TopicSocket, Set<string>>();
@@ -113,8 +128,10 @@ export function createSubscriptions() {
         ws.close(1008, "invalid message");
         return;
       }
-      const { type, channelId } = parsed.data;
-      const topic = channelTopic(channelId);
+      const message = parsed.data;
+      const { type } = message;
+      const topic =
+        "channelId" in message ? channelTopic(message.channelId) : musicTopic(message.musicGuildId);
       const own = topics.get(ws) ?? new Set<string>();
       topics.set(ws, own);
       if (type === "unsubscribe") {
@@ -123,7 +140,11 @@ export function createSubscriptions() {
         return;
       }
       if (!own.has(topic) && own.size >= MAX_TOPICS_PER_SOCKET) {
-        ws.send(JSON.stringify({ event: "subscribe.rejected", channelId, reason: "too_many" }));
+        const target =
+          "channelId" in message
+            ? { channelId: message.channelId }
+            : { musicGuildId: message.musicGuildId };
+        ws.send(JSON.stringify({ event: "subscribe.rejected", ...target, reason: "too_many" }));
         return;
       }
       own.add(topic);

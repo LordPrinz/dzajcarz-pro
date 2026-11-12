@@ -69,6 +69,7 @@ class StubPlayer {
   position = 0;
   connected = false;
   repeatMode: "off" | "track" | "queue" = "off";
+  volume = 100;
   readonly ping = { lavalink: 0, ws: 0 };
   readonly calls: string[] = [];
   /** Runs while the player joins, before Discord answers (a member's /play landing meanwhile). */
@@ -89,6 +90,9 @@ class StubPlayer {
       return removed.length === 1 ? removed[0] : removed;
     },
     shiftPrevious: async () => this.queue.previous.shift() ?? null,
+    shuffle: async () => {
+      this.queue.tracks.reverse();
+    },
   };
   /** The client's real filter manager: what it sends goes to the stub node's `updatePlayer`. */
   readonly filterManager: FilterManager;
@@ -149,6 +153,10 @@ class StubPlayer {
 
   async pause() {
     this.paused = true;
+  }
+
+  async setVolume(volume: number) {
+    this.volume = volume;
   }
 
   async resume() {
@@ -288,15 +296,17 @@ function setup({ localFileGraceMs }: { localFileGraceMs?: number } = {}) {
   });
   const events: string[] = [];
   const failed: MusicTrack[] = [];
+  const changes: string[] = [];
   const listener: MusicListener = {
     trackStart: (guildId, track) => void events.push(`trackStart ${guildId} ${track.title}`),
     queueEnd: (guildId) => void events.push(`queueEnd ${guildId}`),
     playerDestroyed: (guildId) => void events.push(`playerDestroyed ${guildId}`),
     trackFailed: (_guildId, track) => void failed.push(track),
+    stateChanged: (guildId) => void changes.push(guildId),
   };
   music.subscribe(listener);
   const forwardRaw = (packet: unknown) => handlers.get("raw")?.(packet);
-  return { manager, music, gateway, events, failed, warnings, forwardRaw };
+  return { manager, music, gateway, events, failed, changes, warnings, forwardRaw };
 }
 
 /** Lets fire-and-forget recovery work finish. */
@@ -1013,6 +1023,107 @@ describe("lavalink music player", () => {
       expect(await music.seek(GUILD, 1000, "enc-B")).toBe(false);
       expect(await music.seek(GUILD, 2000, "enc-A")).toBe(true);
       expect(player.calls).toEqual(["seek 2000"]);
+    });
+  });
+
+  describe("changes for the panels", () => {
+    test("every control that changes the player tells the listeners", async () => {
+      const { manager, music, changes } = setup();
+      manager.playing(GUILD, song("A"), [song("B"), song("C")]);
+      await music.pause(GUILD);
+      await music.resume(GUILD);
+      await music.setLoop(GUILD, "queue");
+      await music.setVolume(GUILD, 50);
+      await music.setFilter(GUILD, "nightcore");
+      await music.shuffle(GUILD);
+      await music.seek(GUILD, 1000, "enc-A");
+      await music.enqueue(GUILD, []);
+      expect(changes).toEqual(Array(8).fill(GUILD));
+    });
+
+    test("a seek or removal that changes nothing tells nobody", async () => {
+      const { manager, music, changes } = setup();
+      manager.playing(GUILD, song("A"), [song("B")]);
+      expect(await music.seek(GUILD, 1000, "enc-B")).toBe(false);
+      expect(await music.remove(GUILD, 0, "enc-A")).toBeNull();
+      expect(changes).toEqual([]);
+    });
+
+    test("a fresh start is left to trackStart, not reported as a change", async () => {
+      const { manager, music, changes } = setup();
+      manager.response = { loadType: "search", data: [song("A"), song("B")] };
+      const result = await music.search({ kind: "search", text: "a" }, CALLER);
+      const tracks = result.kind === "tracks" ? result.tracks : [];
+      await music.join(GUILD, VOICE, TEXT);
+      await music.enqueue(GUILD, [tracks[0] as MusicTrack]);
+      expect(changes).toEqual([]);
+      await music.enqueue(GUILD, [tracks[1] as MusicTrack]);
+      expect(changes).toEqual([GUILD]);
+    });
+
+    test("controls that change nothing tell nobody", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"));
+      await music.resume(GUILD);
+      player.paused = true;
+      await music.pause(GUILD);
+      await music.clear(GUILD);
+      expect(changes).toEqual([]);
+    });
+
+    test("a move by someone else in Discord is reported too", () => {
+      const { manager, changes } = setup();
+      const player = manager.playing(GUILD, song("A"));
+      manager.emit("playerMove", player, VOICE, "400000000000000009");
+      expect(changes).toEqual([GUILD]);
+    });
+  });
+
+  describe("moving", () => {
+    test("moveTrack puts the track the caller saw at its new place", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B"), song("C"), song("D")]);
+      expect(await music.moveTrack(GUILD, 0, 2, "enc-B")).toBe(true);
+      expect(player.queue.tracks.map((t) => t.info.title)).toEqual(["C", "D", "B"]);
+      expect(await music.moveTrack(GUILD, 2, 0, "enc-B")).toBe(true);
+      expect(player.queue.tracks.map((t) => t.info.title)).toEqual(["B", "C", "D"]);
+      expect(changes).toEqual([GUILD, GUILD]);
+    });
+
+    test("moveTrack leaves a queue that moved meanwhile, or a place past the end, alone", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B"), song("C")]);
+      expect(await music.moveTrack(GUILD, 0, 1, "enc-C")).toBe(false);
+      expect(await music.moveTrack(GUILD, 0, 2, "enc-B")).toBe(false);
+      expect(await music.moveTrack(GUILD, 0, -1, "enc-B")).toBe(false);
+      expect(player.queue.tracks.map((t) => t.info.title)).toEqual(["B", "C"]);
+      expect(changes).toEqual([]);
+    });
+
+    test("moveToChannel moves a playing player with a voice state update, keeping its track", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"), [song("B")]);
+      player.voiceChannelId = VOICE;
+      const target = "400000000000000009";
+      await music.moveToChannel(GUILD, target);
+      expect(player.calls).toEqual([`connect ${target}`]);
+      expect(music.state(GUILD)?.voiceChannelId).toBe(target);
+      expect(music.state(GUILD)?.current?.title).toBe("A");
+      expect(changes).toEqual([GUILD]);
+    });
+
+    test("moveToChannel to the channel the bot is in sends nothing", async () => {
+      const { manager, music, changes } = setup();
+      const player = manager.playing(GUILD, song("A"));
+      player.voiceChannelId = VOICE;
+      await music.moveToChannel(GUILD, VOICE);
+      expect(player.calls).toEqual([]);
+      expect(changes).toEqual([]);
+    });
+
+    test("moveToChannel without a player rejects", async () => {
+      const { music } = setup();
+      await expect(music.moveToChannel(GUILD, VOICE)).rejects.toThrow();
     });
   });
 

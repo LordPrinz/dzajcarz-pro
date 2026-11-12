@@ -4,6 +4,7 @@ import {
   type ButtonSpec,
   createRegistry,
   executeCommand,
+  executeComponent,
   GENERIC_ERROR,
   type LogFields,
   type Logger,
@@ -14,6 +15,7 @@ import {
 } from "@dzajcarz/core";
 import {
   clickComponent,
+  createFakeComponentContext,
   createFakeContext,
   createFakeScheduler,
   replyText,
@@ -634,6 +636,89 @@ describe("music module", () => {
       expect((redrawn.components?.[0]?.[0] as ButtonSpec | undefined)?.label).toBe("Wznów");
       await click(panelButton("panel-pause").customId, CALLER);
       expect(player.state(GUILD)?.paused).toBe(false);
+    });
+
+    test("a click redraws the panel once, through the interaction", async () => {
+      const { run, click, panelButton, panels } = setup();
+      await run("play", { query: "a" });
+      const edits = panels.edits.length;
+      await click(panelButton("panel-pause").customId);
+      await click(panelButton("panel-loop").customId);
+      expect(panels.edits.length).toBe(edits);
+    });
+
+    test("a change from elsewhere while a click edits the panel is drawn after the click", async () => {
+      const { run, player, panels, panel, panelButton, registry } = setup();
+      await run("play", { query: "a" });
+      const edits = panels.edits.length;
+      const resolved = registry.resolveComponent(panelButton("panel-pause").customId);
+      if (!resolved) throw new Error("no pause button");
+      const ctx = createFakeComponentContext({ state: resolved.state });
+      const update = ctx.update.bind(ctx);
+      // The web panel turns the volume down while Discord applies the click's edit.
+      ctx.update = async (reply) => {
+        await update(reply);
+        await player.setVolume(GUILD, 30);
+      };
+      await executeComponent(resolved, ctx, silentLogger);
+      await settle();
+      expect(ctx.updates).toHaveLength(1);
+      expect(panels.edits.length).toBe(edits + 1);
+      expect(panel()?.embeds?.[0]?.footer).toContain("Głośność: 30%");
+    });
+
+    test("a change held back by a click that is then refused is still drawn", async () => {
+      const { run, player, panels, panel, panelButton, registry, voice } = setup();
+      await run("play", { query: "a" });
+      const edits = panels.edits.length;
+      voice.members.set(FRIEND, OTHER_VOICE);
+      const resolved = registry.resolveComponent(panelButton("panel-loop").customId);
+      if (!resolved) throw new Error("no loop button");
+      const ctx = createFakeComponentContext({ state: resolved.state, userId: FRIEND });
+      // The web panel changes the volume while the click is checked; then the click is refused.
+      const clicked = executeComponent(resolved, ctx, silentLogger);
+      await player.setVolume(GUILD, 30);
+      await clicked;
+      await settle();
+      expect(replyText(ctx.replies[0])).toBe(otherChannel(VOICE));
+      expect(panels.edits.length).toBe(edits + 1);
+      expect(panel()?.embeds?.[0]?.footer).toContain("Głośność: 30%");
+    });
+
+    test("a click does not hold back redraws of changes once it is done", async () => {
+      const { run, player, panels, click, panelButton } = setup();
+      await run("play", { query: "a" });
+      await click(panelButton("panel-loop").customId);
+      const edits = panels.edits.length;
+      await player.setVolume(GUILD, 30);
+      await settle();
+      expect(panels.edits.length).toBe(edits + 1);
+    });
+
+    test("is redrawn when the player changes outside the module (the web panel)", async () => {
+      const { run, player, panels, panel } = setup();
+      await run("play", { query: "a" });
+      await player.setVolume(GUILD, 40);
+      await player.pause(GUILD);
+      await settle();
+      expect(panels.posts).toEqual(["panel-1"]);
+      expect(panel()?.embeds?.[0]?.footer).toBe(
+        "Kolejka jest pusta · Pętla: wył. · Głośność: 40% · Filtr: brak",
+      );
+      expect((panel()?.components?.[0]?.[0] as ButtonSpec | undefined)?.label).toBe("Wznów");
+    });
+
+    test("changes in a row before a redraw starts are drawn once", async () => {
+      const { run, player, panels } = setup();
+      await run("play", { query: "a" });
+      const edits = panels.edits.length;
+      await Promise.all([
+        player.setVolume(GUILD, 40),
+        player.setLoop(GUILD, "queue"),
+        player.setFilter(GUILD, "8d"),
+      ]);
+      await settle();
+      expect(panels.edits.length).toBe(edits + 1);
     });
 
     test("a double click on skip skips one track", async () => {

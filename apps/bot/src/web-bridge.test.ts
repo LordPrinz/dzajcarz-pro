@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { silentLogger } from "@dzajcarz/core";
 import { createMemoryPubSub } from "@dzajcarz/kv";
 import {
+  COMMANDS,
   createBotClient,
   EVENT_CHANNEL,
   EVENTS,
@@ -14,6 +15,7 @@ import {
   startWebBridge,
   type WritingControl,
 } from "./web-bridge.ts";
+import type { MusicHandlers } from "./web-music.ts";
 
 const guilds: GuildSummary[] = [
   { id: "100000000000000001", name: "Alfa", iconUrl: null, memberCount: 3 },
@@ -52,6 +54,11 @@ const writing: WritingControl = {
   "members.search": async () => ({ members: [] }),
   "dm.open": async () => ({ status: "rejected", reason: "unknown_user" }),
 };
+const music = Object.fromEntries(
+  Object.keys(COMMANDS)
+    .filter((name) => name.startsWith("music."))
+    .map((name) => [name, async () => ({ status: "rejected", reason: "unavailable" })]),
+) as unknown as MusicHandlers;
 const listChannels = (guildId: string) =>
   guildId === GUILD
     ? {
@@ -74,6 +81,7 @@ function setup(listGuilds: () => GuildSummary[] = () => guilds, logger = silentL
         archive,
         reading,
         writing,
+        music,
         botStatus: () => STATUS,
         logger,
         heartbeatMs: 20,
@@ -219,6 +227,7 @@ describe("startWebBridge", () => {
       archive,
       reading,
       writing,
+      music,
       botStatus: () => STATUS,
       logger: silentLogger,
       heartbeatMs: 60_000,

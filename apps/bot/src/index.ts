@@ -23,6 +23,7 @@ import {
 import { migrate } from "@dzajcarz/db/migrator";
 import { createRedisPubSub, createRedisStore, createTimedStore, keepConnected } from "@dzajcarz/kv";
 import { DZAJCO_GIF } from "@dzajcarz/module-dzajco";
+import { parseQuery } from "@dzajcarz/module-music";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { createArchiveBackfill } from "./archive-backfill.ts";
@@ -53,6 +54,7 @@ import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { createScheduleVoice } from "./discord/schedule.ts";
 import { createGuildList } from "./discord/web-guilds.ts";
+import { createVoiceDirectory } from "./discord/web-music.ts";
 import {
   attachMessageEvents,
   createChannelReader,
@@ -78,6 +80,7 @@ import { createPrefixSettings } from "./prefix-settings.ts";
 import { createRiotStats } from "./riot/stats.ts";
 import { createTimeZones } from "./time-zones.ts";
 import { startWebBridge } from "./web-bridge.ts";
+import { createWebMusic, startMusicEvents } from "./web-music.ts";
 
 // `bot healthcheck` is the container HEALTHCHECK: it needs no token or database, so it runs before loadEnv.
 if (process.argv[2] === "healthcheck") process.exit(await runHealthcheck(Bun.env));
@@ -309,9 +312,19 @@ const webBridge = await startWebBridge({
     resolveNames,
   },
   writing: createWriting({ client, uploads, logger: logger.child({ component: "web-writing" }) }),
+  // The same player instance the music module drives, so both panels show one state.
+  music: createWebMusic({
+    player: musicPlayer,
+    voice: createVoiceDirectory(client),
+    botUserId: () => client.user?.id ?? null,
+    parseQuery,
+    logger: logger.child({ component: "web-music" }),
+  }),
   botStatus: () => ({ guilds: client.guilds.cache.size, startedAt }),
   logger: logger.child({ component: "web-bridge" }),
 });
+// Live music state for the panel (#148): every change of a guild's player, and the node coming or going.
+const musicEvents = startMusicEvents({ player: musicPlayer, publish: webBridge.publishEvent });
 // The panel's live view (#146): every message event goes out, the panel keeps only what a socket watches.
 attachMessageEvents(client, {
   publish: webBridge.publishEvent,
@@ -387,6 +400,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     await healthServer?.stop(true);
     clearInterval(uploadSweep);
+    musicEvents.stop();
     await webBridge.stop();
     for (const module of modules) {
       try {

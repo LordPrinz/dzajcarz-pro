@@ -779,3 +779,66 @@ video.attachment-media,
   border-radius: 0.5rem;
   background: var(--surface);
 }
+
+.music-pickers,
+.music-controls,
+.music-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.music-now,
+.music-results,
+.music-queue {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.music-title {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+.music-badge {
+  margin-left: 0.5rem;
+  padding: 0 0.4rem;
+  border-radius: 0.25rem;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.music-progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.music-progress input {
+  width: 100%;
+}
+
+.music-search input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.music-results ul,
+.music-queue ol {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.music-track {
+  overflow-wrap: anywhere;
+}

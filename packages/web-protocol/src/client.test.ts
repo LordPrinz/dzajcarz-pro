@@ -78,6 +78,23 @@ describe("createBotClient", () => {
     expect(command.deadline - command.sentAt).toBe(50);
   });
 
+  test("a slow command can wait longer than the client's own timeout, never past the TTL limit", async () => {
+    const { client, pubsub } = setup(undefined, 50);
+    await client.start();
+    const seen: { sentAt: number; deadline: number }[] = [];
+    await pubsub.subscribe(COMMAND_CHANNEL, (raw) => seen.push(JSON.parse(raw)));
+    const started = Date.now();
+    expect(await client.request("guilds.list", {}, { timeoutMs: 120 })).toEqual({
+      ok: false,
+      reason: "timeout",
+    });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(100);
+    void client.request("guilds.list", {}, { timeoutMs: 60_000 });
+    await Bun.sleep(0);
+    expect(seen.map((command) => command.deadline - command.sentAt)).toEqual([120, 30_000]);
+    await client.stop();
+  });
+
   test("a reply with an id nobody waits for does not settle the pending request", async () => {
     const { client, pubsub } = setup(undefined, 80);
     await client.start();

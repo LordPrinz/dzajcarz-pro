@@ -18,6 +18,9 @@ spends the bot's CPU on transcoding. Native voice bindings on Bun are less prove
   The library is chosen in a spike issue before the module is built.
 - Lavalink runs under the Docker Compose profile `music`, so the rest of the bot can be developed without
   Java.
+- The web panel (#148, [ADR 9](0009-web-panel-as-a-separate-process.md)) drives the same player instance.
+  For that the port has `moveTrack`, `moveToChannel` and a `stateChanged` listener event, which the adapter
+  emits after every change that no track event reports; the music module redraws its panel on it.
 
 ## YouTube setup (DZAJ-50)
 
