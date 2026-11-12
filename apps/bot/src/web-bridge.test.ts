@@ -8,7 +8,7 @@ import {
   EventEnvelope,
   type GuildSummary,
 } from "@dzajcarz/web-protocol";
-import { type ArchiveControl, startWebBridge } from "./web-bridge.ts";
+import { type ArchiveControl, type ReadingControl, startWebBridge } from "./web-bridge.ts";
 
 const guilds: GuildSummary[] = [
   { id: "100000000000000001", name: "Alfa", iconUrl: null, memberCount: 3 },
@@ -27,6 +27,15 @@ const archive: ArchiveControl = {
   setGuild: async (request) => request,
   setDm: async (request) => request,
   backfill: async () => ({ status: "ok", fetched: 2, stored: 1, oldestId: CHANNEL, done: true }),
+};
+const reading: ReadingControl = {
+  channelMessages: async () => ({ status: "no_access" }),
+  dmList: async () => ({ channels: [], truncated: false }),
+  resolveNames: async ({ users }) => ({
+    users: Object.fromEntries(users.map((id) => [id, "Ola"])),
+    roles: {},
+    channels: {},
+  }),
 };
 const listChannels = (guildId: string) =>
   guildId === GUILD
@@ -48,6 +57,7 @@ function setup(listGuilds: () => GuildSummary[] = () => guilds, logger = silentL
         listGuilds,
         listChannels,
         archive,
+        reading,
         botStatus: () => STATUS,
         logger,
         heartbeatMs: 20,
@@ -96,6 +106,48 @@ describe("startWebBridge", () => {
     });
   });
 
+  test("the reading commands reach the reading control", async () => {
+    const { client, start } = setup();
+    await client.start();
+    await start();
+    expect(await client.request("channel.messages", { channelId: CHANNEL, limit: 10 })).toEqual({
+      ok: true,
+      data: { status: "no_access" },
+    });
+    expect(await client.request("dms.list", {})).toEqual({
+      ok: true,
+      data: { channels: [], truncated: false },
+    });
+    expect(
+      await client.request("names.resolve", {
+        guildId: null,
+        users: [CHANNEL],
+        roles: [],
+        channels: [],
+      }),
+    ).toEqual({ ok: true, data: { users: { [CHANNEL]: "Ola" }, roles: {}, channels: {} } });
+  });
+
+  test("publishEvent reaches the panel's event listeners", async () => {
+    const { client, start } = setup();
+    await client.start();
+    const bridge = await start();
+    const seen: unknown[] = [];
+    client.onEvent((event) => seen.push(event));
+    await bridge.publishEvent("message.deleted", {
+      guildId: GUILD,
+      channelId: CHANNEL,
+      ids: [CHANNEL],
+    });
+    expect(seen).toEqual([
+      {
+        event: "message.deleted",
+        payload: { guildId: GUILD, channelId: CHANNEL, ids: [CHANNEL] },
+        at: expect.any(Number),
+      },
+    ]);
+  });
+
   test("onReady publishes a valid bot.status at once and then on every beat", async () => {
     const { pubsub, start } = setup();
     const seen: unknown[] = [];
@@ -123,6 +175,7 @@ describe("startWebBridge", () => {
       listGuilds: () => guilds,
       listChannels,
       archive,
+      reading,
       botStatus: () => STATUS,
       logger: silentLogger,
       heartbeatMs: 60_000,

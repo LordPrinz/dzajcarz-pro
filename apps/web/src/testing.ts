@@ -1,10 +1,22 @@
 import { silentLogger } from "@dzajcarz/core";
+import type { ArchiveReader } from "@dzajcarz/db";
 import type { BotClient } from "@dzajcarz/web-protocol";
 import { loadPage, type PageFiles } from "./http/page.ts";
 import { attachLive, createLiveState, type LiveState } from "./live.ts";
 import { createWebServer, type WebServerDeps } from "./server.ts";
 
 export const PUBLIC_ORIGIN = "https://panel.example.com";
+
+/** An archive with nothing in it. */
+export const emptyArchive: ArchiveReader = {
+  page: async () => ({ messages: [], hasOlder: false, hasNewer: false }),
+  channelGuild: async () => undefined,
+  messagePlace: async () => null,
+  versions: async () => [],
+  search: async () => ({ messages: [], hasMore: false }),
+  authorNames: async () => new Map(),
+  dmChannels: async () => [],
+};
 
 let page: Promise<PageFiles> | undefined;
 /** The built page, once per test run: building it takes a moment. */
@@ -52,7 +64,12 @@ export async function startTestServer(
       live,
       // Runs the action without recording it; the auditor has its own tests.
       auditor: { audited: (_request, _action, _context, run) => run() },
-      archiveSettings: { listGuilds: async () => [], dmEnabled: async () => false },
+      archiveSettings: {
+        listGuilds: async () => [],
+        dmEnabled: async () => false,
+        findGuild: async () => null,
+      },
+      archive: emptyArchive,
       probes: { postgres: async () => true, redis: async () => true },
       logger: silentLogger,
       page: await testPage(),

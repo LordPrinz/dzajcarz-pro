@@ -20,6 +20,9 @@ export function commandHandlers(overrides: Partial<CommandHandlers> = {}): Comma
     "archive.guild.set": notInThisTest("archive.guild.set"),
     "archive.dm.set": notInThisTest("archive.dm.set"),
     "archive.backfill": notInThisTest("archive.backfill"),
+    "channel.messages": notInThisTest("channel.messages"),
+    "dms.list": notInThisTest("dms.list"),
+    "names.resolve": notInThisTest("names.resolve"),
     ...overrides,
   };
 }

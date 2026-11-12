@@ -14,3 +14,5 @@ END
 $$;
 
 ALTER ROLE dzajcarz_web WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD :'web_password';
+-- Migration 0017 sets this too; here it also holds where the bot's user may not alter the role.
+ALTER ROLE dzajcarz_web SET statement_timeout = '5s';

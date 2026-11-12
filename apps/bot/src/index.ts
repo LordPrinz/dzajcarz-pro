@@ -52,6 +52,12 @@ import { createClock, createPresence } from "./discord/presence.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { createScheduleVoice } from "./discord/schedule.ts";
 import { createGuildList } from "./discord/web-guilds.ts";
+import {
+  attachMessageEvents,
+  createChannelReader,
+  createDmList,
+  createNameResolver,
+} from "./discord/web-reading.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleEnabled } from "./event-scope.ts";
@@ -270,6 +276,7 @@ client.on(
 );
 
 const startedAt = new Date().toISOString();
+const resolveNames = createNameResolver(client);
 // A failed subscribe is retried when Redis reconnects, so the bridge never blocks login.
 const webBridge = await startWebBridge({
   pubsub,
@@ -284,8 +291,19 @@ const webBridge = await startWebBridge({
       archive: messageArchive,
     }),
   }),
+  reading: {
+    channelMessages: createChannelReader(client, resolveNames),
+    dmList: createDmList(client),
+    resolveNames,
+  },
   botStatus: () => ({ guilds: client.guilds.cache.size, startedAt }),
   logger: logger.child({ component: "web-bridge" }),
+});
+// The panel's live view (#146): every message event goes out, the panel keeps only what a socket watches.
+attachMessageEvents(client, {
+  publish: webBridge.publishEvent,
+  resolve: resolveNames,
+  logger: logger.child({ component: "web-events" }),
 });
 
 client.once(Events.ClientReady, (ready) => {
