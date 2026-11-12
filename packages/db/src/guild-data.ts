@@ -16,14 +16,21 @@ export const GUILD_TABLES = [
   "module_disabled",
   "welcome_config",
   "guild_settings",
+  "archive_settings",
 ] as const;
 
 /**
  * Tables with a `guild_id` that survive the bot leaving. An opt-out from a server's scheduled DMs is the
  * member's own choice, not the server's data; deleting it would let that server DM them again after
  * re-adding the bot. `web_audit` is the owner's record of what the web panel did, not the server's data.
+ * `archived_message` is the owner's archive, kept without a retention limit; the archive settings go, so a
+ * server that adds the bot again starts with the archive off.
  */
-export const KEPT_GUILD_TABLES = ["scheduled_message_opt_out", "web_audit"] as const;
+export const KEPT_GUILD_TABLES = [
+  "scheduled_message_opt_out",
+  "web_audit",
+  "archived_message",
+] as const;
 
 export type GuildTable = (typeof GUILD_TABLES)[number];
 
@@ -58,6 +65,8 @@ const DELETES: Record<GuildTable, Delete> = {
     tx`DELETE FROM welcome_config WHERE guild_id = ${guildId} RETURNING 1`,
   guild_settings: (tx, guildId) =>
     tx`DELETE FROM guild_settings WHERE guild_id = ${guildId} RETURNING 1`,
+  archive_settings: (tx, guildId) =>
+    tx`DELETE FROM archive_settings WHERE guild_id = ${guildId} RETURNING 1`,
 };
 
 export function createGuildDataRepository(sql: SQL): GuildDataRepository {

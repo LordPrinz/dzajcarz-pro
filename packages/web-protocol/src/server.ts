@@ -17,9 +17,18 @@ import {
 import { EVENTS, type EventName, type EventPayload } from "./events.ts";
 import type { ProtocolLogger } from "./logger.ts";
 
+/** What a handler knows about the command besides its payload. */
+export interface CommandContext {
+  /** Epoch ms (the panel's clock) after which the panel no longer waits for the answer. */
+  deadline: number;
+}
+
 /** One handler per command; a missing one is a compile error. */
 export type CommandHandlers = {
-  [N in CommandName]: (request: CommandRequest<N>) => Promise<CommandResponse<N>>;
+  [N in CommandName]: (
+    request: CommandRequest<N>,
+    context: CommandContext,
+  ) => Promise<CommandResponse<N>>;
 };
 
 export interface CommandServer {
@@ -124,7 +133,9 @@ export function createCommandServer({
     }
     let result: unknown;
     try {
-      result = await (handlers[command] as (request: unknown) => Promise<unknown>)(request.data);
+      result = await (
+        handlers[command] as (request: unknown, context: CommandContext) => Promise<unknown>
+      )(request.data, { deadline });
     } catch (error) {
       logger.error("Command handler failed", { command, error });
       await reply(replyTo, fail(id, "failed", "The command failed"));

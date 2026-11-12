@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { COMMANDS, GuildSummary, isCommandName } from "./commands.ts";
-import { CommandEnvelope, EventEnvelope, ReplyEnvelope } from "./envelope.ts";
+import {
+  COMMANDS,
+  GuildSummary,
+  isCommandName,
+  MAX_CHANNELS,
+  MAX_EXCLUDED_CHANNELS,
+} from "./commands.ts";
+import { CommandEnvelope, EventEnvelope, MAX_MESSAGE_BYTES, ReplyEnvelope } from "./envelope.ts";
 import { EVENTS, isEventName } from "./events.ts";
 
 const ID = crypto.randomUUID();
@@ -121,5 +127,83 @@ describe("registries", () => {
     expect(EVENTS["bot.status"].safeParse({ guilds: 3, startedAt: "yesterday" }).success).toBe(
       false,
     );
+  });
+});
+
+describe("archive and channel commands", () => {
+  const GUILD = "123456789012345678";
+  const CHANNEL = "223456789012345678";
+  const channel = { id: CHANNEL, name: "ogólny", kind: "text", parentId: null };
+
+  test("guilds.channels takes a guild id and answers a list or null", () => {
+    const { request, response } = COMMANDS["guilds.channels"];
+    expect(request.safeParse({ guildId: GUILD }).success).toBe(true);
+    expect(request.safeParse({ guildId: "abc" }).success).toBe(false);
+    expect(request.safeParse({ guildId: GUILD, extra: 1 }).success).toBe(false);
+    expect(response.safeParse({ channels: [channel], truncated: false }).success).toBe(true);
+    expect(response.safeParse(null).success).toBe(true);
+    expect(
+      response.safeParse({ channels: [{ ...channel, kind: "category" }], truncated: false })
+        .success,
+    ).toBe(false);
+    expect(
+      response.safeParse({
+        channels: Array.from({ length: MAX_CHANNELS + 1 }, () => channel),
+        truncated: true,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("the longest guilds.channels reply fits in one message", () => {
+    const longest = {
+      id: "12345678901234567890",
+      name: "中".repeat(100),
+      kind: "announcement",
+      parentId: "12345678901234567890",
+    };
+    const reply = JSON.stringify({
+      v: 1,
+      id: ID,
+      ok: true,
+      result: { channels: Array.from({ length: MAX_CHANNELS }, () => longest), truncated: true },
+    });
+    expect(Buffer.byteLength(reply)).toBeLessThan(MAX_MESSAGE_BYTES);
+  });
+
+  test("archive.guild.set needs the whole setting with valid channel ids", () => {
+    const { request } = COMMANDS["archive.guild.set"];
+    const settings = { guildId: GUILD, enabled: true, excludedChannelIds: [CHANNEL] };
+    expect(request.safeParse(settings).success).toBe(true);
+    expect(request.safeParse({ ...settings, excludedChannelIds: ["x"] }).success).toBe(false);
+    expect(request.safeParse({ guildId: GUILD, enabled: true }).success).toBe(false);
+    expect(request.safeParse({ ...settings, enabled: "yes" }).success).toBe(false);
+    expect(
+      request.safeParse({
+        ...settings,
+        excludedChannelIds: Array.from({ length: MAX_EXCLUDED_CHANNELS + 1 }, () => CHANNEL),
+      }).success,
+    ).toBe(false);
+  });
+
+  test("archive.dm.set takes only the switch", () => {
+    const { request } = COMMANDS["archive.dm.set"];
+    expect(request.safeParse({ enabled: false }).success).toBe(true);
+    expect(request.safeParse({}).success).toBe(false);
+    expect(request.safeParse({ enabled: true, guildId: GUILD }).success).toBe(false);
+  });
+
+  test("archive.backfill takes a channel and an optional starting point", () => {
+    const { request, response } = COMMANDS["archive.backfill"];
+    expect(request.safeParse({ channelId: CHANNEL }).success).toBe(true);
+    expect(request.safeParse({ channelId: CHANNEL, before: GUILD }).success).toBe(true);
+    expect(request.safeParse({ channelId: CHANNEL, before: "older" }).success).toBe(false);
+    expect(request.safeParse({ channelId: CHANNEL, limit: 10_000 }).success).toBe(false);
+    expect(
+      response.safeParse({ status: "ok", fetched: 100, stored: 3, oldestId: CHANNEL, done: false })
+        .success,
+    ).toBe(true);
+    expect(response.safeParse({ status: "not_archived" }).success).toBe(true);
+    expect(response.safeParse({ status: "ok", fetched: -1, stored: 0 }).success).toBe(false);
+    expect(response.safeParse({ status: "gone" }).success).toBe(false);
   });
 });

@@ -133,7 +133,7 @@ does not count). Logs: `prod logs -f web`.
 ### Managed Postgres without CREATEROLE
 
 When the bot's database user may not create roles, migration 0014 only logs a NOTICE and skips the role and
-its grants. Create the role once as an admin, **before** the bot first runs that migration:
+its grants (and so do later migrations that grant the panel more). Create the role once as an admin, **before** the bot first runs that migration:
 
 ```sql
 CREATE ROLE dzajcarz_web NOLOGIN;
@@ -145,6 +145,9 @@ If the migration already ran without it, grant the rights by hand too (as the ow
 GRANT SELECT, INSERT ON web_audit TO dzajcarz_web;
 GRANT UPDATE (outcome, error) ON web_audit TO dzajcarz_web;
 GRANT USAGE ON SCHEMA public TO dzajcarz_web;
+-- Message archive (migration 0015): read only.
+GRANT SELECT ON archive_settings, archive_dm_settings, archived_message, archived_message_version
+  TO dzajcarz_web;
 ```
 
 Setting the login and password needs those rights as well; when the `web-db-role` step lacks them, run

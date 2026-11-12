@@ -3,7 +3,7 @@ import { createMemoryPubSub, type PubSub } from "@dzajcarz/kv";
 import { COMMAND_CHANNEL, EVENT_CHANNEL, replyChannel } from "./channels.ts";
 import { createBotClient } from "./client.ts";
 import { createCommandServer } from "./server.ts";
-import { recordingLogger } from "./testing.ts";
+import { commandHandlers, recordingLogger } from "./testing.ts";
 
 const guild = { id: "123456789012345678", name: "Dżajcarz", iconUrl: null, memberCount: 4 };
 
@@ -17,7 +17,7 @@ async function withServer(pubsub: PubSub, handler: () => Promise<unknown>) {
   const server = createCommandServer({
     pubsub,
     logger: recordingLogger(),
-    handlers: { "guilds.list": handler as never },
+    handlers: commandHandlers({ "guilds.list": handler as never }),
   });
   await server.start();
   return server;
@@ -205,7 +205,7 @@ describe("createBotClient", () => {
     const server = createCommandServer({
       pubsub,
       logger: recordingLogger(),
-      handlers: { "guilds.list": async () => [] },
+      handlers: commandHandlers({ "guilds.list": async () => [] }),
     });
     await server.publishEvent("bot.status", { guilds: 2, startedAt: "2026-11-11T10:00:00.000Z" });
     await pubsub.publish("dzajcarz:web:event", "not json");

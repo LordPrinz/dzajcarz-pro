@@ -1,5 +1,6 @@
 import type { Logger } from "@dzajcarz/core";
 import type { BotClient } from "@dzajcarz/web-protocol";
+import { type ArchiveRouteDeps, archiveRoutes } from "./archive.ts";
 import type { AuditedResult, Auditor } from "./audit.ts";
 import { createHealth, type Probes } from "./health.ts";
 import { createGuard, guarded, guardRoutes } from "./http/guard.ts";
@@ -17,6 +18,7 @@ export interface WebServerDeps {
   bot: Pick<BotClient, "request">;
   /** Every state-changing endpoint runs its action through `audited`. */
   auditor: Auditor;
+  archiveSettings: ArchiveRouteDeps["archiveSettings"];
   live: LiveState;
   probes: Probes;
   logger: Logger;
@@ -83,6 +85,13 @@ export function createWebServer(
       "/health": { GET: readiness },
       "/health/live": { GET: liveness },
       "/api/ws": { GET: upgrade },
+      ...archiveRoutes({
+        bot,
+        auditor: deps.auditor,
+        archiveSettings: deps.archiveSettings,
+        logger,
+        failure,
+      }),
       ...extraRoutes,
     } satisfies Routes,
     guard,

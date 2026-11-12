@@ -217,6 +217,7 @@ describe("guardRoutes", () => {
         port: 1,
         bot: { request: async () => ({ ok: false as const, reason: "unavailable" as const }) },
         auditor: { audited: (_request, _action, _context, run) => run() },
+        archiveSettings: { listGuilds: async () => [], dmEnabled: async () => false },
         live: started.live,
         probes: { postgres: async () => true, redis: async () => true },
         logger: silentLogger,
@@ -244,6 +245,7 @@ describe("guardRoutes", () => {
       }
     }
     expect(Object.keys(routes)).toContain("/");
+    expect(Object.keys(routes)).toContain("/api/archive/guilds/:guildId");
     expect(unguarded).toEqual([]);
   });
 

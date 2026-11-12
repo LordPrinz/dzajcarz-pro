@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createMemoryPubSub } from "@dzajcarz/kv";
 import { COMMAND_CHANNEL, EVENT_CHANNEL, replyChannel } from "./channels.ts";
 import { createCommandServer } from "./server.ts";
-import { recordingLogger } from "./testing.ts";
+import { commandHandlers, recordingLogger } from "./testing.ts";
 
 const guild = { id: "123456789012345678", name: "Dżajcarz", iconUrl: null, memberCount: 4 };
 
@@ -14,12 +14,12 @@ function setup(handler: () => Promise<unknown> = async () => [guild], now = Date
     pubsub,
     logger,
     now,
-    handlers: {
+    handlers: commandHandlers({
       "guilds.list": (async () => {
         handled += 1;
         return handler();
       }) as never,
-    },
+    }),
   });
   const id = crypto.randomUUID();
   const replyTo = replyChannel(id);
@@ -68,6 +68,38 @@ describe("createCommandServer", () => {
     await t.listen();
     await t.send();
     expect(t.replies).toEqual([{ v: 1, id: t.id, ok: true, result: [guild] }]);
+  });
+
+  test("the handler learns the command's deadline", async () => {
+    const pubsub = createMemoryPubSub();
+    let seen: unknown;
+    const server = createCommandServer({
+      pubsub,
+      logger: recordingLogger(),
+      handlers: commandHandlers({
+        "guilds.list": async (_request, context) => {
+          seen = context;
+          return [];
+        },
+      }),
+    });
+    await server.start();
+    const sentAt = Date.now();
+    const id = crypto.randomUUID();
+    await pubsub.publish(
+      COMMAND_CHANNEL,
+      JSON.stringify({
+        v: 1,
+        id,
+        replyTo: replyChannel(id),
+        command: "guilds.list",
+        payload: {},
+        sentAt,
+        deadline: sentAt + 2_000,
+      }),
+    );
+    await Bun.sleep(10);
+    expect(seen).toEqual({ deadline: sentAt + 2_000 });
   });
 
   test("an unknown command is answered with unknown_command and its name is not echoed", async () => {
@@ -137,12 +169,12 @@ describe("createCommandServer", () => {
       logger: recordingLogger(),
       now: () => clock,
       maxRememberedIds: 2,
-      handlers: {
+      handlers: commandHandlers({
         "guilds.list": async () => {
           handled += 1;
           return [];
         },
-      },
+      }),
     });
     await server.start();
     const send = async (id: string) => {

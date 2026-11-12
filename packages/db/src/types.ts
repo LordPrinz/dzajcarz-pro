@@ -115,3 +115,42 @@ export interface WebAuditRow {
   error: string | null;
   created_at: Date;
 }
+
+export interface ArchiveSettingsRow {
+  guild_id: string;
+  enabled: boolean;
+  excluded_channel_ids: string[];
+  updated_at: Date;
+}
+
+export interface ArchivedMessageRow {
+  message_id: string;
+  /** null: a DM. */
+  guild_id: string | null;
+  channel_id: string;
+  author_id: string;
+  author_username: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_bot: boolean;
+  content: string;
+  attachments: unknown;
+  embeds: unknown;
+  reply_to_id: string | null;
+  created_at: Date;
+  edited_at: Date | null;
+  deleted_at: Date | null;
+  archived_at: Date;
+}
+
+export interface ArchivedMessageVersionRow {
+  /** bigint comes back from Bun.SQL as a string. */
+  id: string;
+  message_id: string;
+  content: string;
+  attachments: unknown;
+  embeds: unknown;
+  /** When this version was written; null: the original message. */
+  edited_at: Date | null;
+  replaced_at: Date;
+}

@@ -41,7 +41,10 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     once ([deployment](../DEPLOYMENT.md#managed-postgres-without-createrole)). No password lives in a
     migration: the one-shot compose step `web-db-role` runs `infra/postgres/web-role.sql` as the owner on
     every start and sets `LOGIN PASSWORD` from `WEB_POSTGRES_PASSWORD`, which works on an existing volume
-    where initdb scripts never run. #145 and #146 add `SELECT` on the archive tables in their own migrations.
+    where initdb scripts never run. Migration 0015 (#145) grants `SELECT` on the archive and its settings
+    (`archived_message`, `archived_message_version`, `archive_settings`, `archive_dm_settings`) and nothing
+    else: the panel never writes them, settings change through the bot. #146 adds grants for any table it
+    adds.
   - Redis: its own ACL user `web`, limited by `infra/redis/web-user.acl` to `PUBLISH`, `SUBSCRIBE`,
     `UNSUBSCRIBE` and `PING` on `dzajcarz:web:*`, with no keys. The redis service writes it into the config
     on its tmpfs from `WEB_REDIS_PASSWORD`, next to `requirepass` for the bot. `SELECT` is not allowed, so
@@ -89,6 +92,27 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     - both sides drop a raw message over 64 KB before parsing it;
     - guild icons must be `https://cdn.discordapp.com` URLs;
     - a WebSocket message over 4 KB closes the socket.
+- Message archive (#145):
+  - Commands `guilds.channels` (at most 150 channels, flagged `truncated` past that, so a reply stays under
+    64 KB), `archive.guild.set`, `archive.dm.set` and `archive.backfill`. The three changing ones run
+    through the audit log like every other state-changing endpoint.
+  - The bot owns the settings: it writes them on the panel's command and then refreshes its Redis copy.
+    The panel cannot reach Redis keys (see the ACL above), so it could not invalidate a cache it wrote
+    behind the bot's back.
+  - Handlers receive the command's `deadline`. `archive.backfill` does bounded work per call: at most two
+    pages of 100 messages, no new page after 1 s or within 1 s of the deadline, each page stored in one
+    statement. The panel calls again to go further back, and the bot runs one backfill per channel at a
+    time (a second call gets the running one's answer).
+  - Trade-off: a page already running is not cut short (discord.js may wait out a 429 inside it), and the
+    deadline is the panel's clock, so with skew or a slow Discord the panel can still answer `bot_timeout`.
+    That call has stored what it fetched, and running it again stores nothing twice. Making backfill a
+    background job with progress events would remove the limit at the cost of more protocol; not worth it
+    for a button pressed by hand.
+  - Backfill goes back from the oldest stored message only. Messages sent while the bot was down, after
+    archiving began, are not filled in.
+  - Attachment URLs point at Discord's CDN and are signed with an expiry; the archive keeps the link and
+    metadata, not the file. Showing them in the panel needs `media-src`/`img-src` for the attachment hosts,
+    which #146 decides together with the reading view.
 
 ## Drivers
 
@@ -136,8 +160,6 @@ configured origin are stateless and fail closed.
 
 ## Follow-ups
 
-- #145 archive tables and the archive reader in `apps/web`; its migration grants `dzajcarz_web` `SELECT` on
-  them (and #146 on any table it adds).
 - #146 live channel/DM events and WebSocket topics per channel, with a zod-validated subscribe message.
   Message streams make slow subscribers matter: set Redis `client-output-buffer-limit pubsub` deliberately
   and drop slow WebSocket clients (Bun backpressure) there.

@@ -8,7 +8,7 @@ import {
   EventEnvelope,
   type GuildSummary,
 } from "@dzajcarz/web-protocol";
-import { startWebBridge } from "./web-bridge.ts";
+import { type ArchiveControl, startWebBridge } from "./web-bridge.ts";
 
 const guilds: GuildSummary[] = [
   { id: "100000000000000001", name: "Alfa", iconUrl: null, memberCount: 3 },
@@ -20,6 +20,21 @@ const guilds: GuildSummary[] = [
   },
 ];
 const STATUS = { guilds: 2, startedAt: "2026-11-11T10:00:00.000Z" };
+const GUILD = "100000000000000001";
+const CHANNEL = "300000000000000003";
+
+const archive: ArchiveControl = {
+  setGuild: async (request) => request,
+  setDm: async (request) => request,
+  backfill: async () => ({ status: "ok", fetched: 2, stored: 1, oldestId: CHANNEL, done: true }),
+};
+const listChannels = (guildId: string) =>
+  guildId === GUILD
+    ? {
+        channels: [{ id: CHANNEL, name: "ogólny", kind: "text" as const, parentId: null }],
+        truncated: false,
+      }
+    : null;
 
 function setup(listGuilds: () => GuildSummary[] = () => guilds, logger = silentLogger) {
   const pubsub = createMemoryPubSub();
@@ -28,7 +43,15 @@ function setup(listGuilds: () => GuildSummary[] = () => guilds, logger = silentL
     pubsub,
     client,
     start: () =>
-      startWebBridge({ pubsub, listGuilds, botStatus: () => STATUS, logger, heartbeatMs: 20 }),
+      startWebBridge({
+        pubsub,
+        listGuilds,
+        listChannels,
+        archive,
+        botStatus: () => STATUS,
+        logger,
+        heartbeatMs: 20,
+      }),
   };
 }
 
@@ -38,6 +61,39 @@ describe("startWebBridge", () => {
     await client.start();
     await start();
     expect(await client.request("guilds.list", {})).toEqual({ ok: true, data: guilds });
+  });
+
+  test("guilds.channels answers the list, or null for a guild the bot is not in", async () => {
+    const { client, start } = setup();
+    await client.start();
+    await start();
+    expect(await client.request("guilds.channels", { guildId: GUILD })).toEqual({
+      ok: true,
+      data: listChannels(GUILD),
+    });
+    expect(await client.request("guilds.channels", { guildId: "200000000000000002" })).toEqual({
+      ok: true,
+      data: null,
+    });
+  });
+
+  test("the archive commands reach the archive control", async () => {
+    const { client, start } = setup();
+    await client.start();
+    await start();
+    const settings = { guildId: GUILD, enabled: true, excludedChannelIds: [CHANNEL] };
+    expect(await client.request("archive.guild.set", settings)).toEqual({
+      ok: true,
+      data: settings,
+    });
+    expect(await client.request("archive.dm.set", { enabled: true })).toEqual({
+      ok: true,
+      data: { enabled: true },
+    });
+    expect(await client.request("archive.backfill", { channelId: CHANNEL })).toEqual({
+      ok: true,
+      data: { status: "ok", fetched: 2, stored: 1, oldestId: CHANNEL, done: true },
+    });
   });
 
   test("onReady publishes a valid bot.status at once and then on every beat", async () => {
@@ -65,6 +121,8 @@ describe("startWebBridge", () => {
     const bridge = await startWebBridge({
       pubsub,
       listGuilds: () => guilds,
+      listChannels,
+      archive,
       botStatus: () => STATUS,
       logger: silentLogger,
       heartbeatMs: 60_000,

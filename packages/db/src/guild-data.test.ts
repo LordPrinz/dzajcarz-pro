@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
+import { createArchiveSettingsRepository } from "./archive-settings.ts";
 import { createDzajcoRepository } from "./dzajco.ts";
 import { createGuildDataRepository, GUILD_TABLES, KEPT_GUILD_TABLES } from "./guild-data.ts";
 import { createGuildSettingsRepository } from "./guild-settings.ts";
@@ -24,7 +25,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   // Test-only SQL built from the constant table list.
-  if (sql) await sql.unsafe(`TRUNCATE ${[...GUILD_TABLES, ...KEPT_GUILD_TABLES].join(", ")}`);
+  if (sql)
+    await sql.unsafe(`TRUNCATE ${[...GUILD_TABLES, ...KEPT_GUILD_TABLES].join(", ")} CASCADE`);
 });
 
 const GONE = "1000000000000000001";
@@ -71,6 +73,11 @@ async function fill(db: SQL, guildId: string, n: number) {
     { perGuild: 25, perRecipient: 3 },
   );
   await messages.optOut(id(8), guildId);
+  await createArchiveSettingsRepository(db).setGuild({
+    guildId,
+    enabled: true,
+    excludedChannelIds: [id(1)],
+  });
 }
 
 async function countsOf(db: SQL, guildId: string) {
