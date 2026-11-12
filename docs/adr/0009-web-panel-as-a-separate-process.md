@@ -44,7 +44,8 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     where initdb scripts never run. Migration 0015 (#145) grants `SELECT` on the archive and its settings
     (`archived_message`, `archived_message_version`, `archive_settings`, `archive_dm_settings`) and nothing
     else: the panel never writes them, settings change through the bot. #146 adds grants for any table it
-    adds.
+    adds. Migration 0018 (#147) grants `INSERT` on four columns of `web_upload` (files for messages) and
+    nothing else on it: the panel cannot read, change or delete a staged file, nor set its age.
   - Redis: its own ACL user `web`, limited by `infra/redis/web-user.acl` to `PUBLISH`, `SUBSCRIBE`,
     `UNSUBSCRIBE` and `PING` on `dzajcarz:web:*`, with no keys. The redis service writes it into the config
     on its tmpfs from `WEB_REDIS_PASSWORD`, next to `requirepass` for the bot. `SELECT` is not allowed, so
@@ -65,8 +66,11 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     comparison ignores case, one trailing dot and an explicit default port (`:443` for an https origin,
     `:80` for http).
   - Every state-changing request and every WebSocket upgrade must carry an `Origin` equal to
-    `WEB_PUBLIC_ORIGIN`, and request bodies must be JSON; anything else is rejected. The checks are
-    applied by wrapping every route handler, and a test fails if a handler is not wrapped.
+    `WEB_PUBLIC_ORIGIN`, and request bodies must be JSON; anything else is rejected. The one exception is
+    the file upload (#147): a handler marked with `binaryBody` takes `application/octet-stream` and nothing
+    else, JSON included. Like JSON, that type is not one a cross-site form can send, and the Origin and
+    Host checks are the same. The checks are applied by wrapping every route handler, and a test fails if a
+    handler is not wrapped.
   - Every response carries `Content-Security-Policy: default-src 'self'; img-src 'self'
     https://cdn.discordapp.com https://media.discordapp.net; media-src https://cdn.discordapp.com
     https://media.discordapp.net; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';
@@ -167,6 +171,50 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     it (or replaces the view when more than a page was missed); a view opened around a search result says
     to refresh instead.
 
+- Writing (#147):
+  - Commands `channel.info` (what the bot may do in a channel and its upload limit; read-only),
+    `message.send`, `message.edit`, `message.delete`, `reaction.add`, `reaction.remove`, `members.search`
+    (read-only, at most 25 members) and `dm.open`. The changing ones run through the audit log; the payload
+    is the validated request, the text in full (the archive keeps it anyway, and the schema caps it at 2000
+    characters), files by id. A refusal is an answer, not an error: `{ status: "rejected", reason }`,
+    recorded with the outcome `rejected` and answered 422, so the panel names the missing permission.
+  - The bot checks its permissions itself on every command: View Channel and Send Messages (Send Messages
+    in Threads in a thread), Attach Files for files, Read Message History for a reply or a reaction, Add
+    Reactions for a new reaction, Manage Messages to delete someone else's message. Only the bot's own
+    messages can be edited. In a DM it may do everything but delete the other side's messages, which has
+    its own reason. Discord's own refusals (a locked thread, a user who takes no DMs, a reply to a message
+    deleted meanwhile) map to reasons as well; anything else fails the command.
+  - Mentions: one function, `panelMentions` in `apps/bot/src/discord/web-writing.ts`, builds
+    `allowedMentions` for sending and editing ([ADR 10](0010-mentions-from-the-web-panel.md)).
+  - Files: a pub/sub message holds 64 KB, so files take another way. The page sends each one raw to
+    `POST /api/uploads`; the panel stores it in `web_upload` (bytea, at most 25 MiB, the id chosen by the
+    panel since its role may not read the row back) and audits the name and size, not the bytes. A name
+    with control, invisible or direction-changing characters is refused. The message command carries the
+    ids. The bot first reads only their sizes and refuses, before loading any bytes, when one is missing or
+    when the files together pass the target's limit (the server's boost tier, 10 MiB in a DM, at most
+    25 MiB; one limit for all files is stricter than Discord, which is the safe side). The page checks the
+    same limits before uploading (`channel.info` carries the limit).
+  - Memory and storage: the panel handles two uploads at a time and answers a third `429 uploads_busy`,
+    so at most about 50 MiB of files sit in its memory. Every body is read as a stream with a hard cap,
+    64 KB for JSON and 25 MiB for a file, so a chunked body without a length is cut off too; Bun's
+    `maxRequestBodySize` (25 MiB plus 64 KB) is only the outer bound. A trigger on `web_upload` refuses an
+    insert once the unexpired files would pass 500 MiB (`503 uploads_full`); it runs as its owner, since
+    the panel's role may not read the table to add it up, and takes an advisory lock so two inserts cannot
+    both pass.
+  - Repeats: the bot drops a replayed command id. A message also carries a nonce the page keeps per draft
+    (a new one whenever the text, files, reply or mention switch change) and is sent with `enforceNonce`,
+    so Discord answers a repeat within a few minutes with the message it already created. Files stay
+    staged after a send until the hourly sweep, marked with the nonce that sent them (`sent_nonce`), and
+    the bot holds a row lock on them (`SELECT … FOR UPDATE`) while it sends. A retry after `bot_timeout`,
+    or two bot instances handling the same command, therefore get the same files with the same nonce and
+    post the message once, while another message cannot take files already sent (`upload_missing`).
+    Deleting the files after a send would turn such a retry into `upload_missing`, and the owner sending
+    again would post twice. Edit, delete and reactions are idempotent on Discord's side.
+  - New DMs: `members.search` (at least 2 characters, typed searches start after a 300 ms pause) asks
+    Discord (`guild.members.search`) in one server or in every server the bot shares, three at a time and
+    no further once 25 members are found, and leaves bots out; `dm.open` opens the DM channel with the
+    member picked.
+
 ## Drivers
 
 1. Behaviour when the bot is down or slow: fast, explicit "unavailable", never a delayed replay.
@@ -202,8 +250,10 @@ configured origin are stateless and fail closed.
 - Each process holds a second Redis connection for subscriptions; `keepConnected` gains an `onConnect`
   hook so the adapter can resubscribe.
 - A command sent during a Redis or bot restart is lost and reported as unavailable; the user retries.
-- If more than one bot instance ever subscribes, both would handle a command; write commands added later
-  must be safe under that or the bridge must elect one handler.
+- If more than one bot instance ever subscribes, both would handle a command. The write commands of #147
+  are safe under that (the nonce, idempotent edits, deletes and reactions); a later write command must be
+  too, or the bridge must elect one handler.
+- Staged files live in Postgres for up to an hour, sent or not, at most 500 MiB at once.
 - Deployment needs the proxy on `dzajcarz-panel`, forwarding `Host` and overwriting `X-authentik-*`
   ([deployment](../DEPLOYMENT.md)). A proxy that rewrites `Host` gets 421 on every request.
 - Two more secrets in `.env`, `WEB_POSTGRES_PASSWORD` and `WEB_REDIS_PASSWORD`. Every panel feature that
@@ -216,6 +266,5 @@ configured origin are stateless and fail closed.
 ## Follow-ups
 
 - Refreshing expired attachment links through the bot (Discord's `attachments/refresh-urls`).
-- #147 send-as-bot commands and the mentions adapter ([ADR 10](0010-mentions-from-the-web-panel.md)).
 - #148 music commands and events.
 - Consider extracting the health probe runner shared by both apps if a third process appears.

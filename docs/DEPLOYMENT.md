@@ -125,6 +125,9 @@ for the bot: it starts alone and says "Bot niedostępny" until the bot answers.
    - forward the original `Host` header (nginx: `proxy_set_header Host $host;`; Caddy and Traefik do it by
      default), since the panel answers `421` to any other `Host`;
    - pass WebSocket upgrades on `/api/ws` (nginx: `Upgrade` and `Connection` headers);
+   - accept request bodies up to 26 MB on `/api/uploads`, where the panel takes files for messages one
+     at a time, 25 MiB each at most (nginx: `client_max_body_size 26m;`, default 1 MB; Caddy and Traefik set no
+     limit by default);
    - leave the panel's `Content-Security-Policy` as it is (a policy of its own must not loosen it).
 
 `docker ps` shows the container's health through `web healthcheck` (Postgres and Redis; the bot being down
@@ -136,6 +139,10 @@ them. Live messages reach the panel over Redis pub/sub. The redis service discon
 more than 8 MB behind (`client-output-buffer-limit pubsub 8mb 2mb 60`); the panel resubscribes on its own and
 misses only the events in between. The limit is part of the redis command, so the first `prod:up` after the
 change recreates the redis container (its data is kept on the volume).
+
+Files attached to a message from the panel wait in Postgres (`web_upload`), at most 25 MiB per message. The
+bot deletes every file an hour after it was staged, sent or not, and the table refuses new files while it
+holds 500 MiB, so plan for that much room in the database at most.
 
 ### Managed Postgres without CREATEROLE
 
@@ -157,6 +164,8 @@ GRANT SELECT ON archive_settings, archive_dm_settings, archived_message, archive
   TO dzajcarz_web;
 -- Migration 0017: the panel's queries end after 5 s.
 ALTER ROLE dzajcarz_web SET statement_timeout = '5s';
+-- Migration 0018: files for messages, which the panel may add but not read, change or delete.
+GRANT INSERT (id, name, size, data) ON web_upload TO dzajcarz_web;
 ```
 
 Setting the login and password needs those rights as well; when the `web-db-role` step lacks them, run

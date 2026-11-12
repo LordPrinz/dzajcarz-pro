@@ -37,7 +37,7 @@ export const toPanel = (message: Message): PanelMessage =>
 const cut = (name: string) => name.slice(0, MAX_RESOLVED_NAME_LENGTH);
 
 /** Avatars the panel shows must be short links on Discord's CDN (the schema checks it too). */
-const cdnAvatar = (user: User): string | null => {
+export const cdnAvatar = (user: User): string | null => {
   const url = user.displayAvatarURL();
   return url.startsWith("https://cdn.discordapp.com/") && url.length <= 256 ? url : null;
 };

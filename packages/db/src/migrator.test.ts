@@ -75,6 +75,7 @@ describe.skipIf(!sql)("migrator", () => {
       "scheduled_song_exclusion",
       "schema_migrations",
       "web_audit",
+      "web_upload",
       "welcome_config",
     ]);
   });

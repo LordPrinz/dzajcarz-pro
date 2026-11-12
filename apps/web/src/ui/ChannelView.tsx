@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { backfillChannel } from "./api.ts";
+import { Composer } from "./Composer.tsx";
 import { Message } from "./Message.tsx";
-import { type ChannelRef, type Cursor, fetchMessages, type PageResult } from "./reading-api.ts";
+import { MessageActions } from "./MessageActions.tsx";
+import {
+  type ChannelRef,
+  type Cursor,
+  fetchMessages,
+  type PageResult,
+  type PanelMessage,
+} from "./reading-api.ts";
 import {
   applyLiveEvent,
   eventChannel,
@@ -13,6 +21,7 @@ import {
   withOlder,
 } from "./timeline.ts";
 import { VirtualList } from "./VirtualList.tsx";
+import { type ChannelInfo, fetchChannelInfo } from "./write-api.ts";
 
 type ViewState =
   | { kind: "loading" }
@@ -50,6 +59,9 @@ export function ChannelView({
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const [busy, setBusy] = useState<"older" | "newer" | "backfill" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** What the bot may do here, for the composer and the message actions; null while unknown. */
+  const [info, setInfo] = useState<ChannelInfo | null>(null);
+  const [replyTo, setReplyTo] = useState<PanelMessage | null>(null);
   const busyRef = useRef(false);
   /** Events that arrive while the first page loads, applied once it is there. */
   const early = useRef<LiveEvent[]>([]);
@@ -78,6 +90,18 @@ export function ChannelView({
       cancelled = true;
     };
   }, [channel, focusId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setInfo(null);
+    setReplyTo(null);
+    void fetchChannelInfo(channel.id).then((result) => {
+      if (!cancelled && result.ok) setInfo(result.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [channel.id]);
 
   useEffect(
     () =>
@@ -236,15 +260,29 @@ export function ChannelView({
           onReachTop={() => void load("older")}
           onReachBottom={() => void load("newer")}
           render={(message) => (
-            <Message
-              message={message}
-              resolved={resolved}
-              archived={archived}
-              highlighted={message.id === focusId}
-            />
+            <div className="message-row">
+              <Message
+                message={message}
+                resolved={resolved}
+                archived={archived}
+                highlighted={message.id === focusId}
+              />
+              <MessageActions
+                message={message}
+                info={info}
+                onReply={setReplyTo}
+                onNotice={setNotice}
+              />
+            </div>
           )}
         />
       )}
+      <Composer
+        channel={channel}
+        info={info}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+      />
     </section>
   );
 }

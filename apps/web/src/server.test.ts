@@ -5,7 +5,7 @@ import { createBotClient, createCommandServer, type GuildSummary } from "@dzajca
 import { commandHandlers } from "@dzajcarz/web-protocol/testing";
 import { SECURITY_HEADERS } from "./http/headers.ts";
 import { createLiveState } from "./live.ts";
-import { failure, WS_BACKPRESSURE_LIMIT } from "./server.ts";
+import { failure, mergeRoutes, WS_BACKPRESSURE_LIMIT } from "./server.ts";
 import {
   emptyArchive,
   PUBLIC_ORIGIN,
@@ -428,6 +428,7 @@ describe("WebSocket /api/ws", () => {
       publicOrigin: PUBLIC_ORIGIN,
       port: 1,
       bot: { request: async () => ({ ok: false as const, reason: "unavailable" as const }) },
+      uploads: { stage: async () => {} },
       auditor: { audited: (_request, _action, _context, run) => run() },
       archiveSettings: {
         listGuilds: async () => [],
@@ -471,5 +472,28 @@ describe("WebSocket /api/ws", () => {
     started = await startTestServer();
     const { opened } = open(started, { Origin: "https://evil.example", Host: PUBLIC_HOST });
     await expect(opened).rejects.toThrow();
+  });
+});
+
+describe("mergeRoutes", () => {
+  const a = () => new Response("a");
+  const b = () => new Response("b");
+
+  test("joins the methods of one path from two tables", () => {
+    expect(mergeRoutes({ "/x": { GET: a } }, { "/x": { POST: b }, "/y": { GET: b } })).toEqual({
+      "/x": { GET: a, POST: b },
+      "/y": { GET: b },
+    });
+  });
+
+  test("the same method twice throws", () => {
+    expect(() => mergeRoutes({ "/x": { GET: a } }, { "/x": { GET: b } })).toThrow(
+      "Route /x defines GET twice",
+    );
+  });
+
+  test("a handler and a method map on one path throw", () => {
+    expect(() => mergeRoutes({ "/x": a }, { "/x": { GET: b } })).toThrow("cannot be merged");
+    expect(() => mergeRoutes({ "/x": { GET: a } }, { "/x": b })).toThrow("cannot be merged");
   });
 });

@@ -3,6 +3,8 @@ import { withSecurityHeaders } from "./headers.ts";
 
 /** Set on every handler `guarded` returns, so a test can tell a wrapped handler from a bare one. */
 export const GUARDED = Symbol("guarded");
+/** Set by `binaryBody` on the one kind of handler that takes a raw file instead of JSON. */
+const BINARY_BODY = Symbol("binary-body");
 
 export interface GuardConfig {
   /** `WEB_PUBLIC_ORIGIN`: a bare origin. */
@@ -25,6 +27,25 @@ type Handler = (
   server: Bun.Server<undefined>,
 ) => Response | undefined | Promise<Response | undefined>;
 type GuardedHandler = Handler & { [GUARDED]?: true };
+type MarkedHandler = Handler & { [BINARY_BODY]?: true };
+
+/** The body type a route takes: JSON unless the handler is marked with `binaryBody`. */
+export type BodyType = "json" | "binary";
+
+const BODY_TYPES: Record<BodyType, string> = {
+  json: "application/json",
+  binary: "application/octet-stream",
+};
+
+/**
+ * Marks a handler that takes a raw file (`application/octet-stream`) and nothing else. Like JSON, that type
+ * is not one a cross-site form can send, and the Origin and Host checks apply as to every route.
+ */
+export function binaryBody(handler: Handler): Handler {
+  const marked: MarkedHandler = (request, server) => handler(request, server);
+  marked[BINARY_BODY] = true;
+  return marked;
+}
 
 const defaultPortOf = (publicOrigin: string) =>
   new URL(publicOrigin).protocol === "https:" ? "443" : "80";
@@ -72,10 +93,15 @@ const reject = (status: number, error: string) => Response.json({ error }, { sta
  * The checks every API, WebSocket and health request goes through (ADR 9):
  * - `Host` must be the public host or a loopback name (421), against DNS rebinding;
  * - state-changing requests and WebSocket upgrades need an exact `Origin` (403), against cross-site requests;
- * - a body on a state-changing request must be JSON (415), which also blocks HTML form posts.
+ * - a body on a state-changing request must be JSON (415), which also blocks HTML form posts; a route marked
+ *   with `binaryBody` takes `application/octet-stream` instead, and then only that.
  * Returns the rejection, or undefined when the request may go on.
  */
-export function check(guard: Guard, request: Request): Response | undefined {
+export function check(
+  guard: Guard,
+  request: Request,
+  bodyType: BodyType = "json",
+): Response | undefined {
   const host = request.headers.get("host") ?? "";
   if (!guard.hosts.has(normalizeHost(host, guard.defaultPort))) {
     guard.logger.warn("Rejected a request with an unexpected Host", { host, path: request.url });
@@ -94,15 +120,16 @@ export function check(guard: Guard, request: Request): Response | undefined {
   }
   if (unsafe && request.body !== null) {
     const type = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-    if (type !== "application/json") return reject(415, "unsupported_media_type");
+    if (type !== BODY_TYPES[bodyType]) return reject(415, "unsupported_media_type");
   }
   return undefined;
 }
 
 /** Wraps one handler in the checks and adds the security headers to whatever it answers. */
 export function guarded(handler: Handler, guard: Guard): GuardedHandler {
+  const bodyType: BodyType = (handler as MarkedHandler)[BINARY_BODY] ? "binary" : "json";
   const wrapped: GuardedHandler = async (request, server) => {
-    const response = check(guard, request) ?? (await handler(request, server));
+    const response = check(guard, request, bodyType) ?? (await handler(request, server));
     // undefined: the request became a WebSocket.
     return response && withSecurityHeaders(response);
   };

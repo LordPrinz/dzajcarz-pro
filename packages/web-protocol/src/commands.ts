@@ -7,6 +7,7 @@ import {
   Resolved,
 } from "./messages.ts";
 import { Snowflake } from "./snowflake.ts";
+import { WRITING_COMMANDS } from "./writing.ts";
 
 export { Snowflake };
 
@@ -162,6 +163,7 @@ export const COMMANDS = {
       .strict(),
     response: Resolved,
   },
+  ...WRITING_COMMANDS,
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

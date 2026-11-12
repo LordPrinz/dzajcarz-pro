@@ -47,6 +47,11 @@ function scriptedFetch() {
   const requests: { url: URL; answer: (body: MessagePage) => void }[] = [];
   const fetcher = (input: string) =>
     new Promise<Response>((resolve) => {
+      // What the bot may do here: not part of these tests, so it is unknown.
+      if (input.endsWith("/info")) {
+        resolve(Response.json({ error: "bot_unavailable" }, { status: 503 }));
+        return;
+      }
       requests.push({
         url: new URL(input, "http://panel"),
         answer: (body) => resolve(new Response(JSON.stringify(body))),

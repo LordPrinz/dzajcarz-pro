@@ -26,12 +26,26 @@ export interface ReadingControl {
   resolveNames: CommandHandlers["names.resolve"];
 }
 
+/** The commands that write as the bot (#147), one handler per command. */
+export type WritingControl = Pick<
+  CommandHandlers,
+  | "channel.info"
+  | "message.send"
+  | "message.edit"
+  | "message.delete"
+  | "reaction.add"
+  | "reaction.remove"
+  | "members.search"
+  | "dm.open"
+>;
+
 export interface WebBridgeOptions {
   pubsub: PubSub;
   listGuilds: () => GuildSummary[];
   listChannels: (guildId: string) => CommandResponse<"guilds.channels">;
   archive: ArchiveControl;
   reading: ReadingControl;
+  writing: WritingControl;
   /** What `bot.status` carries; read on every heartbeat. */
   botStatus: () => EventPayload<"bot.status">;
   logger: Logger;
@@ -57,6 +71,7 @@ export async function startWebBridge({
   listChannels,
   archive,
   reading,
+  writing,
   botStatus,
   logger,
   heartbeatMs = HEARTBEAT_INTERVAL_MS,
@@ -73,6 +88,7 @@ export async function startWebBridge({
       "channel.messages": reading.channelMessages,
       "dms.list": reading.dmList,
       "names.resolve": reading.resolveNames,
+      ...writing,
     },
   });
   await server.start();

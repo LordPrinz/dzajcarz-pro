@@ -4,6 +4,7 @@ import {
   createArchiveReader,
   createArchiveSettingsRepository,
   createDb,
+  createUploadStaging,
   createWebAuditRepository,
   webAuditTableExists,
 } from "@dzajcarz/db";
@@ -67,6 +68,7 @@ const server = Bun.serve({
     auditor,
     archiveSettings: createArchiveSettingsRepository(sql),
     archive: createArchiveReader(sql),
+    uploads: createUploadStaging(sql),
     live,
     probes: {
       postgres: async () => {

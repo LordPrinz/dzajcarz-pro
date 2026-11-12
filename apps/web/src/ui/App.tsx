@@ -10,6 +10,7 @@ import {
 } from "./api.ts";
 import { ChannelView } from "./ChannelView.tsx";
 import { GuildList } from "./GuildList.tsx";
+import { NewDm } from "./NewDm.tsx";
 import { type DmsState, fetchDms } from "./reading-api.ts";
 import { type SearchTarget, SearchView } from "./SearchView.tsx";
 import { type Selection, Sidebar } from "./Sidebar.tsx";
@@ -161,6 +162,21 @@ export function App() {
             guilds={readyGuilds}
             channelName={(channelId) => channelInfo(channelId)?.name ?? null}
             onOpen={openResult}
+          />
+        ) : selection.kind === "new-dm" ? (
+          <NewDm
+            guilds={readyGuilds}
+            onOpened={(channelId, recipient) => {
+              void fetchDms().then(setDms);
+              setSelection({
+                kind: "channel",
+                channel: {
+                  id: channelId,
+                  guildId: null,
+                  name: recipient.displayName ?? recipient.username,
+                },
+              });
+            }}
           />
         ) : selection.kind === "archive" ? (
           <>

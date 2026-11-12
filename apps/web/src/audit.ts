@@ -34,11 +34,23 @@ export function actorOf(request: Request): string | null {
 /** What `audited` returns: the action's own result, or that it never ran because it could not be recorded. */
 export type AuditedResult<T> = BotResult<T> | { ok: false; reason: "audit_unavailable" };
 
+/** The bot's answer when it refused the action, such as `{ status: "rejected", reason: "no_manage" }`. */
+function rejectionOf(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) return null;
+  const { status, reason } = data as { status?: unknown; reason?: unknown };
+  return status === "rejected" ? String(reason) : null;
+}
+
 function outcomeOf(result: BotResult<unknown>): {
   outcome: FinalWebAuditOutcome;
   error: string | null;
 } {
-  if (result.ok) return { outcome: "ok", error: null };
+  if (result.ok) {
+    const reason = rejectionOf(result.data);
+    return reason === null
+      ? { outcome: "ok", error: null }
+      : { outcome: "rejected", error: reason };
+  }
   if (result.reason === "error") return { outcome: "failed", error: result.message ?? null };
   return { outcome: result.reason, error: null };
 }
