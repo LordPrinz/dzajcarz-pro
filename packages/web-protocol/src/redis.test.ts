@@ -4,7 +4,7 @@ import { RedisClient } from "bun";
 import { COMMAND_CHANNEL, EVENT_CHANNEL, replyChannel } from "./channels.ts";
 import { createBotClient } from "./client.ts";
 import { createCommandServer } from "./server.ts";
-import { recordingLogger } from "./testing.ts";
+import { commandHandlers, recordingLogger } from "./testing.ts";
 
 // Started while Redis is not connected yet, then stopped: once the connection comes up nothing may be left
 // subscribed. Runs only when a disposable Redis is available (CI provides one).
@@ -77,7 +77,7 @@ describe.skipIf(!redisUrl)("stop before the subscriber connects", () => {
     const before = await numSub(COMMAND_CHANNEL);
     const server = createCommandServer({
       pubsub: t.pubsub,
-      handlers: { "guilds.list": async () => [] },
+      handlers: commandHandlers({ "guilds.list": async () => [] }),
       logger: recordingLogger(),
     });
     await server.start();

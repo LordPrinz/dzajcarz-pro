@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ArchivePanel } from "./ArchiveSettings.tsx";
 import { fetchBotOnline, fetchGuilds, type GuildsState } from "./api.ts";
 import { GuildList } from "./GuildList.tsx";
 import { type ConnectionState, connectSocket } from "./socket.ts";
@@ -49,6 +50,8 @@ export function App() {
       ) : null}
       <h2>Serwery</h2>
       <GuildList state={guilds} />
+      <h2>Archiwum wiadomości</h2>
+      <ArchivePanel guilds={guilds} />
     </main>
   );
 }

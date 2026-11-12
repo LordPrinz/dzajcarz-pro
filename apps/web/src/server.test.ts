@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { silentLogger } from "@dzajcarz/core";
 import { createMemoryPubSub } from "@dzajcarz/kv";
 import { createBotClient, createCommandServer, type GuildSummary } from "@dzajcarz/web-protocol";
+import { commandHandlers } from "@dzajcarz/web-protocol/testing";
 import { SECURITY_HEADERS } from "./http/headers.ts";
 import { createLiveState } from "./live.ts";
 import { failure } from "./server.ts";
@@ -35,7 +36,7 @@ async function withBot(handler: (() => Promise<GuildSummary[]>) | null, timeoutM
     const commands = createCommandServer({
       pubsub,
       logger: silentLogger,
-      handlers: { "guilds.list": handler },
+      handlers: commandHandlers({ "guilds.list": handler }),
     });
     await commands.start();
     cleanups.push(() => commands.stop());
@@ -330,7 +331,7 @@ describe("WebSocket /api/ws", () => {
     const commands = createCommandServer({
       pubsub,
       logger: silentLogger,
-      handlers: { "guilds.list": async () => [] },
+      handlers: commandHandlers({ "guilds.list": async () => [] }),
     });
     started = await startTestServer({ bot });
     await commands.publishEvent("bot.status", STATUS);

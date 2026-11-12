@@ -138,12 +138,33 @@ policy starts a clean instance.
 
 `apps/web` is the owner's web panel (epic #143): its own process and container, behind a reverse proxy with
 Authentik, with a JSON API, a WebSocket and a React page. The bot keeps the Discord gateway; the panel reads
-the Postgres data it owns (`web_audit`) and talks to the bot over Redis pub/sub, each with its own
-least-privileged login. Modules do not know the panel exists: the bot side is one adapter,
+the Postgres data it owns (`web_audit`) and the message archive, and talks to the bot over Redis pub/sub,
+each with its own least-privileged login. Modules do not know the panel exists: the bot side is one adapter,
 `apps/bot/src/web-bridge.ts`, and the commands and events both sides share live in `packages/web-protocol`.
 The decisions behind it (trust model, protocol, audit log) are in
 [ADR 9](adr/0009-web-panel-as-a-separate-process.md), mentions in
 [ADR 10](adr/0010-mentions-from-the-web-panel.md), running it in [deployment](DEPLOYMENT.md).
+
+### Message archive
+
+The bot keeps a copy of the messages of the servers the owner picks in the panel (#145), for the panel to
+read. It is off for every server and for DMs until switched on, and a server can exclude channels (a thread
+follows its parent). The bot archives what it sees from then on, bot messages included; "Wczytaj starsze" in
+the panel asks the bot to page one channel's history back from the oldest stored message, at most two pages
+of 100 per call, and to store what is missing. Backfill only goes back from the oldest stored message, so
+messages sent while the bot was down, after archiving began, are not filled in. An edit moves the previous content, attachments and embeds to
+`archived_message_version` (a link preview arriving changes the row in place); a delete sets `deleted_at` and
+keeps the row; attachments are stored as links and metadata. There is no retention limit, and the archive
+outlives the bot leaving a server, while that server's archive settings are deleted with its other data.
+
+The recorder (`apps/bot/src/archive-recorder.ts`) is panel infrastructure, not a module: it has its own
+listeners in `apps/bot/src/discord/archive.ts`, and a failed write is logged without reaching any other
+handler. Events of one message run in order, so a delete cannot overtake the insert of its create. A server
+message whose channel the bot cannot resolve is skipped, since it might sit in a thread of an excluded
+channel. Settings live in Postgres (`archive_settings`, `archive_dm_settings`) and are cached in Redis like
+the guild prefix (`createGuildSettingCache`); the panel changes them only through the bot
+(`archive.guild.set`, `archive.dm.set`), which refreshes its cache, so a change applies to the next message.
+The panel reads the archive and the settings straight from Postgres with `SELECT` rights only.
 
 ### Health endpoint
 

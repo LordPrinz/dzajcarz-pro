@@ -59,6 +59,10 @@ describe.skipIf(!sql)("migrator", () => {
       SELECT table_name FROM information_schema.tables WHERE table_schema = ${schema}
     `;
     expect(tables.map((t) => t.table_name).sort()).toEqual([
+      "archive_dm_settings",
+      "archive_settings",
+      "archived_message",
+      "archived_message_version",
       "dzajco_channel_config",
       "guild_settings",
       "moderation_action",

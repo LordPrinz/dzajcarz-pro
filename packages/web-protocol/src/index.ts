@@ -7,12 +7,18 @@ export {
   createBotClient,
 } from "./client.ts";
 export {
+  BackfillResult,
+  CHANNEL_KINDS,
+  ChannelSummary,
   COMMANDS,
   type CommandName,
   type CommandRequest,
   type CommandResponse,
+  GuildArchiveSettings,
   GuildSummary,
   isCommandName,
+  MAX_CHANNELS,
+  MAX_EXCLUDED_CHANNELS,
   Snowflake,
 } from "./commands.ts";
 export {
@@ -35,6 +41,7 @@ export {
 } from "./events.ts";
 export type { ProtocolLogger } from "./logger.ts";
 export {
+  type CommandContext,
   type CommandHandlers,
   type CommandServer,
   type CommandServerOptions,

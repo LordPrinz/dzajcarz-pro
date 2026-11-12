@@ -6,10 +6,12 @@ import {
   createScheduler,
 } from "@dzajcarz/core";
 import {
+  createArchiveSettingsRepository,
   createDb,
   createDzajcoRepository,
   createGuildDataRepository,
   createGuildSettingsRepository,
+  createMessageArchiveRepository,
   createModerationRepository,
   createModuleToggleRepository,
   createPartyRepository,
@@ -22,8 +24,17 @@ import { createRedisPubSub, createRedisStore, createTimedStore, keepConnected } 
 import { DZAJCO_GIF } from "@dzajcarz/module-dzajco";
 import { RedisClient } from "bun";
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
+import { createArchiveBackfill } from "./archive-backfill.ts";
+import { createArchiveControl } from "./archive-control.ts";
+import { createArchivePolicy } from "./archive-policy.ts";
+import { createArchiveRecorder } from "./archive-recorder.ts";
 import { attachHandlers } from "./bot.ts";
 import { deployOnStartup } from "./deploy.ts";
+import {
+  attachArchiveRecorder,
+  createChannelHistory,
+  createGuildChannelList,
+} from "./discord/archive.ts";
 import { createDzajcoChannels, createDzajcoResponder } from "./discord/dzajco.ts";
 import { createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
@@ -109,6 +120,14 @@ const timeZones = createTimeZones({
   cache: redisStore,
   defaultTimeZone: env.DEFAULT_TIME_ZONE,
   logger: logger.child({ component: "time-zone" }),
+});
+
+const archiveSettings = createArchiveSettingsRepository(sql);
+const messageArchive = createMessageArchiveRepository(sql);
+const archivePolicy = createArchivePolicy({
+  settings: archiveSettings,
+  cache: redisStore,
+  logger: logger.child({ component: "archive" }),
 });
 
 const moduleToggleRepository = createModuleToggleRepository(sql);
@@ -230,11 +249,22 @@ attachHandlers(client, {
   logger,
 });
 
+// The panel's message archive (#145): its own listeners, so a failing write never reaches the commands.
+attachArchiveRecorder(
+  client,
+  createArchiveRecorder({
+    policy: archivePolicy,
+    archive: messageArchive,
+    logger: logger.child({ component: "archive" }),
+  }),
+  logger.child({ component: "archive" }),
+);
+
 client.on(
   Events.GuildDelete,
   createGuildCleanup(
     createGuildDataRepository(sql),
-    [prefixes.forget, timeZones.forget, gate.forget],
+    [prefixes.forget, timeZones.forget, gate.forget, archivePolicy.forgetGuild],
     logger.child({ component: "guild-cleanup" }),
   ),
 );
@@ -244,6 +274,16 @@ const startedAt = new Date().toISOString();
 const webBridge = await startWebBridge({
   pubsub,
   listGuilds: createGuildList(client),
+  listChannels: createGuildChannelList(client),
+  archive: createArchiveControl({
+    settings: archiveSettings,
+    policy: archivePolicy,
+    backfill: createArchiveBackfill({
+      history: createChannelHistory(client),
+      policy: archivePolicy,
+      archive: messageArchive,
+    }),
+  }),
   botStatus: () => ({ guilds: client.guilds.cache.size, startedAt }),
   logger: logger.child({ component: "web-bridge" }),
 });

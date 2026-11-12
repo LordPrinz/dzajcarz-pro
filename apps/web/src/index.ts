@@ -1,6 +1,11 @@
 // Composition root of the web panel: creates the real adapters once and starts the server.
 import { createJsonLogger } from "@dzajcarz/core";
-import { createDb, createWebAuditRepository, webAuditTableExists } from "@dzajcarz/db";
+import {
+  createArchiveSettingsRepository,
+  createDb,
+  createWebAuditRepository,
+  webAuditTableExists,
+} from "@dzajcarz/db";
 import { createRedisPubSub, createRedisStore, keepConnected } from "@dzajcarz/kv";
 import { createBotClient } from "@dzajcarz/web-protocol";
 import { RedisClient } from "bun";
@@ -59,6 +64,7 @@ const server = Bun.serve({
     port: env.WEB_PORT,
     bot,
     auditor,
+    archiveSettings: createArchiveSettingsRepository(sql),
     live,
     probes: {
       postgres: async () => {

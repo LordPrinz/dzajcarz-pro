@@ -52,6 +52,7 @@ export async function startTestServer(
       live,
       // Runs the action without recording it; the auditor has its own tests.
       auditor: { audited: (_request, _action, _context, run) => run() },
+      archiveSettings: { listGuilds: async () => [], dmEnabled: async () => false },
       probes: { postgres: async () => true, redis: async () => true },
       logger: silentLogger,
       page: await testPage(),

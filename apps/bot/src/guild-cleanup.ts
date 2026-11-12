@@ -4,8 +4,8 @@ import type { GuildDataRepository } from "@dzajcarz/db";
 /**
  * Handles `guildDelete`: the bot was kicked or the server deleted. Everything stored for it goes, so a server
  * that adds the bot again starts fresh. An outage is `guildUnavailable` in discord.js and never reaches this.
- * `refreshCaches` then reload the Redis copies (prefix, zone, toggles), which would otherwise serve the old
- * settings for up to 10 minutes to a server that re-adds the bot.
+ * `refreshCaches` then reload the Redis copies (prefix, zone, toggles, archive settings), which would
+ * otherwise serve the old settings for up to 10 minutes to a server that re-adds the bot.
  */
 export function createGuildCleanup(
   guildData: GuildDataRepository,

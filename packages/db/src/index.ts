@@ -4,9 +4,11 @@ export function createDb(url: string): SQL {
   return new SQL(url);
 }
 
+export * from "./archive-settings.ts";
 export * from "./dzajco.ts";
 export * from "./guild-data.ts";
 export * from "./guild-settings.ts";
+export * from "./message-archive.ts";
 export * from "./moderation.ts";
 export * from "./module-toggles.ts";
 export * from "./party.ts";
