@@ -17,6 +17,7 @@ import {
   createPartyRepository,
   createScheduledMessageRepository,
   createScheduledSongRepository,
+  createUploadStore,
   createWelcomeRepository,
 } from "@dzajcarz/db";
 import { migrate } from "@dzajcarz/db/migrator";
@@ -58,6 +59,7 @@ import {
   createDmList,
   createNameResolver,
 } from "./discord/web-reading.ts";
+import { createWriting } from "./discord/web-writing.ts";
 import { createGuildLookup, createTextChannels, createWelcomeSender } from "./discord/welcome.ts";
 import { loadEnv } from "./env.ts";
 import { createModuleEnabled } from "./event-scope.ts";
@@ -277,6 +279,16 @@ client.on(
 
 const startedAt = new Date().toISOString();
 const resolveNames = createNameResolver(client);
+// Files the panel staged for a message (#147): deleted once sent, or after an hour by this sweep.
+const uploads = createUploadStore(sql);
+const UPLOAD_SWEEP_MS = 15 * 60_000;
+const sweepUploads = () =>
+  void uploads
+    .purgeExpired()
+    .catch((error: unknown) => logger.warn("Could not delete expired uploads", { error }));
+sweepUploads();
+const uploadSweep = setInterval(sweepUploads, UPLOAD_SWEEP_MS);
+uploadSweep.unref();
 // A failed subscribe is retried when Redis reconnects, so the bridge never blocks login.
 const webBridge = await startWebBridge({
   pubsub,
@@ -296,6 +308,7 @@ const webBridge = await startWebBridge({
     dmList: createDmList(client),
     resolveNames,
   },
+  writing: createWriting({ client, uploads, logger: logger.child({ component: "web-writing" }) }),
   botStatus: () => ({ guilds: client.guilds.cache.size, startedAt }),
   logger: logger.child({ component: "web-bridge" }),
 });
@@ -373,6 +386,7 @@ async function shutdown(signal: string): Promise<void> {
   let exitCode = 0;
   try {
     await healthServer?.stop(true);
+    clearInterval(uploadSweep);
     await webBridge.stop();
     for (const module of modules) {
       try {

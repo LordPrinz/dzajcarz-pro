@@ -23,6 +23,14 @@ export function commandHandlers(overrides: Partial<CommandHandlers> = {}): Comma
     "channel.messages": notInThisTest("channel.messages"),
     "dms.list": notInThisTest("dms.list"),
     "names.resolve": notInThisTest("names.resolve"),
+    "channel.info": notInThisTest("channel.info"),
+    "message.send": notInThisTest("message.send"),
+    "message.edit": notInThisTest("message.edit"),
+    "message.delete": notInThisTest("message.delete"),
+    "reaction.add": notInThisTest("reaction.add"),
+    "reaction.remove": notInThisTest("reaction.remove"),
+    "members.search": notInThisTest("members.search"),
+    "dm.open": notInThisTest("dm.open"),
     ...overrides,
   };
 }

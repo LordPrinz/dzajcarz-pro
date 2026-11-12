@@ -44,13 +44,32 @@ export interface TestServer {
   stop(): Promise<void>;
 }
 
-export async function startTestServer(
-  overrides: Partial<WebServerDeps> & {
-    extraRoutes?: Record<string, unknown>;
-    bot?: Pick<BotClient, "request" | "onEvent">;
-  } = {},
+type TestServerOverrides = Partial<WebServerDeps> & {
+  extraRoutes?: Record<string, unknown>;
+  bot?: Pick<BotClient, "request" | "onEvent">;
+};
+
+const isAddressInUse = (error: unknown) =>
+  typeof error === "object" && error !== null && "code" in error && error.code === "EADDRINUSE";
+
+/**
+ * Starts the panel on a free port. Another test file running in parallel can take the port between
+ * `freePort` and `Bun.serve`, so a port that turned out to be taken is retried with a new one.
+ */
+export async function startTestServer(overrides: TestServerOverrides = {}): Promise<TestServer> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await startTestServerOn(await freePort(), overrides);
+    } catch (error) {
+      if (!isAddressInUse(error) || attempt >= 5) throw error;
+    }
+  }
+}
+
+async function startTestServerOn(
+  port: number,
+  overrides: TestServerOverrides,
 ): Promise<TestServer> {
-  const port = await freePort();
   const live = overrides.live ?? createLiveState();
   const bot = overrides.bot ?? {
     request: async () => ({ ok: true as const, data: [] as never }),
@@ -70,6 +89,7 @@ export async function startTestServer(
         findGuild: async () => null,
       },
       archive: emptyArchive,
+      uploads: { stage: async () => {} },
       probes: { postgres: async () => true, redis: async () => true },
       logger: silentLogger,
       page: await testPage(),

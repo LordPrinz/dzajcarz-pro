@@ -16,6 +16,7 @@ export type Selection =
   | { kind: "channel"; channel: ChannelRef; focusId?: string | null }
   | { kind: "search" }
   | { kind: "archive" }
+  | { kind: "new-dm" }
   | { kind: "none" };
 
 export interface SidebarProps {
@@ -171,6 +172,14 @@ export function Sidebar(props: SidebarProps) {
         </p>
       )}
       <h2 className="side-heading">Wiadomości prywatne</h2>
+      <button
+        type="button"
+        className="side-item"
+        aria-current={selection.kind === "new-dm" ? "page" : undefined}
+        onClick={() => onSelect({ kind: "new-dm" })}
+      >
+        + Nowa rozmowa
+      </button>
       <Dms dms={props.dms} selection={selection} onSelect={onSelect} />
     </nav>
   );

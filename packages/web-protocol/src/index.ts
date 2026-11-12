@@ -80,3 +80,20 @@ export {
   type CommandServerOptions,
   createCommandServer,
 } from "./server.ts";
+export {
+  ChannelInfo,
+  DEFAULT_UPLOAD_LIMIT,
+  Emoji,
+  MAX_FILE_NAME_LENGTH,
+  MAX_FILES,
+  MAX_MEMBER_QUERY_LENGTH,
+  MAX_MEMBER_RESULTS,
+  MAX_MESSAGE_LENGTH,
+  MAX_UPLOAD_BYTES,
+  MemberResult,
+  MIN_MEMBER_QUERY_LENGTH,
+  Nonce,
+  SendMessageBody,
+  WRITE_REJECTIONS,
+  type WriteRejection,
+} from "./writing.ts";

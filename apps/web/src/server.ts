@@ -1,5 +1,5 @@
 import type { Logger } from "@dzajcarz/core";
-import type { BotClient } from "@dzajcarz/web-protocol";
+import { type BotClient, MAX_UPLOAD_BYTES } from "@dzajcarz/web-protocol";
 import { type ArchiveRouteDeps, archiveRoutes } from "./archive.ts";
 import type { AuditedResult, Auditor } from "./audit.ts";
 import { createHealth, type Probes } from "./health.ts";
@@ -9,6 +9,7 @@ import { MAX_BODY_BYTES } from "./http/json.ts";
 import { type PageFiles, pageRoutes } from "./http/page.ts";
 import { BOT_TOPIC, createSubscriptions, type LiveState } from "./live.ts";
 import { type ReadingRouteDeps, readingRoutes } from "./reading.ts";
+import { type WritingRouteDeps, writingRoutes } from "./writing.ts";
 
 /** Largest WebSocket message a client may send; the panel expects nothing bigger than a small JSON object. */
 export const MAX_WS_MESSAGE_BYTES = 4 * 1024;
@@ -26,6 +27,7 @@ export interface WebServerDeps {
   auditor: Auditor;
   archiveSettings: ArchiveRouteDeps["archiveSettings"] & ReadingRouteDeps["archiveSettings"];
   archive: ReadingRouteDeps["archive"];
+  uploads: WritingRouteDeps["uploads"];
   live: LiveState;
   probes: Probes;
   logger: Logger;
@@ -34,6 +36,39 @@ export interface WebServerDeps {
 }
 
 type Routes = Record<string, unknown>;
+
+/**
+ * Bun rejects a bigger body before any handler runs. A file upload needs this much; every JSON route still
+ * stops at `MAX_BODY_BYTES` in `readJson`.
+ */
+export const MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + MAX_BODY_BYTES;
+
+const isMethodMap = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+/**
+ * Joins route tables; two tables with the same path add their methods to one map. The same method twice, or
+ * a path that is a handler in one table and a method map in another, is a mistake and throws.
+ */
+export function mergeRoutes(...tables: Routes[]): Routes {
+  const merged: Routes = {};
+  for (const table of tables) {
+    for (const [path, value] of Object.entries(table)) {
+      const known = merged[path];
+      if (known === undefined) {
+        merged[path] = value;
+        continue;
+      }
+      if (!isMethodMap(known) || !isMethodMap(value)) {
+        throw new Error(`Route ${path} is defined twice and cannot be merged`);
+      }
+      const twice = Object.keys(value).filter((method) => Object.hasOwn(known, method));
+      if (twice.length > 0) throw new Error(`Route ${path} defines ${twice.join(", ")} twice`);
+      merged[path] = { ...known, ...value };
+    }
+  }
+  return merged;
+}
 
 /** The HTTP answer for a bot (or audited) result that is not ok. */
 export function failure(result: Extract<AuditedResult<unknown>, { ok: false }>): Response {
@@ -109,14 +144,17 @@ export function createWebServer(
         logger,
         failure,
       }),
-      ...readingRoutes({
-        bot,
-        archive: deps.archive,
-        archiveSettings: deps.archiveSettings,
-        botOnline: () => live.status().online,
-        logger,
-        failure,
-      }),
+      ...mergeRoutes(
+        readingRoutes({
+          bot,
+          archive: deps.archive,
+          archiveSettings: deps.archiveSettings,
+          botOnline: () => live.status().online,
+          logger,
+          failure,
+        }),
+        writingRoutes({ bot, auditor: deps.auditor, uploads: deps.uploads, logger, failure }),
+      ),
       ...extraRoutes,
     } satisfies Routes,
     guard,
@@ -130,7 +168,7 @@ export function createWebServer(
       logger.error("Request failed", { error });
       return withSecurityHeaders(Response.json({ error: "internal_error" }, { status: 500 }));
     },
-    maxRequestBodySize: MAX_BODY_BYTES,
+    maxRequestBodySize: MAX_REQUEST_BYTES,
     websocket: {
       // A bigger message closes the socket (1009).
       maxPayloadLength: MAX_WS_MESSAGE_BYTES,

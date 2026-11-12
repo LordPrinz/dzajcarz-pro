@@ -9,6 +9,7 @@ import {
 } from "../testing.ts";
 import {
   allowedHosts,
+  binaryBody,
   createGuard,
   GUARDED,
   guardRoutes,
@@ -184,6 +185,56 @@ describe("Origin check", () => {
     expect(text.status).toBe(415);
   });
 
+  test("a route marked for files takes application/octet-stream and nothing else", async () => {
+    started = await startTestServer({
+      extraRoutes: { "/api/file": { POST: binaryBody(ok) } },
+    });
+    const postFile = (headers: Record<string, string>, body: string) =>
+      fetch(`${started?.url}/api/file`, { method: "POST", headers, body });
+    const sameOrigin = started.sameOrigin;
+    expect(
+      (await postFile({ ...sameOrigin, "Content-Type": "application/octet-stream" }, "x")).status,
+    ).toBe(200);
+    for (const type of ["application/json", "multipart/form-data; boundary=x", "text/plain"]) {
+      expect((await postFile({ ...sameOrigin, "Content-Type": type }, "x")).status).toBe(415);
+    }
+    // The Origin and Host checks are the same as for every route.
+    expect(
+      (
+        await postFile(
+          {
+            Host: sameOrigin.Host,
+            Origin: "https://evil.example",
+            "Content-Type": "application/octet-stream",
+          },
+          "x",
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await postFile(
+          {
+            Host: "evil.example",
+            Origin: sameOrigin.Origin,
+            "Content-Type": "application/octet-stream",
+          },
+          "x",
+        )
+      ).status,
+    ).toBe(421);
+  });
+
+  test("a JSON route refuses a raw file", async () => {
+    started = await startTestServer({ extraRoutes: echoRoutes });
+    const response = await post(
+      started,
+      { ...started.sameOrigin, "Content-Type": "application/octet-stream" },
+      "x",
+    );
+    expect(response.status).toBe(415);
+  });
+
   test("JSON with a charset is accepted", async () => {
     started = await startTestServer({ extraRoutes: echoRoutes });
     const response = await post(
@@ -229,6 +280,7 @@ describe("guardRoutes", () => {
           findGuild: async () => null,
         },
         archive: emptyArchive,
+        uploads: { stage: async () => {} },
         live: started.live,
         probes: { postgres: async () => true, redis: async () => true },
         logger: silentLogger,
@@ -257,6 +309,7 @@ describe("guardRoutes", () => {
     }
     expect(Object.keys(routes)).toContain("/");
     expect(Object.keys(routes)).toContain("/api/archive/guilds/:guildId");
+    expect(Object.keys(routes)).toContain("/api/uploads");
     expect(unguarded).toEqual([]);
   });
 

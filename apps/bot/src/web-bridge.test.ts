@@ -8,7 +8,12 @@ import {
   EventEnvelope,
   type GuildSummary,
 } from "@dzajcarz/web-protocol";
-import { type ArchiveControl, type ReadingControl, startWebBridge } from "./web-bridge.ts";
+import {
+  type ArchiveControl,
+  type ReadingControl,
+  startWebBridge,
+  type WritingControl,
+} from "./web-bridge.ts";
 
 const guilds: GuildSummary[] = [
   { id: "100000000000000001", name: "Alfa", iconUrl: null, memberCount: 3 },
@@ -37,6 +42,16 @@ const reading: ReadingControl = {
     channels: {},
   }),
 };
+const writing: WritingControl = {
+  "channel.info": async () => ({ status: "unknown_channel" }),
+  "message.send": async () => ({ status: "ok", messageId: "500000000000000005" }),
+  "message.edit": async () => ({ status: "rejected", reason: "not_own" }),
+  "message.delete": async () => ({ status: "ok" }),
+  "reaction.add": async () => ({ status: "ok" }),
+  "reaction.remove": async () => ({ status: "ok" }),
+  "members.search": async () => ({ members: [] }),
+  "dm.open": async () => ({ status: "rejected", reason: "unknown_user" }),
+};
 const listChannels = (guildId: string) =>
   guildId === GUILD
     ? {
@@ -58,6 +73,7 @@ function setup(listGuilds: () => GuildSummary[] = () => guilds, logger = silentL
         listChannels,
         archive,
         reading,
+        writing,
         botStatus: () => STATUS,
         logger,
         heartbeatMs: 20,
@@ -128,6 +144,32 @@ describe("startWebBridge", () => {
     ).toEqual({ ok: true, data: { users: { [CHANNEL]: "Ola" }, roles: {}, channels: {} } });
   });
 
+  test("the writing commands reach the writing control", async () => {
+    const { client, start } = setup();
+    await client.start();
+    await start();
+    expect(
+      await client.request("message.send", {
+        channelId: CHANNEL,
+        content: "hej",
+        allowMentions: false,
+        nonce: "n1",
+      }),
+    ).toEqual({ ok: true, data: { status: "ok", messageId: "500000000000000005" } });
+    expect(
+      await client.request("message.edit", {
+        channelId: CHANNEL,
+        messageId: CHANNEL,
+        content: "x",
+        allowMentions: false,
+      }),
+    ).toEqual({ ok: true, data: { status: "rejected", reason: "not_own" } });
+    expect(await client.request("dm.open", { userId: CHANNEL })).toEqual({
+      ok: true,
+      data: { status: "rejected", reason: "unknown_user" },
+    });
+  });
+
   test("publishEvent reaches the panel's event listeners", async () => {
     const { client, start } = setup();
     await client.start();
@@ -176,6 +218,7 @@ describe("startWebBridge", () => {
       listChannels,
       archive,
       reading,
+      writing,
       botStatus: () => STATUS,
       logger: silentLogger,
       heartbeatMs: 60_000,

@@ -69,8 +69,15 @@ describe("actorOf", () => {
 });
 
 describe("audited", () => {
-  const cases: [string, BotResult<string>, WebAuditOutcome, string | null][] = [
+  const cases: [string, BotResult<unknown>, WebAuditOutcome, string | null][] = [
     ["ok", { ok: true, data: "x" }, "ok", null],
+    ["ok with a status", { ok: true, data: { status: "ok", messageId: "5" } }, "ok", null],
+    [
+      "refused by the bot",
+      { ok: true, data: { status: "rejected", reason: "no_manage" } },
+      "rejected",
+      "no_manage",
+    ],
     ["unavailable", { ok: false, reason: "unavailable" }, "unavailable", null],
     ["timeout", { ok: false, reason: "timeout" }, "timeout", null],
     ["error", { ok: false, reason: "error", message: "nope" }, "failed", "nope"],

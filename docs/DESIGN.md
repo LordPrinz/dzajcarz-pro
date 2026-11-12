@@ -195,6 +195,34 @@ The DM list is the union of the DMs in the archive and the DM channels discord.j
 Discord gives a bot no list of its conversations, so after a restart a DM outside the archive shows up only
 once a message arrives in it.
 
+### Writing as the bot
+
+Under the open channel the panel has a composer (#147): text up to 2000 characters, an optional reply to a
+chosen message, up to 10 files, and a "Pinguj" switch that is off for every new message. Ctrl+Enter (Cmd+Enter
+on a Mac) sends. Hovering a message offers reply, react (a few common emoji or any unicode or custom one),
+edit for the bot's own messages and delete. The panel asks the bot what it may do in the channel
+(`channel.info`), but the bot checks its permissions again on every action and answers a refusal with a
+reason the panel shows in Polish: deleting someone else's message needs Manage Messages, a reply and a
+reaction need Read Message History, files need Attach Files. Nobody's messages but the bot's can be edited.
+The draft stays in the page and in `localStorage` until the bot confirms the message, so a bot that is down
+or a refusal never loses it. The result appears through the live events, like any other message.
+
+Mentions follow [ADR 10](adr/0010-mentions-from-the-web-panel.md): `panelMentions` in
+`apps/bot/src/discord/web-writing.ts` is the only code that builds `allowedMentions` for a panel message.
+
+Files do not fit in a pub/sub message, so the page sends each one raw to the panel, which stores it in the
+`web_upload` table; the message command carries only their ids. The bot checks their sizes first, all files
+together against the target's upload limit (the server's boost tier, 10 MiB in a DM, at most 25 MiB), and
+only then loads and sends them. The page checks the same limits before uploading. A message is sent with a
+nonce the page keeps per draft and `enforceNonce`; the files stay staged after the send, marked with that
+nonce, so a retry of the same draft gets them again and Discord answers it with the message it already
+created instead of posting it twice. Staged files are deleted after an hour, and the table holds at most
+500 MiB at once.
+
+"Nowa rozmowa" searches members of every server the bot shares (or one) by name (`members.search`, at least
+two characters, while typing after a short pause) and opens a DM with the one picked (`dm.open`). Every
+write, upload and DM opening goes through the audit log.
+
 ### Health endpoint
 
 The bot serves a small HTTP endpoint (`Bun.serve`) on `HEALTH_HOSTNAME:HEALTH_PORT` (default
