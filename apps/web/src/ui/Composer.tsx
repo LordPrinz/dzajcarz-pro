@@ -80,6 +80,9 @@ export function Composer({ channel, info, replyTo, onCancelReply }: ComposerProp
   const uploadLimit = info?.uploadLimit ?? DEFAULT_UPLOAD_LIMIT;
   const blocked = info !== null && !info.can.send;
   const empty = content.trim() === "" && files.length === 0;
+  /** What the form holds now, for a send that finishes after the user kept typing. */
+  const latest = useRef({ content, allowMentions, replyId });
+  latest.current = { content, allowMentions, replyId };
 
   const edit = (value: string) => {
     setContent(value);
@@ -123,26 +126,33 @@ export function Composer({ channel, info, replyTo, onCancelReply }: ComposerProp
       setError(problem);
       return;
     }
+    // Exactly this goes out; whatever changes while it is in flight stays in the form.
+    const sent = { content, allowMentions, nonce: nonce.current, replyId };
     setSending(true);
     setError(null);
     const uploaded = [...files];
+    /** Puts the upload ids (or their absence) on the files still listed, which may include newer ones. */
+    const markUploads = (marked: PendingFile[]) =>
+      setFiles((listed) =>
+        listed.map((file) => marked.find(({ key }) => key === file.key) ?? file),
+      );
     for (const [index, pending] of uploaded.entries()) {
       if (pending.id) continue;
       const result = await uploadFile(pending.file);
       if (!result.ok) {
-        setFiles(uploaded);
+        markUploads(uploaded);
         setError(`${pending.file.name}: ${WRITE_ERRORS[result.error]}`);
         setSending(false);
         return;
       }
       uploaded[index] = { ...pending, id: result.data.id };
     }
-    setFiles(uploaded);
+    markUploads(uploaded);
     const draft: Draft = {
-      content,
-      allowMentions,
-      nonce: nonce.current,
-      ...(replyTo ? { replyTo: replyTo.id } : {}),
+      content: sent.content,
+      allowMentions: sent.allowMentions,
+      nonce: sent.nonce,
+      ...(sent.replyId ? { replyTo: sent.replyId } : {}),
       ...(uploaded.length > 0 ? { attachmentIds: uploaded.flatMap(({ id }) => id ?? []) } : {}),
     };
     const result = await sendMessage(channel.id, draft);
@@ -150,16 +160,21 @@ export function Composer({ channel, info, replyTo, onCancelReply }: ComposerProp
     if (!result.ok) {
       // Gone uploads are sent again next time.
       if (result.error === "upload_missing")
-        setFiles(uploaded.map(({ key, file }) => ({ key, file })));
+        markUploads(uploaded.map(({ key, file }) => ({ key, file })));
       setError(WRITE_ERRORS[result.error]);
       return;
     }
-    setContent("");
-    saveDraft(channel.id, "");
-    setFiles([]);
-    setAllowMentions(false);
-    onCancelReply();
-    changed();
+    const now = latest.current;
+    if (now.content === sent.content) {
+      setContent("");
+      saveDraft(channel.id, "");
+    }
+    if (now.allowMentions === sent.allowMentions) setAllowMentions(false);
+    if (now.replyId === sent.replyId) onCancelReply();
+    const sentKeys = new Set(uploaded.map(({ key }) => key));
+    setFiles((rest) => rest.filter(({ key }) => !sentKeys.has(key)));
+    // Anything kept is a new message: it must not reuse the nonce of the one just posted.
+    if (nonce.current === sent.nonce) changed();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

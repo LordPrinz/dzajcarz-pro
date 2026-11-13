@@ -7,19 +7,13 @@ import {
   RESTJSONErrorCodes,
   SnowflakeUtil,
 } from "discord.js";
+import { t } from "../messages.ts";
 import { sendDirectMessage } from "./direct.ts";
 import { hasCode } from "./errors.ts";
-
-export const BOT_MISSING_PERMISSIONS =
-  "Nie mam uprawnień, żeby to zrobić. Sprawdź moje uprawnienia i czy moja rola jest wyżej.";
-export const MEMBER_GONE = "Tej osoby nie ma na serwerze.";
-export const UNKNOWN_USER = "Nie ma takiego użytkownika.";
-export const NOT_A_TEXT_CHANNEL = "Tu nie mogę usuwać wiadomości.";
+import { BULK_MAX_AGE_MS } from "./limits.ts";
 
 /** Discord returns at most this many messages per request, and bulk delete takes as many. */
 const MAX_FETCH = 100;
-/** Bulk delete works up to 14 days; stay a minute inside so a message does not age out in flight. */
-const BULK_MAX_AGE_MS = 14 * 24 * 3_600_000 - 60_000;
 
 /**
  * Discord validates the timeout end against its own clock, so exactly 28 days from a host clock that runs
@@ -29,14 +23,13 @@ const TIMEOUT_CEILING_MS = MAX_TIMEOUT_MS - 60_000;
 
 /** The refusals a moderator can act on become UserErrors; anything else stays an error to log. */
 function explain(error: unknown): never {
-  if (
-    hasCode(error, RESTJSONErrorCodes.MissingPermissions) ||
-    hasCode(error, RESTJSONErrorCodes.MissingAccess)
-  ) {
-    throw new UserError(BOT_MISSING_PERMISSIONS);
+  if (hasCode(error, RESTJSONErrorCodes.MissingPermissions, RESTJSONErrorCodes.MissingAccess)) {
+    throw new UserError((l) => t(l).botMissingPermissions);
   }
-  if (hasCode(error, RESTJSONErrorCodes.UnknownMember)) throw new UserError(MEMBER_GONE);
-  if (hasCode(error, RESTJSONErrorCodes.UnknownUser)) throw new UserError(UNKNOWN_USER);
+  if (hasCode(error, RESTJSONErrorCodes.UnknownMember)) {
+    throw new UserError((l) => t(l).memberGone);
+  }
+  if (hasCode(error, RESTJSONErrorCodes.UnknownUser)) throw new UserError((l) => t(l).unknownUser);
   throw error;
 }
 
@@ -74,10 +67,7 @@ export function createModerationGuild(
       try {
         return memberInfo(guild, await guild.members.fetch(userId));
       } catch (error) {
-        if (
-          hasCode(error, RESTJSONErrorCodes.UnknownMember) ||
-          hasCode(error, RESTJSONErrorCodes.UnknownUser)
-        ) {
+        if (hasCode(error, RESTJSONErrorCodes.UnknownMember, RESTJSONErrorCodes.UnknownUser)) {
           return null;
         }
         throw error;
@@ -115,7 +105,8 @@ export function createModerationGuild(
 
     async purge(channelId, count, beforeMessageId) {
       const channel = await client.channels.fetch(channelId);
-      if (!channel?.isTextBased() || channel.isDMBased()) throw new UserError(NOT_A_TEXT_CHANNEL);
+      if (!channel?.isTextBased() || channel.isDMBased())
+        throw new UserError((l) => t(l).notATextChannel);
       const firstPage = await channel.messages
         .fetch({
           limit: Math.min(MAX_FETCH, count),

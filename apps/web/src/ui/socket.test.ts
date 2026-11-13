@@ -23,7 +23,7 @@ class FakeSocket {
   }
 }
 
-function setup(isExpired: () => Promise<boolean> = async () => false) {
+function setup(isExpired: () => Promise<boolean> = async () => false, now?: () => number) {
   const sockets: FakeSocket[] = [];
   const states: ConnectionState[] = [];
   const statuses: StatusMessage[] = [];
@@ -41,6 +41,7 @@ function setup(isExpired: () => Promise<boolean> = async () => false) {
       return socket;
     },
     isExpired,
+    ...(now ? { now } : {}),
     schedule: (callback, ms) => {
       delays.push(ms);
       pending = callback;
@@ -154,8 +155,12 @@ describe("connectSocket", () => {
     });
   });
 
-  test("reconnects with a doubling delay, and a successful open starts the count again", async () => {
-    const t = setup();
+  test("reconnects with a doubling delay, and a socket that stayed open starts the count again", async () => {
+    let time = 0;
+    const t = setup(
+      async () => false,
+      () => time,
+    );
     for (let i = 0; i < 3; i += 1) {
       t.sockets[i]?.onclose?.();
       await flush();
@@ -165,10 +170,40 @@ describe("connectSocket", () => {
     expect(t.sockets).toHaveLength(4);
 
     t.sockets[3]?.onopen?.();
+    time = 5_000;
     t.sockets[3]?.onclose?.();
     await flush();
     expect(t.delays).toEqual([1_000, 2_000, 4_000, 1_000]);
     expect(t.states.at(-1)).toBe("reconnecting");
+  });
+
+  test("a socket that opens and closes at once keeps the backoff growing", async () => {
+    const t = setup(
+      async () => false,
+      () => 0,
+    );
+    for (let i = 0; i < 3; i += 1) {
+      t.sockets[i]?.onopen?.();
+      t.sockets[i]?.onclose?.();
+      await flush();
+      t.fire();
+    }
+    expect(t.delays).toEqual([1_000, 2_000, 4_000]);
+  });
+
+  test("a message from the server starts the count again", async () => {
+    const t = setup(
+      async () => false,
+      () => 0,
+    );
+    t.sockets[0]?.onclose?.();
+    await flush();
+    t.fire();
+    t.sockets[1]?.onopen?.();
+    t.sockets[1]?.onmessage?.({ data: "{}" });
+    t.sockets[1]?.onclose?.();
+    await flush();
+    expect(t.delays).toEqual([1_000, 1_000]);
   });
 
   test("a 401 or an opaque redirect from /api/status stops reconnecting for good", async () => {

@@ -324,8 +324,7 @@ export function createWebMusic({
             return ok;
           case "skip":
             if (trackKey(current.id) !== control.key) return rejected("track_changed");
-            await player.skip(guildId, current.id);
-            return ok;
+            return (await player.skip(guildId, current.id)) ? ok : rejected("track_changed");
           case "seek":
             if (trackKey(current.id) !== control.key) return rejected("track_changed");
             if (current.isStream || !current.isSeekable) return rejected("not_seekable");

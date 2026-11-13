@@ -18,6 +18,7 @@
         "@dzajcarz/core": "workspace:*",
         "@dzajcarz/db": "workspace:*",
         "@dzajcarz/kv": "workspace:*",
+        "@dzajcarz/module-birthday": "workspace:*",
         "@dzajcarz/module-dzajco": "workspace:*",
         "@dzajcarz/module-fun": "workspace:*",
         "@dzajcarz/module-general": "workspace:*",
@@ -55,15 +56,19 @@
         "@types/react-dom": "19.3.0",
       },
     },
+    "modules/birthday": {
+      "name": "@dzajcarz/module-birthday",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dzajcarz/core": "workspace:*",
+      },
+    },
     "modules/dzajco": {
       "name": "@dzajcarz/module-dzajco",
       "version": "0.0.0",
       "dependencies": {
         "@dzajcarz/core": "workspace:*",
         "@dzajcarz/kv": "workspace:*",
-      },
-      "devDependencies": {
-        "discord.js": "14.28.1",
       },
     },
     "modules/fun": {
@@ -131,9 +136,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@dzajcarz/core": "workspace:*",
-      },
-      "devDependencies": {
-        "discord.js": "14.28.1",
       },
     },
     "modules/settings": {
@@ -229,6 +231,8 @@
     "@dzajcarz/db": ["@dzajcarz/db@workspace:packages/db"],
 
     "@dzajcarz/kv": ["@dzajcarz/kv@workspace:packages/kv"],
+
+    "@dzajcarz/module-birthday": ["@dzajcarz/module-birthday@workspace:modules/birthday"],
 
     "@dzajcarz/module-dzajco": ["@dzajcarz/module-dzajco@workspace:modules/dzajco"],
 

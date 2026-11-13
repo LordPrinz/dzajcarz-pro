@@ -54,15 +54,24 @@ export function buildDeployBody(
 type CommandBody = RESTPostAPIChatInputApplicationCommandsJSONBody;
 
 /** The fields of a command or option that `toSlashCommand` sets, read loosely from either side. */
+type LooseLocalizations = Readonly<Record<string, string | null>> | null;
+
 interface LooseCommand {
   type?: number;
   name?: string;
   description?: string;
+  description_localizations?: LooseLocalizations;
   required?: boolean;
   default_member_permissions?: string | null;
   integration_types?: readonly number[] | null;
   contexts?: readonly number[] | null;
-  choices?: readonly { name: string; value: string | number }[] | null;
+  choices?:
+    | readonly {
+        name: string;
+        name_localizations?: LooseLocalizations;
+        value: string | number;
+      }[]
+    | null;
   min_value?: number | null;
   max_value?: number | null;
   options?: readonly LooseCommand[] | null;
@@ -76,6 +85,7 @@ export const HANDLED_COMMAND_KEYS: readonly string[] = [
   "type",
   "name",
   "description",
+  "description_localizations",
   "default_member_permissions",
   "options",
   "integration_types",
@@ -85,13 +95,22 @@ export const HANDLED_OPTION_KEYS: readonly string[] = [
   "type",
   "name",
   "description",
+  "description_localizations",
   "required",
   "choices",
   "min_value",
   "max_value",
   "options",
 ];
-export const HANDLED_CHOICE_KEYS: readonly string[] = ["name", "value"];
+export const HANDLED_CHOICE_KEYS: readonly string[] = ["name", "name_localizations", "value"];
+
+/** Discord answers null for no localizations and keeps its own key order. */
+function canonicalLocalizations(map: LooseLocalizations | undefined): unknown {
+  const entries = Object.entries(map ?? {}).filter(([, text]) => text !== null);
+  return entries.length > 0
+    ? Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)))
+    : null;
+}
 
 function canonicalOptions(options: readonly LooseCommand[] | null | undefined): unknown[] {
   // Order matters: it is the order of prefix arguments and of the options in Discord's picker.
@@ -99,8 +118,13 @@ function canonicalOptions(options: readonly LooseCommand[] | null | undefined): 
     type: option.type,
     name: option.name,
     description: option.description,
+    description_localizations: canonicalLocalizations(option.description_localizations),
     required: option.required ?? false,
-    choices: (option.choices ?? []).map(({ name, value }) => ({ name, value })),
+    choices: (option.choices ?? []).map(({ name, name_localizations, value }) => ({
+      name,
+      name_localizations: canonicalLocalizations(name_localizations),
+      value,
+    })),
     min_value: option.min_value ?? null,
     max_value: option.max_value ?? null,
     options: canonicalOptions(option.options),
@@ -119,6 +143,7 @@ function canonicalCommand(command: LooseCommand, scope: DeployStep["scope"]): un
     type: command.type ?? 1,
     name: command.name,
     description: command.description,
+    description_localizations: canonicalLocalizations(command.description_localizations),
     default_member_permissions: command.default_member_permissions ?? null,
     options: canonicalOptions(command.options),
     ...(scope === "global" && {
@@ -143,9 +168,11 @@ export function sameCommands(
   return canonical(local as readonly LooseCommand[]) === canonical(remote);
 }
 
+const WITH_LOCALIZATIONS = new URLSearchParams({ with_localizations: "true" });
+
 /** The slice of discord.js `REST` the startup deploy uses. */
 export interface CommandRest {
-  get(route: `/${string}`): Promise<unknown>;
+  get(route: `/${string}`, options: { query: URLSearchParams }): Promise<unknown>;
   put(route: `/${string}`, options: { body: unknown }): Promise<unknown>;
 }
 
@@ -185,7 +212,8 @@ export async function deployOnStartup({
     try {
       const route = deployRoute(clientId, step);
       const body = buildDeployBody(step, registry);
-      const remote = await rest.get(route);
+      // Without this flag Discord leaves the localizations out, and every set would look changed.
+      const remote = await rest.get(route, { query: WITH_LOCALIZATIONS });
       if (!Array.isArray(remote)) {
         logger.warn("Discord returned an unexpected command list; sending the set anyway", {
           where,
@@ -240,7 +268,9 @@ async function warnOnGlobalDuplicates({
   logger,
 }: Pick<StartupDeployOptions, "rest" | "clientId" | "logger">): Promise<void> {
   try {
-    const remoteGlobal = await rest.get(Routes.applicationCommands(clientId));
+    const remoteGlobal = await rest.get(Routes.applicationCommands(clientId), {
+      query: WITH_LOCALIZATIONS,
+    });
     if (Array.isArray(remoteGlobal) && remoteGlobal.length > 0) {
       logger.warn("Global commands duplicate the dev guild", {
         count: remoteGlobal.length,
@@ -316,6 +346,7 @@ export const createDeployRegistry = () =>
       scheduledSongCron: DEFAULT_SCHEDULED_SONG_CRON,
       timeZones: unusedServices(),
       defaultTimeZone: DEFAULT_TIME_ZONE,
+      locales: unusedServices(),
       dzajcoSettings: unusedServices(),
       dzajcoResponder: unusedServices(),
       dzajcoStore: unusedServices(),
@@ -333,6 +364,10 @@ export const createDeployRegistry = () =>
       messageFailures: unusedServices(),
       clientReady: unusedServices(),
       messageChannels: unusedServices(),
+      // birthday (its cron job is the shared stand-in above too)
+      birthdays: unusedServices(),
+      birthdaySender: unusedServices(),
+      birthdayMembers: unusedServices(),
       logger: silentLogger,
     }),
   );

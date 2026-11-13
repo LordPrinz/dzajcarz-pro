@@ -13,7 +13,7 @@ breaks once the bot runs more than one shard process.
 
 - Redis holds only state that can be lost: caches (guild prefix), cooldown and rate-limit counters.
 - Code reaches it through the `KeyValueStore` port in `packages/kv` (`get`, `set` with TTL, `del`, atomic
-  `increment`, `ping`). Tests use the in-memory adapter; the same contract suite runs against a real Redis
+  `increment`, `setIfAbsent`, `delIfEquals`, `ping`). Tests use the in-memory adapter; the same contract suite runs against a real Redis
   when `TEST_REDIS_URL` is set.
 - The client runs with `enableOfflineQueue: false` and reconnects in the background, so while Redis is
   down commands fail at once and callers fall back (the prefix resolver reads Postgres).

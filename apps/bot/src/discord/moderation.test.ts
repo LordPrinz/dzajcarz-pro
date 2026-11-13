@@ -1,13 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { UserError } from "@dzajcarz/core";
 import { type Client, RESTJSONErrorCodes, SnowflakeUtil } from "discord.js";
-import {
-  BOT_MISSING_PERMISSIONS,
-  createModerationGuild,
-  MEMBER_GONE,
-  NOT_A_TEXT_CHANNEL,
-  UNKNOWN_USER,
-} from "./moderation.ts";
+import { t } from "../messages.ts";
+import { createModerationGuild } from "./moderation.ts";
 import { NO_MENTIONS } from "./reply.ts";
 
 const GUILD = "100000000000000001";
@@ -165,7 +160,8 @@ describe("actions", () => {
     ]) {
       const error = await action().catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(UserError);
-      expect((error as Error).message).toBe(BOT_MISSING_PERMISSIONS);
+      expect((error as Error).message).toBe(t("pl").botMissingPermissions);
+      expect((error as UserError).messageIn("en")).toBe(t("en").botMissingPermissions);
     }
   });
 
@@ -173,8 +169,8 @@ describe("actions", () => {
     const guild = createModerationGuild(
       guildClient({ banError: discordError(RESTJSONErrorCodes.UnknownUser) }).client,
     );
-    await expect(guild.kick(GUILD, "5", "r")).rejects.toThrow(MEMBER_GONE);
-    await expect(guild.ban(GUILD, "5", "r")).rejects.toThrow(UNKNOWN_USER);
+    await expect(guild.kick(GUILD, "5", "r")).rejects.toThrow(t("pl").memberGone);
+    await expect(guild.ban(GUILD, "5", "r")).rejects.toThrow(t("pl").unknownUser);
   });
 
   test("other failures stay errors to log", async () => {
@@ -285,14 +281,14 @@ describe("purge", () => {
           throw discordError(code);
         },
       });
-      await expect(guild.purge(CHANNEL, 2, null)).rejects.toThrow(BOT_MISSING_PERMISSIONS);
+      await expect(guild.purge(CHANNEL, 2, null)).rejects.toThrow(t("pl").botMissingPermissions);
     }
   });
 
   test("a DM or a channel without text is refused", async () => {
     for (const extra of [{ isDMBased: () => true }, { isTextBased: () => false }]) {
       const { guild } = channelClient(recent, extra);
-      await expect(guild.purge(CHANNEL, 2, null)).rejects.toThrow(NOT_A_TEXT_CHANNEL);
+      await expect(guild.purge(CHANNEL, 2, null)).rejects.toThrow(t("pl").notATextChannel);
     }
   });
 });

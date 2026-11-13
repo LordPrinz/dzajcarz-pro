@@ -1,12 +1,14 @@
 import type { ButtonSpec, Embed } from "@dzajcarz/core";
-import { escapeMarkdown, plural, truncate } from "@dzajcarz/core";
+import { escapeMarkdown, type Locale, truncate } from "@dzajcarz/core";
 import { formatDuration, httpUrl, progressLine } from "./format.ts";
+import { t } from "./messages.ts";
 import type { LoopMode, MusicFilter, MusicTrack, PanelMessage, PlayerState } from "./ports.ts";
 
 export const PANEL_COLOR = 0x1db954;
 /** Discord's embed title limit. */
 const MAX_TITLE = 256;
 
+/** The panel's buttons in one language; `panelMessage` takes the set of the language it draws in. */
 export interface PanelButtons {
   pause: (paused: boolean) => ButtonSpec;
   skip: ButtonSpec;
@@ -16,23 +18,32 @@ export interface PanelButtons {
   shuffle: ButtonSpec;
 }
 
-export const LOOP_LABELS: Record<LoopMode, string> = {
-  off: "wył.",
-  track: "utwór",
-  queue: "kolejka",
-};
+export function loopLabel(mode: LoopMode, locale: Locale): string {
+  const text = t(locale);
+  return { off: text.loopOff, track: text.loopTrack, queue: text.loopQueue }[mode];
+}
 
-export const FILTER_LABELS: Record<MusicFilter, string> = {
-  off: "brak",
-  bassboost: "bassboost",
-  nightcore: "nightcore",
-  vaporwave: "vaporwave",
-  "8d": "8D",
-};
+export function filterLabel(filter: MusicFilter, locale: Locale): string {
+  const labels: Record<MusicFilter, string> = {
+    off: t(locale).filterNone,
+    bassboost: "bassboost",
+    nightcore: "nightcore",
+    vaporwave: "vaporwave",
+    "8d": "8D",
+  };
+  return labels[filter];
+}
 
 /** `Pętla: utwór · Głośność: 80% · Filtr: nightcore`, the settings part of the footer. */
-export function settingsLine(state: Pick<PlayerState, "loop" | "volume" | "filter">): string {
-  return `Pętla: ${LOOP_LABELS[state.loop]} · Głośność: ${state.volume}% · Filtr: ${FILTER_LABELS[state.filter]}`;
+export function settingsLine(
+  state: Pick<PlayerState, "loop" | "volume" | "filter">,
+  locale: Locale,
+): string {
+  return t(locale).settings(
+    loopLabel(state.loop, locale),
+    state.volume,
+    filterLabel(state.filter, locale),
+  );
 }
 
 /** Title (linked), author, cover, progress and who added the track. */
@@ -41,27 +52,39 @@ export function trackEmbed(
   positionMs: number,
   upcoming: number,
   settings: string,
+  locale: Locale,
 ): Embed {
+  const text = t(locale);
   return {
     title: truncate(track.title, MAX_TITLE),
     url: httpUrl(track.uri),
     thumbnail: httpUrl(track.artworkUrl),
     color: PANEL_COLOR,
     description: [
-      `**Autor:** ${escapeMarkdown(track.author)}`,
-      `**Dodał(a):** <@${track.requesterId}>`,
-      progressLine(positionMs, track.durationMs, track.isStream),
+      `**${text.author}:** ${escapeMarkdown(track.author)}`,
+      ...(track.requesterId ? [`**${text.addedBy}:** <@${track.requesterId}>`] : []),
+      progressLine(positionMs, track.durationMs, track.isStream, locale),
     ].join("\n"),
-    footer: `${upcoming === 0 ? "Kolejka jest pusta" : `W kolejce: ${upcoming}`} · ${settings}`,
+    footer: `${upcoming === 0 ? text.queueEmptyFooter : text.queuedFooter(upcoming)} · ${settings}`,
   };
 }
 
 /** The now playing panel; null when nothing is playing or the bot plays its own track. */
-export function panelMessage(state: PlayerState, buttons: PanelButtons): PanelMessage | null {
+export function panelMessage(
+  state: PlayerState,
+  buttons: PanelButtons,
+  locale: Locale,
+): PanelMessage | null {
   if (!state.current || state.current.byBot) return null;
   return {
     embeds: [
-      trackEmbed(state.current, state.positionMs, state.upcoming.length, settingsLine(state)),
+      trackEmbed(
+        state.current,
+        state.positionMs,
+        state.upcoming.length,
+        settingsLine(state, locale),
+        locale,
+      ),
     ],
     components: [
       [buttons.pause(state.paused), buttons.skip, buttons.stop, buttons.queue],
@@ -76,31 +99,30 @@ const MAX_QUEUE_LINK_LENGTH = 300;
 const QUEUE_LINES_BUDGET = 3700;
 
 /** One line of `/queue`: `3. [Title](link) · 3:21 · @member`; `withLink` false keeps only the title. */
-function queueLine(index: number, track: MusicTrack, withLink: boolean): string {
+function queueLine(index: number, track: MusicTrack, withLink: boolean, locale: Locale): string {
   const title = escapeMarkdown(truncate(track.title, 60));
   const url = withLink ? httpUrl(track.uri) : undefined;
   const label = url ? `[${title}](${url.replaceAll(")", "%29")})` : title;
-  const length = track.isStream ? "na żywo" : formatDuration(track.durationMs);
-  return `\`${index}.\` ${label} · ${length} · <@${track.requesterId}>`;
+  const length = track.isStream ? t(locale).liveShort : formatDuration(track.durationMs);
+  return `\`${index}.\` ${label} · ${length}${track.requesterId ? ` · <@${track.requesterId}>` : ""}`;
 }
 
 /**
  * The lines of one `/queue` page, numbered from `firstIndex`. A long link is dropped, and when the page would
  * still pass the budget the links go from the last line backwards, so the description always fits.
  */
-export function queueLines(firstIndex: number, tracks: readonly MusicTrack[]): string[] {
+export function queueLines(
+  firstIndex: number,
+  tracks: readonly MusicTrack[],
+  locale: Locale,
+): string[] {
   const linked = tracks.map((track) => (httpUrl(track.uri)?.length ?? 0) <= MAX_QUEUE_LINK_LENGTH);
   const render = () =>
-    tracks.map((track, i) => queueLine(firstIndex + i, track, linked[i] ?? false));
+    tracks.map((track, i) => queueLine(firstIndex + i, track, linked[i] ?? false, locale));
   let lines = render();
   for (let i = tracks.length - 1; i >= 0 && lines.join("\n").length > QUEUE_LINES_BUDGET; i--) {
     linked[i] = false;
     lines = render();
   }
   return lines;
-}
-
-/** 1 utwór, 2 utwory, 5 utworów, 22 utwory. */
-export function tracksWord(count: number): string {
-  return plural(count, "utwór", "utwory", "utworów");
 }

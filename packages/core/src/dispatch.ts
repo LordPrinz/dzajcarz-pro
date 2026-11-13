@@ -1,24 +1,22 @@
 import { type AnyCommand, type CommandContext, DEFAULT_CONTEXTS, type Reply } from "./command.ts";
 import type { ComponentContext } from "./component.ts";
 import { UserError } from "./errors.ts";
+import type { Locale } from "./i18n.ts";
 import type { Logger } from "./logger.ts";
+import { common, coreMessages } from "./messages.ts";
 import { type ModalBaseContext, type ModalRawValues, parseModalValues } from "./modal.ts";
+import { hasPermissions } from "./permissions.ts";
 import { splitInvocation, usage } from "./prefix.ts";
 import type { ResolvedComponent, ResolvedModal } from "./registry.ts";
 import { withTimeout } from "./timeout.ts";
 
-type AccessContext = Pick<CommandContext, "guildId" | "place" | "memberPermissions">;
-
-/** PermissionFlagsBits.Administrator: Discord grants every permission to it. */
-const ADMINISTRATOR = 1n << 3n;
+type AccessContext = Pick<CommandContext, "guildId" | "place" | "memberPermissions" | "locale">;
 
 /** What the cooldown check needs from a store; `KeyValueStore` from `@dzajcarz/kv` fits. */
 export interface CooldownStore {
   /** Counts a call in a window that the first call opens for `ttlMs`. */
   increment(key: string, ttlMs: number): Promise<{ count: number; ttlMs: number }>;
 }
-
-export const GENERIC_ERROR = "Coś poszło nie tak. Spróbuj ponownie za chwilę.";
 
 /**
  * Runs a command with the checks every command shares (DMs, member permissions) and one error policy:
@@ -48,7 +46,9 @@ export async function executeCommand(
         subcommand !== undefined && Object.hasOwn(command.subcommands, subcommand)
           ? command.subcommands[subcommand]
           : undefined;
-      if (!target) throw new UserError(`Nieznana podkomenda. ${usage(command)}`);
+      if (!target) {
+        throw new UserError((l) => coreMessages(l).unknownSubcommand(usage(command, undefined, l)));
+      }
       const deniedAction = checkAccess(target, ctx);
       if (deniedAction) throw new UserError(deniedAction);
       await enforceCooldown(
@@ -68,15 +68,19 @@ export async function executeCommand(
       await command.run?.(ctx);
     }
   } catch (error) {
-    const userFacing = error instanceof UserError;
-    if (!userFacing) log.error("Command failed", { error });
+    if (!(error instanceof UserError)) log.error("Command failed", { error });
     try {
-      await ctx.reply({ content: userFacing ? error.message : GENERIC_ERROR, ephemeral: true });
+      await ctx.reply({ content: errorText(error, ctx.locale), ephemeral: true });
     } catch (replyError) {
       // The interaction may have expired or the channel may be gone; nothing left to tell the user.
       log.warn("Could not report a command error to the caller", { error: replyError });
     }
   }
+}
+
+/** What the caller sees for a failure: a UserError's own text, anything else the generic message. */
+function errorText(error: unknown, locale: Locale): string {
+  return error instanceof UserError ? error.messageIn(locale) : common(locale).genericError;
 }
 
 /** Refuses the call while the user's previous one is inside the window. Fails open if the store is down. */
@@ -96,25 +100,21 @@ async function enforceCooldown(
   }
   if (counter.count > 1) {
     const seconds = Math.max(1, Math.ceil(counter.ttlMs / 1000));
-    throw new UserError(`Zwolnij. Spróbuj ponownie za ${seconds} s.`);
+    throw new UserError((l) => coreMessages(l).cooldown(seconds));
   }
 }
 
-export const MENU_GUILD_ONLY = "To menu działa tylko na serwerze.";
-export const MENU_NO_PERMISSION = "Nie masz uprawnień do tego menu.";
-export const NOT_YOUR_MENU = "To nie Twoje menu.";
-export const UNKNOWN_COMPONENT = "To menu jest nieaktualne. Wywołaj komendę jeszcze raz.";
-
-interface GatedContext extends Pick<CommandContext, "user" | "guildId" | "memberPermissions"> {
+interface GatedContext
+  extends Pick<CommandContext, "user" | "guildId" | "memberPermissions" | "locale"> {
   readonly acknowledged: boolean;
   defer(): Promise<void>;
   reply(reply: Reply): Promise<void>;
 }
 
-interface GateMessages {
-  notOwner: string;
-  guildOnly: string;
-  permissions: string;
+type Text = (locale: Locale) => string;
+
+interface GateMessages extends AccessMessages {
+  notOwner: Text;
   /** Log line for a failure that is not the user's fault. */
   failed: string;
   /** Log line when even the error reply fails. */
@@ -143,10 +143,9 @@ async function runGated(
     // Discord shows "interaction failed" after 3 seconds without an answer.
     if (!ctx.acknowledged) await answerSilently();
   } catch (error) {
-    const userFacing = error instanceof UserError;
-    if (!userFacing) log.error(messages.failed, { error });
+    if (!(error instanceof UserError)) log.error(messages.failed, { error });
     try {
-      await ctx.reply({ content: userFacing ? error.message : GENERIC_ERROR, ephemeral: true });
+      await ctx.reply({ content: errorText(error, ctx.locale), ephemeral: true });
     } catch (replyError) {
       log.warn(messages.replyFailed, { error: replyError });
     }
@@ -154,9 +153,9 @@ async function runGated(
 }
 
 const COMPONENT_MESSAGES: GateMessages = {
-  notOwner: NOT_YOUR_MENU,
-  guildOnly: MENU_GUILD_ONLY,
-  permissions: MENU_NO_PERMISSION,
+  notOwner: (l) => coreMessages(l).notYourMenu,
+  guildOnly: (l) => coreMessages(l).menuGuildOnly,
+  permissions: (l) => coreMessages(l).menuNoPermission,
   failed: "Component failed",
   replyFailed: "Could not report a component error to the user",
 };
@@ -183,23 +182,17 @@ export async function executeComponent(
   );
 }
 
-export const MODAL_GUILD_ONLY = "Ten formularz działa tylko na serwerze.";
-export const MODAL_NO_PERMISSION = "Nie masz uprawnień do tego formularza.";
-export const NOT_YOUR_MODAL = "To nie Twój formularz.";
-export const MODAL_DONE = "Gotowe.";
-export const UNKNOWN_MODAL = "Ten formularz jest nieaktualny. Wywołaj komendę jeszcze raz.";
-
 const MODAL_MESSAGES: GateMessages = {
-  notOwner: NOT_YOUR_MODAL,
-  guildOnly: MODAL_GUILD_ONLY,
-  permissions: MODAL_NO_PERMISSION,
+  notOwner: (l) => coreMessages(l).notYourModal,
+  guildOnly: (l) => coreMessages(l).modalGuildOnly,
+  permissions: (l) => coreMessages(l).modalNoPermission,
   failed: "Modal failed",
   replyFailed: "Modal failed: could not report error",
 };
 
 /**
  * Runs a modal handler after a submit: the owner and permission checks of a click, then the answers are
- * validated against the modal's fields (a problem is answered with an ephemeral Polish message) and the
+ * validated against the modal's fields (a problem is answered with an ephemeral message) and the
  * handler gets them as `ctx.values`.
  */
 export async function executeModal(
@@ -220,7 +213,7 @@ export async function executeModal(
     MODAL_MESSAGES,
     log,
     async () => {
-      const values = parseModalValues(modal.fields, raw);
+      const values = parseModalValues(modal.fields, raw, ctx.locale);
       // An explicit wrapper instead of prototype delegation, so spreading `ctx` in a handler is safe.
       await modal.run({
         user: ctx.user,
@@ -228,6 +221,7 @@ export async function executeModal(
         place: ctx.place,
         channelId: ctx.channelId,
         memberPermissions: ctx.memberPermissions,
+        locale: ctx.locale,
         state: ctx.state,
         canUpdate: ctx.canUpdate,
         values,
@@ -241,7 +235,10 @@ export async function executeModal(
     },
     // A modal opened from a message leaves that message as it is; otherwise there is nothing to edit, so
     // the member gets a short ephemeral confirmation instead of a "thinking" state that never resolves.
-    () => (ctx.canUpdate ? ctx.defer() : ctx.reply({ content: MODAL_DONE, ephemeral: true })),
+    () =>
+      ctx.canUpdate
+        ? ctx.defer()
+        : ctx.reply({ content: coreMessages(ctx.locale).modalDone, ephemeral: true }),
   );
 }
 
@@ -272,33 +269,40 @@ export function checkPrefixAccess(
 function checkCommandAccess(command: AnyCommand, ctx: AccessContext): string | null {
   const { places } = command.contexts ?? DEFAULT_CONTEXTS;
   if (!places.includes(ctx.place)) {
-    if (ctx.place === "guild") return "Ta komenda działa tylko w prywatnej wiadomości do bota.";
-    return places.includes("guild")
-      ? "Ta komenda działa tylko na serwerze."
-      : "Ta komenda nie działa w tym miejscu.";
+    const t = coreMessages(ctx.locale);
+    if (ctx.place === "guild") return t.dmOnly;
+    return places.includes("guild") ? common(ctx.locale).guildOnly : t.notHere;
   }
   return checkAccess({ permissions: command.permissions }, ctx);
 }
 
+interface AccessMessages {
+  guildOnly: Text;
+  permissions: Text;
+}
+
+const COMMAND_ACCESS: AccessMessages = {
+  guildOnly: (l) => common(l).guildOnly,
+  permissions: (l) => common(l).noPermission,
+};
+
 /**
- * Guild-only and member-permission gate shared by slash and prefix invocations. Returns the Polish message
- * to show the caller, or null when access is fine.
+ * Guild-only and member-permission gate shared by slash and prefix invocations. Returns the message to
+ * show the caller, in their language, or null when access is fine.
  */
 export function checkAccess(
   target: { guildOnly?: boolean; permissions?: bigint },
-  { guildId, memberPermissions }: Pick<CommandContext, "guildId" | "memberPermissions">,
-  messages = {
-    guildOnly: "Ta komenda działa tylko na serwerze.",
-    permissions: "Nie masz uprawnień do tej komendy.",
-  },
+  {
+    guildId,
+    memberPermissions,
+    locale,
+  }: Pick<CommandContext, "guildId" | "memberPermissions" | "locale">,
+  messages: AccessMessages = COMMAND_ACCESS,
 ): string | null {
   if ((target.guildOnly || target.permissions !== undefined) && guildId === null) {
-    return messages.guildOnly;
+    return messages.guildOnly(locale);
   }
   const required = target.permissions;
   if (required === undefined) return null;
-  const granted = memberPermissions ?? 0n;
-  const isAdmin = (granted & ADMINISTRATOR) === ADMINISTRATOR;
-  if (!isAdmin && (granted & required) !== required) return messages.permissions;
-  return null;
+  return hasPermissions(memberPermissions, required) ? null : messages.permissions(locale);
 }

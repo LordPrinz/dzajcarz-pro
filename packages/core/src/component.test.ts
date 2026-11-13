@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   type ComponentRow,
+  coreMessages,
   createComponentStateStore,
   createPaginator,
   createRegistry,
@@ -9,12 +10,9 @@ import {
   defineUserSelect,
   ExpiredStateError,
   MAX_COMPONENT_PREFIX,
-  MENU_EXPIRED,
-  NOT_YOUR_MENU,
   PUBLIC_OWNER,
   parseCustomId,
   STATE_KEY_LENGTH,
-  UNKNOWN_COMPONENT,
   UserError,
   validateRows,
 } from "./index.ts";
@@ -227,7 +225,7 @@ describe("clicking", () => {
         userId: STRANGER,
       });
       expect(clicks).toEqual([]);
-      expect(ctx.replies).toEqual([{ content: NOT_YOUR_MENU, ephemeral: true }]);
+      expect(ctx.replies).toEqual([{ content: coreMessages("pl").notYourMenu, ephemeral: true }]);
     });
   });
 
@@ -239,8 +237,8 @@ describe("clicking", () => {
       userId: STRANGER,
     });
     expect(clicks).toEqual([]);
-    expect(ctx.replies).toEqual([{ content: NOT_YOUR_MENU, ephemeral: true }]);
-    expect(NOT_YOUR_MENU).toBe("To nie Twoje menu.");
+    expect(ctx.replies).toEqual([{ content: coreMessages("pl").notYourMenu, ephemeral: true }]);
+    expect(coreMessages("pl").notYourMenu).toBe("To nie Twoje menu.");
   });
 
   test("component permissions are checked like command permissions", async () => {
@@ -302,7 +300,9 @@ describe("clicking", () => {
   test("an unknown custom_id gets an ephemeral notice", async () => {
     const { registry } = setup();
     const ctx = await clickComponent({ registry, customId: "gone:thing:1:" });
-    expect(ctx.replies).toEqual([{ content: UNKNOWN_COMPONENT, ephemeral: true }]);
+    expect(ctx.replies).toEqual([
+      { content: coreMessages("pl").unknownComponent, ephemeral: true },
+    ]);
   });
 });
 
@@ -485,7 +485,7 @@ describe("paginator", () => {
       userId: STRANGER,
     });
     expect(ctx.updates).toEqual([]);
-    expect(ctx.replies).toEqual([{ content: NOT_YOUR_MENU, ephemeral: true }]);
+    expect(ctx.replies).toEqual([{ content: coreMessages("pl").notYourMenu, ephemeral: true }]);
   });
 
   test("a malformed button state is acknowledged instead of ignored", async () => {
@@ -573,7 +573,7 @@ describe("component state store", () => {
     expect(await store.load("k")).toBe("x");
     clock = 15 * 60_000;
     await expect(store.load("k")).rejects.toThrow(ExpiredStateError);
-    await expect(store.load("k")).rejects.toThrow(MENU_EXPIRED);
+    await expect(store.load("k")).rejects.toThrow(coreMessages("pl").menuExpired);
   });
 
   test("generated keys are 22 characters of base64url and differ", async () => {

@@ -192,6 +192,11 @@ export function createLavalinkMusicPlayer({
   const resumeAt = new Map<string, number>();
   /** The track a skip was sent for, until the next track starts: a second skip of it is a no-op. */
   const skipping = new Map<string, string>();
+  /**
+   * Tracks a queue-loop jump passed over, until the jumped-over track ends. The client puts the ended track at
+   * the end of the queue then, so these join behind it and the loop continues in its old order.
+   */
+  const passedOver = new Map<string, (Track | UnresolvedTrack)[]>();
   /** Guilds whose bot leaves and rejoins voice on purpose (recovery); their disconnect is not a kick. */
   const rejoining = new Map<string, () => void>();
   /** Recoveries in progress; a join or enqueue waits for its guild's, as the player has no channel meanwhile. */
@@ -247,6 +252,7 @@ export function createLavalinkMusicPlayer({
     resumeAt.delete(guildId);
     filters.delete(guildId);
     skipping.delete(guildId);
+    passedOver.delete(guildId);
     logger.info("Music player destroyed", { guildId, reason });
     emit("playerDestroyed", (listener) => listener.playerDestroyed(guildId));
   }
@@ -292,6 +298,16 @@ export function createLavalinkMusicPlayer({
   // Emitted when another track follows, and when play() replaces the track ("replaced"); the end of the
   // last one is queueEnd.
   manager.on("trackEnd", (player, track) => {
+    const passed = passedOver.get(player.guildId);
+    if (passed) {
+      passedOver.delete(player.guildId);
+      player.queue.add(passed).catch((error: unknown) =>
+        logger.warn("Re-queueing the tracks a jump passed over failed", {
+          guildId: player.guildId,
+          error,
+        }),
+      );
+    }
     if (track?.encoded === localPlays.get(player.guildId)?.encoded)
       finishLocal(player.guildId, true);
   });
@@ -602,11 +618,13 @@ export function createLavalinkMusicPlayer({
     async skip(guildId, expectedTrackId) {
       const player = playerOf(guildId);
       const current = player.queue.current;
-      if (current?.encoded !== expectedTrackId || skipping.get(guildId) === expectedTrackId) return;
+      if (current?.encoded !== expectedTrackId || skipping.get(guildId) === expectedTrackId)
+        return false;
       skipping.set(guildId, expectedTrackId);
       try {
         // With nothing queued this stops the track, which ends the queue (queueEnd).
         await player.skip(0, false);
+        return true;
       } catch (error) {
         skipping.delete(guildId);
         throw error;
@@ -708,8 +726,9 @@ export function createLavalinkMusicPlayer({
       skipping.set(guildId, current.encoded);
       try {
         if (loopOf(player) === "queue" && index > 0) {
-          // The loop keeps every track: the ones passed over wait at the end instead of being dropped.
-          await player.queue.add(tracksOf(await player.queue.splice(0, index)));
+          // The loop keeps every track: the ones passed over rejoin behind the current one when it ends
+          // (trackEnd), as the client queues that one at the end itself.
+          passedOver.set(guildId, tracksOf(await player.queue.splice(0, index)));
           await player.skip(0, false);
         } else {
           // Skipping to place n drops the n - 1 tracks before it and ends the current one.
@@ -717,6 +736,9 @@ export function createLavalinkMusicPlayer({
         }
       } catch (error) {
         skipping.delete(guildId);
+        const passed = passedOver.get(guildId);
+        passedOver.delete(guildId);
+        if (passed) await player.queue.add(passed);
         throw error;
       }
       return true;

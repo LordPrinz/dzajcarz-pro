@@ -101,7 +101,7 @@ type Content = z.infer<typeof ContentSchema>;
 
 const lastSegment = (path: string) => path.split("/").filter(Boolean).at(-1);
 
-function mapName(content: Content, mapId: string): string {
+function mapName(content: Content, mapId: string): string | null {
   const wanted = lastSegment(mapId);
   const named = content.maps.find(
     (map) =>
@@ -109,14 +109,14 @@ function mapName(content: Content, mapId: string): string {
       ((map.assetPath !== undefined && lastSegment(map.assetPath) === wanted) ||
         map.assetName === wanted),
   );
-  return named?.name ?? wanted ?? "Nieznana mapa";
+  return named?.name ?? wanted ?? null;
 }
 
-function agentName(content: Content, characterId: string | undefined): string {
+function agentName(content: Content, characterId: string | undefined): string | null {
   const agent = content.characters.find(
     (character) => character.id.toLowerCase() === characterId?.toLowerCase(),
   );
-  return agent ? agent.name : "Nieznany agent";
+  return agent ? agent.name : null;
 }
 
 function toMatch(match: Match, puuid: string, content: Content, fallbackQueue: string) {

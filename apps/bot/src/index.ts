@@ -7,6 +7,7 @@ import {
 } from "@dzajcarz/core";
 import {
   createArchiveSettingsRepository,
+  createBirthdayRepository,
   createDb,
   createDzajcoRepository,
   createGuildDataRepository,
@@ -18,6 +19,7 @@ import {
   createScheduledMessageRepository,
   createScheduledSongRepository,
   createUploadStore,
+  createUserSettingsRepository,
   createWelcomeRepository,
 } from "@dzajcarz/db";
 import { migrate } from "@dzajcarz/db/migrator";
@@ -37,8 +39,9 @@ import {
   createChannelHistory,
   createGuildChannelList,
 } from "./discord/archive.ts";
+import { createBirthdayMembers, createBirthdaySender } from "./discord/birthday.ts";
 import { createDzajcoChannels, createDzajcoResponder } from "./discord/dzajco.ts";
-import { createGuildChannels } from "./discord/guild-channels.ts";
+import { createCategoryLookup, createGuildChannels } from "./discord/guild-channels.ts";
 import { createInstallLinks } from "./discord/install.ts";
 import { createMessageChannels, createScheduledMessageSender } from "./discord/messages.ts";
 import { createModerationGuild } from "./discord/moderation.ts";
@@ -68,6 +71,7 @@ import { createModuleEnabled } from "./event-scope.ts";
 import { createGuildCleanup } from "./guild-cleanup.ts";
 import { gatewayReady, startHealthServer } from "./health.ts";
 import { runHealthcheck } from "./healthcheck.ts";
+import { createLocales } from "./locales.ts";
 import { createModuleGate } from "./module-gate.ts";
 import { createModuleToggles } from "./module-toggles.ts";
 import { createModules } from "./modules.ts";
@@ -132,6 +136,12 @@ const timeZones = createTimeZones({
   defaultTimeZone: env.DEFAULT_TIME_ZONE,
   logger: logger.child({ component: "time-zone" }),
 });
+const locales = createLocales({
+  guildSettings,
+  userSettings: createUserSettingsRepository(sql),
+  cache: redisStore,
+  logger: logger.child({ component: "locale" }),
+});
 
 const archiveSettings = createArchiveSettingsRepository(sql);
 const messageArchive = createMessageArchiveRepository(sql);
@@ -146,6 +156,7 @@ const gate = createModuleGate({
   toggles: moduleToggleRepository,
   cache: redisStore,
   logger: logger.child({ component: "module-gate" }),
+  categoryOf: (channelId) => categoryOf(channelId),
 });
 
 const client = new Client({
@@ -165,6 +176,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message],
   allowedMentions: NO_MENTIONS,
 });
+const categoryOf = createCategoryLookup(client);
 
 // Without a configured node the module still loads, so its commands explain that music is unavailable.
 const musicPlayer =
@@ -231,6 +243,7 @@ const modules = createModules({
   scheduledSongCron: env.SCHEDULED_SONG_CRON,
   timeZones,
   defaultTimeZone: env.DEFAULT_TIME_ZONE,
+  locales,
   dzajcoSettings: createDzajcoRepository(sql),
   dzajcoResponder: createDzajcoResponder(client, logger.child({ component: "dzajco" }), DZAJCO_GIF),
   dzajcoStore: redisStore,
@@ -248,6 +261,9 @@ const modules = createModules({
   messageFailures: redisStore,
   clientReady: () => client.isReady(),
   messageChannels: createMessageChannels(client),
+  birthdays: createBirthdayRepository(sql),
+  birthdaySender: createBirthdaySender(client),
+  birthdayMembers: createBirthdayMembers(client),
   logger,
 });
 const registry = createRegistry(modules);
@@ -257,6 +273,7 @@ attachHandlers(client, {
   gate,
   botInGuild,
   cooldowns: redisStore,
+  locales,
   logger,
 });
 
@@ -275,7 +292,7 @@ client.on(
   Events.GuildDelete,
   createGuildCleanup(
     createGuildDataRepository(sql),
-    [prefixes.forget, timeZones.forget, gate.forget, archivePolicy.forgetGuild],
+    [prefixes.forget, timeZones.forget, locales.forget, gate.forget, archivePolicy.forgetGuild],
     logger.child({ component: "guild-cleanup" }),
   ),
 );
@@ -292,7 +309,7 @@ const sweepUploads = () =>
 sweepUploads();
 const uploadSweep = setInterval(sweepUploads, UPLOAD_SWEEP_MS);
 uploadSweep.unref();
-// A failed subscribe is retried when Redis reconnects, so the bridge never blocks login.
+// The bridge only answers once the gateway is ready; a failed subscribe is retried when Redis reconnects.
 const webBridge = await startWebBridge({
   pubsub,
   listGuilds: createGuildList(client),
@@ -333,7 +350,7 @@ attachMessageEvents(client, {
 });
 
 client.once(Events.ClientReady, (ready) => {
-  webBridge.onReady();
+  void webBridge.onReady();
   logger.info("Logged in", {
     app: env.DISCORD_APP,
     user: ready.user.tag,

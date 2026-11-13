@@ -1,4 +1,6 @@
 import type { AnyCommand, OptionDef, OptionsDef } from "./command.ts";
+import { allLocalizations, DEFAULT_LOCALE, type Locale } from "./i18n.ts";
+import { coreMessages } from "./messages.ts";
 
 export const MAX_PREFIX_LENGTH = 5;
 
@@ -39,7 +41,7 @@ export function splitInvocation(body: string): PrefixInvocation | null {
 
 export type ParseResult =
   | { ok: true; args: Record<string, unknown>; subcommand?: string }
-  /** `error` is shown to the caller (Polish). */
+  /** `error` is shown to the caller, in the language the parser was given. */
   | { ok: false; error: string };
 
 interface Token {
@@ -59,8 +61,8 @@ export function tokenize(input: string): Token[] {
 }
 
 const DECIMAL = /^-?\d+(?:[.,]\d+)?$/;
-const TRUE = new Set(["true", "tak", "yes", "y", "on", "1"]);
-const FALSE = new Set(["false", "nie", "no", "n", "off", "0"]);
+const TRUE = new Set(["true", "tak", "yes", "y", "ja", "on", "1"]);
+const FALSE = new Set(["false", "nie", "no", "n", "nein", "off", "0"]);
 const SNOWFLAKE = String.raw`(\d{17,20})`;
 const MENTION: Record<"user" | "channel" | "role", RegExp> = {
   user: new RegExp(`^(?:<@!?${SNOWFLAKE}>|${SNOWFLAKE})$`),
@@ -70,21 +72,27 @@ const MENTION: Record<"user" | "channel" | "role", RegExp> = {
 
 /**
  * Maps positional prefix arguments onto the command's options, in declaration order. For a command with
- * subcommands the first word picks the subcommand and the rest is parsed against its options.
+ * subcommands the first word picks the subcommand and the rest is parsed against its options. A choice is
+ * accepted by its value, its name in any language or an alias; errors are written in `locale`.
  */
-export function parsePrefixArgs(command: AnyCommand, input: string): ParseResult {
+export function parsePrefixArgs(
+  command: AnyCommand,
+  input: string,
+  locale: Locale = DEFAULT_LOCALE,
+): ParseResult {
+  const t = coreMessages(locale);
   const { subcommands } = command;
-  if (!subcommands) return parseOptions(command, command.options ?? {}, input);
+  if (!subcommands) return parseOptions(command, command.options ?? {}, input, locale);
 
   const picked = splitInvocation(input);
-  if (!picked) return { ok: false, error: `Podaj podkomendę. ${usage(command)}` };
+  if (!picked) return { ok: false, error: t.missingSubcommand(usage(command, undefined, locale)) };
   const subcommand = Object.hasOwn(subcommands, picked.name) ? subcommands[picked.name] : undefined;
   if (!subcommand) {
     // Backticks would close the code span around the echoed word and let it inject markdown.
     const word = picked.name.replaceAll("`", "").slice(0, 32);
-    return { ok: false, error: `Nieznana podkomenda \`${word}\`. ${usage(command)}` };
+    return { ok: false, error: t.unknownSubcommandNamed(word, usage(command, undefined, locale)) };
   }
-  const parsed = parseOptions(command, subcommand.options ?? {}, picked.rest, picked.name);
+  const parsed = parseOptions(command, subcommand.options ?? {}, picked.rest, locale, picked.name);
   return parsed.ok ? { ...parsed, subcommand: picked.name } : parsed;
 }
 
@@ -92,8 +100,10 @@ function parseOptions(
   command: AnyCommand,
   optionDefs: OptionsDef,
   input: string,
+  locale: Locale,
   subcommand?: string,
 ): ParseResult {
+  const t = coreMessages(locale);
   const tokens = tokenize(input);
   const options = Object.entries(optionDefs);
   const args: Record<string, unknown> = {};
@@ -106,7 +116,7 @@ function parseOptions(
       if (option.required) {
         return {
           ok: false,
-          error: `Brakuje argumentu \`${name}\`. ${usage(command, subcommand)}`,
+          error: t.missingArgument(name, usage(command, subcommand, locale)),
         };
       }
       continue;
@@ -117,50 +127,48 @@ function parseOptions(
       index = tokens.length;
       break;
     }
-    const value = convert(option, token.value);
-    if (!value.ok) return { ok: false, error: `Argument \`${name}\`: ${value.error}` };
+    const value = convert(option, token.value, locale);
+    if (!value.ok) return { ok: false, error: t.badArgument(name, value.error) };
     args[name] = value.value;
     index++;
   }
 
   if (index < tokens.length) {
-    return { ok: false, error: `Za dużo argumentów. ${usage(command, subcommand)}` };
+    return { ok: false, error: t.tooManyArguments(usage(command, subcommand, locale)) };
   }
   return { ok: true, args };
 }
 
 type Converted = { ok: true; value: unknown } | { ok: false; error: string };
 
-function convert(option: OptionDef, raw: string): Converted {
+function convert(option: OptionDef, raw: string, locale: Locale): Converted {
+  const t = coreMessages(locale);
   switch (option.type) {
     case "string":
-      return withChoices(option, raw);
+      return withChoices(option, raw, locale);
     case "integer":
     case "number": {
       // A numeric choice can be picked by its name too ("!volume głośno").
-      const named = option.choices?.find((c) => c.name.toLowerCase() === raw.toLowerCase());
+      const named = option.choices?.find((c) => choiceWords(c).includes(raw.toLowerCase()));
       if (named) return { ok: true, value: named.value };
       // Number() would also take "", "0x1f" and "1e3".
       const value = DECIMAL.test(raw) ? Number(raw.replace(",", ".")) : Number.NaN;
       if (!Number.isFinite(value) || (option.type === "integer" && !Number.isSafeInteger(value))) {
-        return {
-          ok: false,
-          error: option.type === "integer" ? "to musi być liczba całkowita" : "to musi być liczba",
-        };
+        return { ok: false, error: option.type === "integer" ? t.notInteger : t.notNumber };
       }
       if (option.minValue !== undefined && value < option.minValue) {
-        return { ok: false, error: `najmniej ${option.minValue}` };
+        return { ok: false, error: t.atLeast(option.minValue) };
       }
       if (option.maxValue !== undefined && value > option.maxValue) {
-        return { ok: false, error: `najwyżej ${option.maxValue}` };
+        return { ok: false, error: t.atMost(option.maxValue) };
       }
-      return withChoices(option, value);
+      return withChoices(option, value, locale);
     }
     case "boolean": {
       const lower = raw.toLowerCase();
       if (TRUE.has(lower)) return { ok: true, value: true };
       if (FALSE.has(lower)) return { ok: true, value: false };
-      return { ok: false, error: "wpisz tak albo nie" };
+      return { ok: false, error: t.yesOrNo };
     }
     case "user":
     case "channel":
@@ -168,22 +176,28 @@ function convert(option: OptionDef, raw: string): Converted {
       const match = MENTION[option.type].exec(raw);
       const id = match?.[1] ?? match?.[2];
       if (!id) {
-        const what = { user: "użytkownika", channel: "kanał", role: "rolę" }[option.type];
-        return { ok: false, error: `oznacz ${what} albo podaj jego ID` };
+        const error = { user: t.mentionUser, channel: t.mentionChannel, role: t.mentionRole };
+        return { ok: false, error: error[option.type] };
       }
       return { ok: true, value: id };
     }
   }
 }
 
-function withChoices(option: OptionDef, value: string | number): Converted {
+/** Every lowercased word that picks the choice: its value, its name in each language, its aliases. */
+export function choiceWords(choice: NonNullable<OptionDef["choices"]>[number]): string[] {
+  return [String(choice.value), ...allLocalizations(choice.name), ...(choice.aliases ?? [])].map(
+    (word) => word.toLowerCase(),
+  );
+}
+
+function withChoices(option: OptionDef, value: string | number, locale: Locale): Converted {
   if (!option.choices?.length) return { ok: true, value };
   const lower = String(value).toLowerCase();
-  const choice = option.choices.find(
-    (c) => String(c.value).toLowerCase() === lower || c.name.toLowerCase() === lower,
-  );
+  const choice = option.choices.find((c) => choiceWords(c).includes(lower));
   if (!choice) {
-    return { ok: false, error: `dozwolone: ${option.choices.map((c) => c.value).join(", ")}` };
+    const allowed = option.choices.map((c) => c.value).join(", ");
+    return { ok: false, error: coreMessages(locale).allowed(allowed) };
   }
   return { ok: true, value: choice.value };
 }
@@ -210,7 +224,11 @@ export function usageLine(
   return [command.name, subcommand, ...parts].filter(Boolean).join(" ");
 }
 
-/** `Użycie: \`play <query...> [volume]\`` */
-export function usage(command: AnyCommand, subcommand?: string): string {
-  return `Użycie: \`${usageLine(command, subcommand)}\``;
+/** `Użycie: \`play <query...> [volume]\``, in `locale`. */
+export function usage(
+  command: AnyCommand,
+  subcommand?: string,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return coreMessages(locale).usage(usageLine(command, subcommand));
 }

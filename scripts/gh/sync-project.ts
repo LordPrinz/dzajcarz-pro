@@ -1,5 +1,6 @@
 // Runs in GitHub Actions (see .github/workflows/project-sync.yml).
 import { ticketFromBranch } from "../git/conventions.ts";
+import { hasClosingKeyword, withClosingKeyword } from "./closing-keyword.ts";
 import {
   createGraphql,
   ensureIssueItem,
@@ -41,7 +42,11 @@ if (env.GITHUB_EVENT_NAME === "create") {
   branch = pr.head.ref;
   status = pr.draft || action === "converted_to_draft" ? "In Progress" : "QA";
   // Fork PRs get a read-only token; their issue link is added by hand.
-  if (!pr.head.repo?.fork) await ensureClosingKeyword(pr.number, pr.body ?? "", branch);
+  if (!pr.head.repo?.fork) {
+    await ensureClosingKeyword(pr.number, pr.body ?? "", branch).catch((error: unknown) =>
+      console.warn("Could not link the PR to its issue:", error),
+    );
+  }
 }
 
 const ticket = ticketFromBranch(branch);
@@ -75,15 +80,8 @@ console.info(`#${issueNumber} → ${status}`);
 /** Adds "Closes #n" so merging the PR closes the issue (and the board moves it to Done). */
 async function ensureClosingKeyword(prNumber: number, body: string, headRef: string) {
   const id = ticketFromBranch(headRef)?.slice("DZAJ-".length);
-  if (
-    !id ||
-    new RegExp(String.raw`\b(close[sd]?|fix(e[sd])?|resolve[sd]?) #${id}\b`, "i").test(body)
-  ) {
-    return;
-  }
-  const newBody = /^Closes #\s*$/m.test(body)
-    ? body.replace(/^Closes #\s*$/m, `Closes #${id}`)
-    : `${body}\n\nCloses #${id}`.trim();
+  if (!id || hasClosingKeyword(body, id)) return;
+  const newBody = withClosingKeyword(body, id);
   const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`, {
     method: "PATCH",
     headers: {
@@ -93,6 +91,10 @@ async function ensureClosingKeyword(prNumber: number, body: string, headRef: str
     },
     body: JSON.stringify({ body: newBody }),
   });
-  if (!res.ok) throw new Error(`Failed to update PR body: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    // The board update does not depend on the link, so it carries on.
+    console.warn(`Failed to update PR body: ${res.status} ${await res.text()}`);
+    return;
+  }
   console.info(`PR #${prNumber}: linked to #${id}`);
 }

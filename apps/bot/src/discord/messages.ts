@@ -1,7 +1,7 @@
 import type { MessageChannels, ScheduledMessageSender } from "@dzajcarz/module-messages";
 import { type Client, PermissionFlagsBits, RESTJSONErrorCodes } from "discord.js";
 import { toComponentRows } from "./components.ts";
-import { hasCode } from "./errors.ts";
+import { fetchOrNull, hasCode } from "./errors.ts";
 import { NO_MENTIONS } from "./reply.ts";
 import { createTextChannels } from "./welcome.ts";
 
@@ -12,8 +12,8 @@ export function createMessageChannels(client: Client): MessageChannels {
     async botCanPostIn(guildId, channelId) {
       const guild = client.guilds.cache.get(guildId);
       if (!guild) return false;
-      const channel = await guild.channels.fetch(channelId).catch(() => null);
-      const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+      const channel = await fetchOrNull(guild.channels.fetch(channelId));
+      const me = guild.members.me ?? (await fetchOrNull(guild.members.fetchMe()));
       if (!channel || !me) return false;
       return (
         channel

@@ -4,12 +4,14 @@ import {
   type CommandContexts,
   defineCommand,
   type Embed,
+  type Locale,
   type Logger,
   UserError,
   withTimeout,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
 import { escapeText, lolEmbed, valorantEmbed } from "./format.ts";
+import { t } from "./messages.ts";
 import {
   LOL_PLATFORMS,
   type LolPlatform,
@@ -63,7 +65,7 @@ const REGIONS = [
 const isLolPlatform = (value: string): value is LolPlatform =>
   (LOL_PLATFORMS as readonly string[]).includes(value);
 
-const pauseMessage = (seconds: number) => `Riot API prosi o przerwę. Spróbuj za ${seconds} s.`;
+const pauseMessage = (seconds: number) => (l: Locale) => t(l).pause(seconds);
 const secondsUntil = (deadline: number, now: number) =>
   Math.max(1, Math.ceil((deadline - now) / 1000));
 
@@ -82,17 +84,17 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     }
   }
 
-  /** Runs one lookup behind the shared checks; every refusal and failure becomes a Polish UserError. */
+  /** Runs one lookup behind the shared checks; every refusal and failure becomes a UserError. */
   async function lookup(
     ctx: CommandContext,
     game: Game,
     input: string,
-    fetchEmbed: ((id: RiotId) => Promise<Embed>) | undefined,
+    fetchEmbed: ((id: RiotId, locale: Locale) => Promise<Embed>) | undefined,
     /** The region choice's label ("EUNE"), for the failures that name it. */
     region?: string,
   ): Promise<void> {
     if (!fetchEmbed) {
-      throw new UserError(`Statystyki ${GAME_NAMES[game]} są wyłączone: bot nie ma klucza API.`);
+      throw new UserError((l) => t(l).statsOff(GAME_NAMES[game]));
     }
     const id = parseRiotId(input);
 
@@ -108,7 +110,7 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
       tookCooldown = await store.setIfAbsent(cooldownKey, cooldownToken, USER_COOLDOWN_MS);
       return tookCooldown;
     });
-    if (!free) throw new UserError("Poczekaj chwilę przed kolejnym sprawdzeniem.");
+    if (!free) throw new UserError((l) => t(l).cooldown);
     const budget = await guarded("budget", null, () =>
       store.increment(GLOBAL_KEY, GLOBAL_WINDOW_MS),
     );
@@ -119,12 +121,12 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
           withTimeout(store.delIfEquals(cooldownKey, cooldownToken)),
         );
       }
-      throw new UserError("Za dużo zapytań do Riot w ostatniej minucie. Spróbuj za chwilę.");
+      throw new UserError((l) => t(l).tooManyLookups);
     }
 
     await ctx.defer();
     try {
-      await ctx.reply({ embeds: [await fetchEmbed(id)] });
+      await ctx.reply({ embeds: [await fetchEmbed(id, ctx.locale)] });
     } catch (error) {
       if (error instanceof RiotLookupError) throw await toUserError(error, game, id, region);
       throw error;
@@ -137,20 +139,15 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
     id: RiotId,
     region?: string,
   ): Promise<UserError> {
+    const player = `${escapeText(id.gameName)}#${escapeText(id.tagLine)}`;
     switch (error.kind) {
       case "not-found":
-        return new UserError(
-          `Nie znalazłem gracza **${escapeText(id.gameName)}#${escapeText(id.tagLine)}**.`,
-        );
+        return new UserError((l) => t(l).notFound(player));
       case "no-region-profile":
-        return new UserError(
-          `Gracz **${escapeText(id.gameName)}#${escapeText(id.tagLine)}** nie ma konta League of Legends na serwerze ${region ?? "tym"}. Spróbuj z innym regionem.`,
-        );
+        return new UserError((l) => t(l).noRegionProfile(player, region));
       case "forbidden":
-        return new UserError(
-          game === "valorant"
-            ? "Klucz Riot API nie ma dostępu do tych danych (klucz deweloperski nie czyta historii meczów Valorant)."
-            : "Klucz Riot API wygasł albo nie ma dostępu.",
+        return new UserError((l) =>
+          game === "valorant" ? t(l).forbiddenValorant : t(l).forbiddenLol,
         );
       case "rate-limited": {
         const asked = error.retryAfterMs;
@@ -170,18 +167,18 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
         return new UserError(pauseMessage(secondsUntil(now() + waitMs, now())));
       }
       case "unavailable":
-        return new UserError("Riot API nie odpowiada. Spróbuj za chwilę.");
+        return new UserError((l) => t(l).unavailable);
     }
   }
 
   const valorant = defineCommand({
     name: "valorant",
-    description: "Statystyki gracza Valorant: ranga i ostatnie mecze",
+    description: t.all("valorantDescription"),
     contexts: EVERYWHERE,
     options: {
       riot_id: {
         type: "string",
-        description: "Riot ID, np. Nazwa#TAG",
+        description: t.all("valorantIdOption"),
         required: true,
         rest: true,
       },
@@ -191,35 +188,34 @@ export function createRiotModule({ stats, store, now, logger }: RiotModuleDeps):
         ctx,
         "valorant",
         ctx.args.riot_id,
-        valorantStats && (async (id) => valorantEmbed(await valorantStats(id))),
+        valorantStats && (async (id, locale) => valorantEmbed(await valorantStats(id), locale)),
       ),
   });
 
   const lol = defineCommand({
     name: "lol",
-    description: "Statystyki gracza League of Legends: rangi i najlepsi bohaterowie",
+    description: t.all("lolDescription"),
     contexts: EVERYWHERE,
     options: {
       riot_id: {
         type: "string",
-        description:
-          'Riot ID, np. Nazwa#TAG (z odstępami w cudzysłowie: !lol "Nazwa ze spacją#TAG" euw)',
+        description: t.all("lolIdOption"),
         required: true,
       },
       region: {
         type: "string",
-        description: "Serwer gry (domyślnie eune)",
+        description: t.all("regionOption"),
         choices: REGIONS,
       },
     },
     run: async (ctx) => {
       const platform = ctx.args.region ?? "eun1";
-      if (!isLolPlatform(platform)) throw new UserError("Nieznany serwer gry.");
+      if (!isLolPlatform(platform)) throw new UserError((l) => t(l).unknownRegion);
       await lookup(
         ctx,
         "lol",
         ctx.args.riot_id,
-        lolStats && (async (id) => lolEmbed(await lolStats(id, platform))),
+        lolStats && (async (id, locale) => lolEmbed(await lolStats(id, platform), locale)),
         REGIONS.find((region) => region.value === platform)?.name.toUpperCase(),
       );
     },

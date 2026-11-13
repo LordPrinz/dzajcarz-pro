@@ -10,6 +10,8 @@ import {
   defineEvent,
   defineSelect,
   escapeMarkdown,
+  type Locale,
+  type LocaleResolver,
   type LogFields,
   type Logger,
   PUBLIC_OWNER,
@@ -20,26 +22,27 @@ import {
   UserError,
 } from "@dzajcarz/core";
 import { formatDuration, httpUrl, parseQuery, parseTime } from "./format.ts";
+import { t } from "./messages.ts";
 import {
-  FILTER_LABELS,
-  LOOP_LABELS,
+  filterLabel,
+  loopLabel,
   PANEL_COLOR,
   panelMessage,
   queueLines,
   settingsLine,
   trackEmbed,
-  tracksWord,
 } from "./panel.ts";
-import type {
-  DirectMessages,
-  LoopMode,
-  MusicFilter,
-  MusicPlayer,
-  MusicQuery,
-  MusicTrack,
-  PanelMessages,
-  PlayerState,
-  VoiceChannels,
+import {
+  type DirectMessages,
+  type LoopMode,
+  MAX_VOLUME,
+  type MusicFilter,
+  type MusicPlayer,
+  type MusicQuery,
+  type MusicTrack,
+  type PanelMessages,
+  type PlayerState,
+  type VoiceChannels,
 } from "./ports.ts";
 
 /** The query rules of `/play`, for other entry points (the web panel) that must accept the same links. */
@@ -52,6 +55,8 @@ export interface MusicModuleDeps {
   panels: PanelMessages;
   /** `/save` sends the track this way. */
   directMessages: DirectMessages;
+  /** The language of the panel and the notes posted in a server's channel, and of the `/save` message. */
+  locales: LocaleResolver;
   /** Runs the idle timeout. */
   scheduler: Scheduler;
   /** Holds `/search` results until the member picks one (ADR 6 component state). */
@@ -74,48 +79,7 @@ export const MAX_QUEUE_LENGTH = 500;
 /** Discord allows 25 options; ten results are enough to choose from. */
 const MAX_SEARCH_RESULTS = 10;
 const QUEUE_PAGE_SIZE = 10;
-export const MAX_VOLUME = 150;
 const LOOP_ORDER: readonly LoopMode[] = ["off", "track", "queue"];
-
-/** What the prefix forms of `/loop` and `/filter` accept, in English and Polish. */
-const LOOP_WORDS: Readonly<Record<string, LoopMode>> = {
-  off: "off",
-  wyłącz: "off",
-  wyłączona: "off",
-  track: "track",
-  utwór: "track",
-  queue: "queue",
-  kolejka: "queue",
-};
-const FILTER_WORDS: Readonly<Record<string, MusicFilter>> = {
-  bassboost: "bassboost",
-  bas: "bassboost",
-  nightcore: "nightcore",
-  vaporwave: "vaporwave",
-  "8d": "8d",
-  off: "off",
-  wyłącz: "off",
-};
-/** `Object.hasOwn` keeps words like `constructor` from reaching the prototype. */
-const wordIn = <T>(words: Readonly<Record<string, T>>, input: string): T | undefined => {
-  const word = input.trim().toLowerCase();
-  return Object.hasOwn(words, word) ? words[word] : undefined;
-};
-
-export const UNAVAILABLE = "Odtwarzacz muzyki jest teraz niedostępny.";
-export const NOT_IN_VOICE = "Najpierw wejdź na kanał głosowy.";
-export const NOTHING_PLAYING = "Nic teraz nie gra.";
-export const SONG_LOCKED =
-  "Lato z Radiem gra do końca: nie da się go wstrzymać, pominąć, zatrzymać, przewinąć ani zapętlić.";
-export const UNSUPPORTED_LINK = "Obsługuję tylko linki z YouTube, Bandcamp, Twitch i Vimeo.";
-export const trackFailedText = (title: string) =>
-  `Nie udało się odtworzyć **${escapeMarkdown(title)}**, gram dalej.`;
-export const moreTracksFailedText = (count: number) =>
-  `Kolejne utwory też nie działają, pominięte: ${count}.`;
-export const EMPTY_QUEUE = "Kolejka jest pusta.";
-export const queueChanged = "Kolejka zmieniła się w międzyczasie, spróbuj jeszcze raz.";
-export const otherChannel = (channelId: string) =>
-  `Musisz być na kanale <#${channelId}>, na którym gram.`;
 
 interface PendingSearch {
   tracks: MusicTrack[];
@@ -126,6 +90,7 @@ export function createMusicModule({
   voice,
   panels,
   directMessages,
+  locales,
   scheduler,
   stateStorage,
   logger,
@@ -134,8 +99,7 @@ export function createMusicModule({
   const searches = createComponentStateStore(stateStorage);
 
   // Commands are guild-only by default and the components declare guildOnly, so this never fires.
-  const guildOf = (ctx: Pick<CommandContext, "guildId">) =>
-    requireGuild(ctx.guildId, "Muzyka działa tylko na serwerze.");
+  const guildOf = (ctx: Pick<CommandContext, "guildId">) => requireGuild(ctx.guildId);
 
   /** What the logs may say about a query: what it was, never what the member typed. */
   function describeQuery(query: MusicQuery): LogFields {
@@ -145,10 +109,10 @@ export function createMusicModule({
   }
 
   /** The member's input as a query; a link to another site is refused here. */
-  function queryOf(input: string, emptyText: string): MusicQuery {
+  function queryOf(input: string, emptyText: (locale: Locale) => string): MusicQuery {
     const query = parseQuery(input);
     if (!query) throw new UserError(emptyText);
-    if (query.kind === "unsupported") throw new UserError(UNSUPPORTED_LINK);
+    if (query.kind === "unsupported") throw new UserError((l) => t(l).unsupportedLink);
     return query;
   }
 
@@ -158,12 +122,12 @@ export function createMusicModule({
    * tears down (stop) through while the node is away.
    */
   async function requireListener(guildId: string, userId: string, needsNode = true) {
-    if (needsNode && !player.available()) throw new UserError(UNAVAILABLE);
+    if (needsNode && !player.available()) throw new UserError((l) => t(l).unavailable);
     const channelId = await voice.channelOf(guildId, userId);
-    if (channelId === null) throw new UserError(NOT_IN_VOICE);
+    if (channelId === null) throw new UserError((l) => t(l).notInVoice);
     const state = player.state(guildId);
     if (state && state.voiceChannelId !== channelId) {
-      throw new UserError(otherChannel(state.voiceChannelId));
+      throw new UserError((l) => t(l).otherChannel(state.voiceChannelId));
     }
     return { channelId, state };
   }
@@ -174,16 +138,16 @@ export function createMusicModule({
     userId: string,
     needsNode = true,
   ): Promise<PlayerState> {
-    if (needsNode && !player.available()) throw new UserError(UNAVAILABLE);
-    if (!player.state(guildId)) throw new UserError(NOTHING_PLAYING);
+    if (needsNode && !player.available()) throw new UserError((l) => t(l).unavailable);
+    if (!player.state(guildId)) throw new UserError((l) => t(l).nothingPlaying);
     const { state } = await requireListener(guildId, userId, needsNode);
-    if (!state) throw new UserError(NOTHING_PLAYING);
+    if (!state) throw new UserError((l) => t(l).nothingPlaying);
     return state;
   }
 
   /** The scheduled song plays to the end: members cannot pause, skip, stop, seek or loop it. */
   function refuseSongControl(state: PlayerState) {
-    if (state.current?.byBot) throw new UserError(SONG_LOCKED);
+    if (state.current?.byBot) throw new UserError((l) => t(l).songLocked);
   }
 
   /** Additions run one at a time per guild: two quick `/play`s must not both join or both "start". */
@@ -215,7 +179,7 @@ export function createMusicModule({
       const { channelId, state } = await requireListener(guildId, userId);
       const queued = state ? state.upcoming.length + (state.current ? 1 : 0) : 0;
       const room = MAX_QUEUE_LENGTH - queued;
-      if (room <= 0) throw new UserError(`Kolejka jest pełna (${MAX_QUEUE_LENGTH} utworów).`);
+      if (room <= 0) throw new UserError((l) => t(l).queueFull(MAX_QUEUE_LENGTH));
       const accepted = tracks.slice(0, room);
       // Joining a song the bot plays on its own makes this channel the panel's for the tracks to come.
       if (!state || state.current?.byBot) await player.join(guildId, channelId, textChannelId);
@@ -234,15 +198,22 @@ export function createMusicModule({
     return oneAtATime(guildId, async () => {
       const state = await requireControl(guildId, userId);
       if (state.upcoming.length < 2) {
-        throw new UserError("W kolejce jest za mało utworów, żeby je pomieszać.");
+        throw new UserError((l) => t(l).tooFewToShuffle);
       }
       await player.shuffle(guildId);
     });
   }
 
-  function addedText(track: MusicTrack, startsNow: boolean, position: number): string {
-    const title = `**${escapeMarkdown(track.title)}** (${track.isStream ? "na żywo" : formatDuration(track.durationMs)})`;
-    return startsNow ? `Gram: ${title}.` : `Dodano do kolejki na miejsce ${position}: ${title}.`;
+  function addedText(
+    track: MusicTrack,
+    startsNow: boolean,
+    position: number,
+    locale: Locale,
+  ): string {
+    const text = t(locale);
+    const length = track.isStream ? text.liveShort : formatDuration(track.durationMs);
+    const title = `**${escapeMarkdown(track.title)}** (${length})`;
+    return startsNow ? text.playing(title) : text.queuedAt(position, title);
   }
 
   const pauseButton = defineButton({
@@ -272,9 +243,10 @@ export function createMusicModule({
       await ctx.defer();
       const state = await requireControl(guildId, ctx.user.id);
       refuseSongControl(state);
-      if (!state.current) throw new UserError(NOTHING_PLAYING);
+      if (!state.current) throw new UserError((l) => t(l).nothingPlaying);
       // The next trackStart (or queueEnd) redraws the panel.
-      await player.skip(guildId, state.current.id);
+      if (!(await player.skip(guildId, state.current.id)))
+        throw new UserError((l) => t(l).queueChanged);
     },
   });
 
@@ -332,50 +304,58 @@ export function createMusicModule({
     },
   });
 
-  const buttons = {
-    loop: (mode: LoopMode): ButtonSpec => ({
-      type: "button",
-      customId: loopButton.customId(PUBLIC_OWNER),
-      label: `Pętla: ${LOOP_LABELS[mode]}`,
-      emoji: mode === "track" ? "🔂" : "🔁",
-      style: mode === "off" ? "secondary" : "success",
-    }),
-    shuffle: {
-      type: "button",
-      customId: shuffleButton.customId(PUBLIC_OWNER),
-      label: "Losowo",
-      emoji: "🔀",
-      style: "secondary",
-    },
-    pause: (paused: boolean): ButtonSpec => ({
-      type: "button",
-      customId: pauseButton.customId(PUBLIC_OWNER),
-      label: paused ? "Wznów" : "Pauza",
-      emoji: paused ? "▶️" : "⏸️",
-      style: "primary",
-    }),
-    skip: {
-      type: "button",
-      customId: skipButton.customId(PUBLIC_OWNER),
-      label: "Dalej",
-      emoji: "⏭️",
-      style: "secondary",
-    },
-    stop: {
-      type: "button",
-      customId: stopButton.customId(PUBLIC_OWNER),
-      label: "Stop",
-      emoji: "⏹️",
-      style: "danger",
-    },
-    queue: {
-      type: "button",
-      customId: queueButton.customId(PUBLIC_OWNER),
-      label: "Kolejka",
-      emoji: "📜",
-      style: "secondary",
-    },
-  } satisfies Parameters<typeof panelMessage>[1];
+  /** The panel's buttons with their labels in `locale`. */
+  const buttonsFor = (locale: Locale) => {
+    const text = t(locale);
+    return {
+      loop: (mode: LoopMode): ButtonSpec => ({
+        type: "button",
+        customId: loopButton.customId(PUBLIC_OWNER),
+        label: text.buttonLoop(loopLabel(mode, locale)),
+        emoji: mode === "track" ? "🔂" : "🔁",
+        style: mode === "off" ? "secondary" : "success",
+      }),
+      shuffle: {
+        type: "button",
+        customId: shuffleButton.customId(PUBLIC_OWNER),
+        label: text.buttonShuffle,
+        emoji: "🔀",
+        style: "secondary",
+      },
+      pause: (paused: boolean): ButtonSpec => ({
+        type: "button",
+        customId: pauseButton.customId(PUBLIC_OWNER),
+        label: paused ? text.buttonResume : text.buttonPause,
+        emoji: paused ? "▶️" : "⏸️",
+        style: "primary",
+      }),
+      skip: {
+        type: "button",
+        customId: skipButton.customId(PUBLIC_OWNER),
+        label: text.buttonSkip,
+        emoji: "⏭️",
+        style: "secondary",
+      },
+      stop: {
+        type: "button",
+        customId: stopButton.customId(PUBLIC_OWNER),
+        label: text.buttonStop,
+        emoji: "⏹️",
+        style: "danger",
+      },
+      queue: {
+        type: "button",
+        customId: queueButton.customId(PUBLIC_OWNER),
+        label: text.buttonQueue,
+        emoji: "📜",
+        style: "secondary",
+      },
+    } satisfies Parameters<typeof panelMessage>[1];
+  };
+
+  /** The panel in `locale`; null when nothing is playing or the bot plays its own track. */
+  const panelFor = (state: PlayerState, locale: Locale) =>
+    panelMessage(state, buttonsFor(locale), locale);
 
   /** The posted panel of each guild. */
   const posted = new Map<string, { channelId: string; messageId: string }>();
@@ -395,7 +375,8 @@ export function createMusicModule({
 
   async function showPanel(guildId: string): Promise<void> {
     const state = player.state(guildId);
-    const message = state && panelMessage(state, buttons);
+    // The panel lives in the server's channel, so it speaks the server's language.
+    const message = state && panelFor(state, await locales.guild(guildId));
     // The scheduled song has no panel, and one left from before it must not keep live buttons.
     if (state?.current?.byBot) return removePanel(guildId);
     if (!state || !message) return;
@@ -468,7 +449,7 @@ export function createMusicModule({
       await change();
       const state = player.state(guildId);
       click.drawn = true;
-      const message = state && panelMessage(state, buttons);
+      const message = state && panelFor(state, ctx.locale);
       if (message) await ctx.update(message);
       updated = true;
     } finally {
@@ -569,23 +550,30 @@ export function createMusicModule({
       }
       const channelId = player.state(guildId)?.textChannelId;
       if (!channelId) return;
-      postFailedNote(guildId, channelId, trackFailedText(track.title));
+      postFailedNote(guildId, channelId, (text) => text.trackFailed(escapeMarkdown(track.title)));
       // A playlist full of removed videos fails track after track; one note per window keeps the chat usable.
       const cancel = scheduler.after(FAILED_NOTE_WINDOW_MS, () => {
         const ended = failedBursts.get(guildId);
         failedBursts.delete(guildId);
         if (ended && ended.skipped > 0) {
-          postFailedNote(guildId, channelId, moreTracksFailedText(ended.skipped));
+          postFailedNote(guildId, channelId, (text) => text.moreTracksFailed(ended.skipped));
         }
       });
       failedBursts.set(guildId, { skipped: 0, cancel });
     },
   });
 
-  function postFailedNote(guildId: string, channelId: string, content: string): void {
-    panels.post(channelId, { content }).catch((error: unknown) => {
-      logger.warn("Posting a failed track note failed", { guildId, error });
-    });
+  function postFailedNote(
+    guildId: string,
+    channelId: string,
+    content: (text: ReturnType<typeof t>) => string,
+  ): void {
+    locales
+      .guild(guildId)
+      .then((locale) => panels.post(channelId, { content: content(t(locale)) }))
+      .catch((error: unknown) => {
+        logger.warn("Posting a failed track note failed", { guildId, error });
+      });
   }
 
   const voiceChange = defineEvent({
@@ -615,25 +603,30 @@ export function createMusicModule({
     guildOnly: true,
     render({ page, viewer }) {
       const state = viewer.guildId === null ? null : player.state(viewer.guildId);
-      if (!state?.current) return { content: NOTHING_PLAYING, pageCount: 1 };
+      const text = t(viewer.locale);
+      if (!state?.current) return { content: text.nothingPlaying, pageCount: 1 };
       const pageCount = Math.max(1, Math.ceil(state.upcoming.length / QUEUE_PAGE_SIZE));
       const start = page * QUEUE_PAGE_SIZE;
-      const lines = queueLines(start + 1, state.upcoming.slice(start, start + QUEUE_PAGE_SIZE));
+      const lines = queueLines(
+        start + 1,
+        state.upcoming.slice(start, start + QUEUE_PAGE_SIZE),
+        viewer.locale,
+      );
       const total = state.upcoming.reduce((sum, track) => sum + track.durationMs, 0);
       return {
         embeds: [
           {
-            title: "Kolejka",
+            title: text.queueTitle,
             color: PANEL_COLOR,
             description: [
-              `**Teraz:** ${escapeMarkdown(truncate(state.current.title, 80))}`,
+              `**${text.queueNow}:** ${escapeMarkdown(truncate(state.current.title, 80))}`,
               "",
-              lines.length > 0 ? lines.join("\n") : "Nic więcej nie czeka w kolejce.",
+              lines.length > 0 ? lines.join("\n") : text.queueRestEmpty,
             ].join("\n"),
             footer:
               state.upcoming.length === 0
                 ? undefined
-                : `${state.upcoming.length} ${tracksWord(state.upcoming.length)} · ${formatDuration(total)}`,
+                : `${text.trackCount(state.upcoming.length)} · ${formatDuration(total)}`,
           },
         ],
         pageCount,
@@ -644,7 +637,7 @@ export function createMusicModule({
   const queryOption = {
     query: {
       type: "string",
-      description: "Link (YouTube…) albo czego szukać",
+      description: t.all("queryOption"),
       required: true,
       rest: true,
     },
@@ -652,14 +645,14 @@ export function createMusicModule({
 
   const play = defineCommand({
     name: "play",
-    description: "Odtwarza utwór albo playlistę z linku lub wyszukiwania",
+    description: t.all("playDescription"),
     aliases: ["p"],
     options: queryOption,
     // Each call is a YouTube lookup through Lavalink; spamming it risks a block for everyone.
     cooldownMs: SEARCH_COOLDOWN_MS,
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const query = queryOf(ctx.args.query, "Podaj link albo czego szukać.");
+      const query = queryOf(ctx.args.query, (l) => t(l).enterQueryPlay);
       await requireListener(guildId, ctx.user.id);
       await ctx.defer();
       const result = await player.search(query, ctx.user.id);
@@ -669,10 +662,10 @@ export function createMusicModule({
           query: describeQuery(query),
           message: result.message,
         });
-        throw new UserError("Nie udało się wczytać tego utworu.");
+        throw new UserError((l) => t(l).loadFailed);
       }
       if (result.kind === "empty" || result.tracks.length === 0) {
-        throw new UserError("Nic nie znaleziono.");
+        throw new UserError((l) => t(l).nothingFound);
       }
       // A search returns many matches; only the first one is meant.
       const wanted =
@@ -683,17 +676,18 @@ export function createMusicModule({
       const added = await addTracks(guildId, ctx.user.id, ctx.channelId, wanted);
       if (result.kind !== "playlist") {
         const [track] = added.accepted;
-        if (track) await ctx.reply(addedText(track, added.startsNow, added.position));
+        if (track) {
+          await ctx.reply(addedText(track, added.startsNow, added.position, ctx.locale));
+        }
         return;
       }
       const count = added.accepted.length;
       const skipped = result.tracks.length - count;
+      const text = t(ctx.locale);
       const note =
-        skipped === 0
-          ? ""
-          : ` Pominięto ${skipped} (playlista może dodać do ${MAX_PLAYLIST_TRACKS} utworów, kolejka mieści ${MAX_QUEUE_LENGTH}).`;
+        skipped === 0 ? "" : text.playlistSkipped(skipped, MAX_PLAYLIST_TRACKS, MAX_QUEUE_LENGTH);
       await ctx.reply(
-        `Dodano ${count} ${tracksWord(count)} z playlisty **${escapeMarkdown(result.name)}**.${note}`,
+        `${text.playlistAdded(text.trackCount(count), escapeMarkdown(result.name))}${note}`,
       );
     },
   });
@@ -706,12 +700,12 @@ export function createMusicModule({
       const guildId = guildOf(ctx);
       const { tracks } = await searches.load<PendingSearch>(ctx.state);
       const track = tracks[Number(ctx.values[0])];
-      if (!track) throw new UserError("Nie ma takiego wyniku.");
+      if (!track) throw new UserError((l) => t(l).noSuchResult);
       // Joining the voice channel can take longer than the 3 s Discord gives a click to be answered.
       await ctx.defer();
       const added = await addTracks(guildId, ctx.user.id, ctx.channelId, [track]);
       await ctx.update({
-        content: addedText(track, added.startsNow, added.position),
+        content: addedText(track, added.startsNow, added.position, ctx.locale),
         components: [],
       });
     },
@@ -719,12 +713,12 @@ export function createMusicModule({
 
   const search = defineCommand({
     name: "search",
-    description: "Szuka na YouTube i pozwala wybrać jeden z wyników",
+    description: t.all("searchDescription"),
     options: queryOption,
     cooldownMs: SEARCH_COOLDOWN_MS,
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const query = queryOf(ctx.args.query, "Podaj, czego szukać.");
+      const query = queryOf(ctx.args.query, (l) => t(l).enterQuery);
       await requireListener(guildId, ctx.user.id);
       await ctx.defer({ ephemeral: true });
       const result = await player.search(query, ctx.user.id);
@@ -734,25 +728,25 @@ export function createMusicModule({
           query: describeQuery(query),
           message: result.message,
         });
-        throw new UserError("Wyszukiwanie się nie udało.");
+        throw new UserError((l) => t(l).searchFailed);
       }
       const tracks = result.kind === "empty" ? [] : result.tracks.slice(0, MAX_SEARCH_RESULTS);
-      if (tracks.length === 0) throw new UserError("Nic nie znaleziono.");
+      if (tracks.length === 0) throw new UserError((l) => t(l).nothingFound);
       const key = await searches.save({ tracks } satisfies PendingSearch);
       await ctx.reply({
-        content: "Wybierz utwór:",
+        content: t(ctx.locale).pickTrack,
         ephemeral: true,
         components: [
           [
             {
               type: "select",
               customId: pick.customId(ctx.user.id, key),
-              placeholder: "Wyniki wyszukiwania",
+              placeholder: t(ctx.locale).searchResults,
               options: tracks.map((track, index) => ({
                 label: truncate(track.title, 100),
                 value: String(index),
                 description: truncate(
-                  `${track.author} · ${track.isStream ? "na żywo" : formatDuration(track.durationMs)}`,
+                  `${track.author} · ${track.isStream ? t(ctx.locale).liveShort : formatDuration(track.durationMs)}`,
                   100,
                 ),
               })),
@@ -765,7 +759,7 @@ export function createMusicModule({
 
   const queue = defineCommand({
     name: "queue",
-    description: "Pokazuje kolejkę utworów",
+    description: t.all("queueDescription"),
     async run(ctx) {
       guildOf(ctx);
       await ctx.reply({ ...(await queuePages.first(ctx)), ephemeral: true });
@@ -774,71 +768,76 @@ export function createMusicModule({
 
   const skip = defineCommand({
     name: "skip",
-    description: "Pomija bieżący utwór",
+    description: t.all("skipDescription"),
     async run(ctx) {
       const guildId = guildOf(ctx);
       const state = await requireControl(guildId, ctx.user.id);
       refuseSongControl(state);
-      if (!state.current) throw new UserError(NOTHING_PLAYING);
-      await player.skip(guildId, state.current.id);
-      await ctx.reply(`Pominięto: **${escapeMarkdown(state.current.title)}**.`);
+      if (!state.current) throw new UserError((l) => t(l).nothingPlaying);
+      if (!(await player.skip(guildId, state.current.id)))
+        throw new UserError((l) => t(l).queueChanged);
+      await ctx.reply(t(ctx.locale).skipped(escapeMarkdown(state.current.title)));
     },
   });
 
   const stop = defineCommand({
     name: "stop",
-    description: "Zatrzymuje muzykę, czyści kolejkę i wychodzi z kanału",
+    description: t.all("stopDescription"),
     async run(ctx) {
       const guildId = guildOf(ctx);
       // Works while the node is away too: the bot still leaves voice.
       refuseSongControl(await requireControl(guildId, ctx.user.id, false));
       await player.leave(guildId);
-      await ctx.reply("Zatrzymano muzykę i wyczyszczono kolejkę.");
+      await ctx.reply(t(ctx.locale).stopped);
     },
   });
 
   const pause = defineCommand({
     name: "pause",
-    description: "Wstrzymuje odtwarzanie",
+    description: t.all("pauseDescription"),
     async run(ctx) {
       const guildId = guildOf(ctx);
       const state = await requireControl(guildId, ctx.user.id);
       refuseSongControl(state);
-      if (!state.current) throw new UserError(NOTHING_PLAYING);
-      if (state.paused) throw new UserError("Muzyka już jest wstrzymana.");
+      if (!state.current) throw new UserError((l) => t(l).nothingPlaying);
+      if (state.paused) throw new UserError((l) => t(l).alreadyPaused);
       await player.pause(guildId);
-      await ctx.reply("Wstrzymano.");
+      await ctx.reply(t(ctx.locale).paused);
     },
   });
 
   const resume = defineCommand({
     name: "resume",
-    description: "Wznawia odtwarzanie",
+    description: t.all("resumeDescription"),
     async run(ctx) {
       const guildId = guildOf(ctx);
       const state = await requireControl(guildId, ctx.user.id);
-      if (!state.paused) throw new UserError("Muzyka nie jest wstrzymana.");
+      if (!state.paused) throw new UserError((l) => t(l).notPaused);
       await player.resume(guildId);
-      await ctx.reply("Wznowiono.");
+      await ctx.reply(t(ctx.locale).resumed);
     },
   });
 
   const nowPlaying = defineCommand({
     name: "nowplaying",
-    description: "Pokazuje, co teraz gra",
+    description: t.all("nowPlayingDescription"),
     aliases: ["np"],
     async run(ctx) {
       const state = player.state(guildOf(ctx));
-      if (!state?.current) throw new UserError(NOTHING_PLAYING);
+      if (!state?.current) throw new UserError((l) => t(l).nothingPlaying);
       const embed = trackEmbed(
         state.current,
         state.positionMs,
         state.upcoming.length,
-        settingsLine(state),
+        settingsLine(state, ctx.locale),
+        ctx.locale,
       );
       await ctx.reply({
         embeds: [
-          { ...embed, footer: state.paused ? `Wstrzymane · ${embed.footer}` : embed.footer },
+          {
+            ...embed,
+            footer: state.paused ? `${t(ctx.locale).pausedFooter} · ${embed.footer}` : embed.footer,
+          },
         ],
       });
     },
@@ -846,86 +845,80 @@ export function createMusicModule({
 
   const loop = defineCommand({
     name: "loop",
-    description: "Ustawia powtarzanie: wyłączone, utwór albo kolejka",
+    description: t.all("loopDescription"),
     options: {
       mode: {
         type: "string",
-        description: "Co powtarzać",
+        description: t.all("loopOption"),
         required: true,
         choices: [
-          { name: "wyłączone", value: "off" },
-          { name: "utwór", value: "track" },
-          { name: "kolejka", value: "queue" },
+          { name: t.all("loopChoiceOff"), value: "off", aliases: ["wyłącz", "wyłączona"] },
+          { name: t.all("loopTrack"), value: "track" },
+          { name: t.all("loopQueue"), value: "queue" },
         ],
       },
     },
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const mode = wordIn(LOOP_WORDS, ctx.args.mode);
-      if (!mode) {
-        throw new UserError(
-          "Podaj `wyłącz`, `utwór` albo `kolejka` (albo `off`, `track`, `queue`).",
-        );
-      }
+      // Slash and prefix both hold the value to the choices before `run`.
+      const mode = ctx.args.mode as LoopMode;
       await oneAtATime(guildId, async () => {
         refuseSongControl(await requireControl(guildId, ctx.user.id));
         await player.setLoop(guildId, mode);
       });
-      await ctx.reply(`Powtarzanie: **${LOOP_LABELS[mode]}**.`);
+      await ctx.reply(t(ctx.locale).loopSet(loopLabel(mode, ctx.locale)));
     },
   });
 
   const shuffle = defineCommand({
     name: "shuffle",
-    description: "Miesza kolejkę",
+    description: t.all("shuffleDescription"),
     async run(ctx) {
       const guildId = guildOf(ctx);
       await shuffleQueue(guildId, ctx.user.id);
-      await ctx.reply("Pomieszano kolejkę.");
+      await ctx.reply(t(ctx.locale).shuffled);
     },
   });
 
   const seek = defineCommand({
     name: "seek",
-    description: "Przewija bieżący utwór (np. 1:30, 90 albo 1m30s)",
+    description: t.all("seekDescription"),
     options: {
-      time: { type: "string", description: "Dokąd przewinąć", required: true, rest: true },
+      time: { type: "string", description: t.all("seekOption"), required: true, rest: true },
     },
     async run(ctx) {
       const guildId = guildOf(ctx);
       const positionMs = parseTime(ctx.args.time);
       if (positionMs === null) {
-        throw new UserError("Nie rozumiem czasu. Podaj np. `1:30`, `90` albo `1m30s`.");
+        throw new UserError((l) => t(l).timeUnclear);
       }
       await oneAtATime(guildId, async () => {
         const state = await requireControl(guildId, ctx.user.id);
         refuseSongControl(state);
         const current = state.current;
-        if (!current) throw new UserError(NOTHING_PLAYING);
-        if (current.isStream) throw new UserError("Transmisji na żywo nie da się przewijać.");
-        if (!current.isSeekable) throw new UserError("Tego utworu nie da się przewijać.");
+        if (!current) throw new UserError((l) => t(l).nothingPlaying);
+        if (current.isStream) throw new UserError((l) => t(l).streamNoSeek);
+        if (!current.isSeekable) throw new UserError((l) => t(l).notSeekable);
         // The end itself is allowed: the track ends and the next one plays.
         if (positionMs > current.durationMs) {
-          throw new UserError(
-            `Utwór trwa tylko ${formatDuration(current.durationMs)}, nie przewinę dalej.`,
-          );
+          throw new UserError((l) => t(l).seekTooFar(formatDuration(current.durationMs)));
         }
         if (!(await player.seek(guildId, positionMs, current.id))) {
-          throw new UserError("Utwór zmienił się w międzyczasie, spróbuj jeszcze raz.");
+          throw new UserError((l) => t(l).trackChanged);
         }
       });
-      await ctx.reply(`Przewinięto do **${formatDuration(positionMs)}**.`);
+      await ctx.reply(t(ctx.locale).seeked(formatDuration(positionMs)));
     },
   });
 
   const volume = defineCommand({
     name: "volume",
-    description: `Ustawia głośność (0-${MAX_VOLUME})`,
+    description: t.all("volumeDescription"),
     aliases: ["vol"],
     options: {
       percent: {
         type: "integer",
-        description: `Głośność w procentach (0-${MAX_VOLUME})`,
+        description: t.all("volumeOption"),
         required: true,
         minValue: 0,
         maxValue: MAX_VOLUME,
@@ -935,39 +928,34 @@ export function createMusicModule({
       const guildId = guildOf(ctx);
       const percent = ctx.args.percent;
       if (!Number.isInteger(percent) || percent < 0 || percent > MAX_VOLUME) {
-        throw new UserError(`Głośność musi być liczbą od 0 do ${MAX_VOLUME}.`);
+        throw new UserError((l) => t(l).volumeRange(MAX_VOLUME));
       }
       await requireControl(guildId, ctx.user.id);
       await player.setVolume(guildId, percent);
-      await ctx.reply(`Głośność: **${percent}%**.`);
+      await ctx.reply(t(ctx.locale).volumeSet(percent));
     },
   });
 
   const filter = defineCommand({
     name: "filter",
-    description: "Włącza efekt dźwiękowy albo go wyłącza",
+    description: t.all("filterDescription"),
     options: {
       name: {
         type: "string",
-        description: "Efekt",
+        description: t.all("filterOption"),
         required: true,
         choices: [
-          { name: "bassboost", value: "bassboost" },
+          { name: "bassboost", value: "bassboost", aliases: ["bas"] },
           { name: "nightcore", value: "nightcore" },
           { name: "vaporwave", value: "vaporwave" },
           { name: "8D", value: "8d" },
-          { name: "wyłącz", value: "off" },
+          { name: t.all("filterChoiceOff"), value: "off", aliases: ["wyłącz"] },
         ],
       },
     },
     async run(ctx) {
       const guildId = guildOf(ctx);
-      const name = wordIn(FILTER_WORDS, ctx.args.name);
-      if (!name) {
-        throw new UserError(
-          "Podaj `bassboost` (albo `bas`), `nightcore`, `vaporwave`, `8d` albo `wyłącz` (`off`).",
-        );
-      }
+      const name = ctx.args.name as MusicFilter;
       // Refused here already, so the answer stays private; checked again in the chain.
       await requireControl(guildId, ctx.user.id);
       await ctx.defer();
@@ -975,16 +963,19 @@ export function createMusicModule({
         await requireControl(guildId, ctx.user.id);
         await player.setFilter(guildId, name);
       });
-      await ctx.reply(name === "off" ? "Wyłączono efekty." : `Efekt: **${FILTER_LABELS[name]}**.`);
+      const text = t(ctx.locale);
+      await ctx.reply(
+        name === "off" ? text.filtersOff : text.filterSet(filterLabel(name, ctx.locale)),
+      );
     },
   });
 
   /** The place in `/queue` (1-based) as an index into the upcoming tracks, checked against the queue. */
   function queueIndexOf(state: PlayerState, place: number): number {
-    if (state.upcoming.length === 0) throw new UserError(EMPTY_QUEUE);
+    if (state.upcoming.length === 0) throw new UserError((l) => t(l).emptyQueue);
     if (!Number.isInteger(place) || place < 1 || place > state.upcoming.length) {
-      throw new UserError(
-        `Nie ma utworu na miejscu ${place}. W kolejce jest ${state.upcoming.length} ${tracksWord(state.upcoming.length)}.`,
+      throw new UserError((l) =>
+        t(l).noTrackAtPlace(place, t(l).trackCount(state.upcoming.length)),
       );
     }
     return place - 1;
@@ -993,7 +984,7 @@ export function createMusicModule({
   const placeOption = {
     place: {
       type: "integer",
-      description: "Miejsce w kolejce (jak w /queue)",
+      description: t.all("placeOption"),
       required: true,
       minValue: 1,
     },
@@ -1001,7 +992,7 @@ export function createMusicModule({
 
   const remove = defineCommand({
     name: "remove",
-    description: "Usuwa utwór z kolejki",
+    description: t.all("removeDescription"),
     options: placeOption,
     async run(ctx) {
       const guildId = guildOf(ctx);
@@ -1009,18 +1000,18 @@ export function createMusicModule({
         const state = await requireControl(guildId, ctx.user.id);
         const index = queueIndexOf(state, ctx.args.place);
         const wanted = state.upcoming[index];
-        if (!wanted) throw new UserError(queueChanged);
+        if (!wanted) throw new UserError((l) => t(l).queueChanged);
         const taken = await player.remove(guildId, index, wanted.id);
-        if (!taken) throw new UserError(queueChanged);
+        if (!taken) throw new UserError((l) => t(l).queueChanged);
         return taken;
       });
-      await ctx.reply(`Usunięto z kolejki: **${escapeMarkdown(removed.title)}**.`);
+      await ctx.reply(t(ctx.locale).removed(escapeMarkdown(removed.title)));
     },
   });
 
   const jump = defineCommand({
     name: "jump",
-    description: "Przeskakuje do utworu z kolejki, pomijając te przed nim",
+    description: t.all("jumpDescription"),
     options: placeOption,
     async run(ctx) {
       const guildId = guildOf(ctx);
@@ -1030,66 +1021,66 @@ export function createMusicModule({
         const index = queueIndexOf(state, ctx.args.place);
         const wanted = state.upcoming[index];
         if (!wanted || !(await player.jump(guildId, index, wanted.id))) {
-          throw new UserError(queueChanged);
+          throw new UserError((l) => t(l).queueChanged);
         }
         return wanted;
       });
-      await ctx.reply(`Przeskoczono do: **${escapeMarkdown(target.title)}**.`);
+      await ctx.reply(t(ctx.locale).jumped(escapeMarkdown(target.title)));
     },
   });
 
   const back = defineCommand({
     name: "back",
-    description: "Wraca do poprzedniego utworu",
+    description: t.all("backDescription"),
     async run(ctx) {
       const guildId = guildOf(ctx);
       const previous = await oneAtATime(guildId, async () => {
         refuseSongControl(await requireControl(guildId, ctx.user.id));
         return player.previous(guildId);
       });
-      if (previous === "none") throw new UserError("Nie ma poprzedniego utworu.");
-      if (previous === "changed") throw new UserError(queueChanged);
-      await ctx.reply(`Wracam do: **${escapeMarkdown(previous.title)}**.`);
+      if (previous === "none") throw new UserError((l) => t(l).noPrevious);
+      if (previous === "changed") throw new UserError((l) => t(l).queueChanged);
+      await ctx.reply(t(ctx.locale).wentBack(escapeMarkdown(previous.title)));
     },
   });
 
   const clear = defineCommand({
     name: "clear",
-    description: "Czyści kolejkę, bieżący utwór gra dalej",
+    description: t.all("clearDescription"),
     async run(ctx) {
       const guildId = guildOf(ctx);
       const count = await oneAtATime(guildId, async () => {
         const state = await requireControl(guildId, ctx.user.id);
-        if (state.upcoming.length === 0) throw new UserError(EMPTY_QUEUE);
+        if (state.upcoming.length === 0) throw new UserError((l) => t(l).emptyQueue);
         await player.clear(guildId);
         return state.upcoming.length;
       });
-      await ctx.reply(`Wyczyszczono kolejkę (${count} ${tracksWord(count)}).`);
+      await ctx.reply(t(ctx.locale).cleared(t(ctx.locale).trackCount(count)));
     },
   });
 
   const save = defineCommand({
     name: "save",
-    description: "Wysyła Ci w wiadomości prywatnej bieżący utwór",
+    description: t.all("saveDescription"),
     aliases: ["sv"],
     async run(ctx) {
       // Like /queue and /nowplaying: anyone in the server may save what plays, in voice or not.
       const current = player.state(guildOf(ctx))?.current;
-      if (!current) throw new UserError(NOTHING_PLAYING);
+      if (!current) throw new UserError((l) => t(l).nothingPlaying);
       const link = httpUrl(current.uri);
+      // The message goes to the member's DMs, so it speaks their own language.
+      const dmText = t(await locales.user(ctx.user.id));
       const delivered = await directMessages.send(ctx.user.id, {
         content: [
           `**${escapeMarkdown(current.title)}**`,
-          `**Autor:** ${escapeMarkdown(current.author)}`,
+          `**${dmText.author}:** ${escapeMarkdown(current.author)}`,
           link ? `<${link}>` : "",
         ]
           .filter(Boolean)
           .join("\n"),
       });
       await ctx.reply({
-        content: delivered
-          ? "Wysłałem Ci ten utwór w wiadomości prywatnej."
-          : "Nie mogę Ci wysłać wiadomości prywatnej. Sprawdź, czy masz je włączone dla członków serwera.",
+        content: delivered ? t(ctx.locale).saveSent : t(ctx.locale).saveBlocked,
         ephemeral: true,
       });
     },

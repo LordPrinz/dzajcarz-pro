@@ -9,6 +9,8 @@ export interface GuildSettingsRepository {
   setTimeZone(guildId: string, timeZone: string | null): Promise<GuildSettingsRow>;
   /** Whether Postgres knows the zone; its tzdata can differ from the runtime's ICU. */
   isKnownTimeZone(timeZone: string): Promise<boolean>;
+  /** Sets the guild's language (`pl`, `en`, `de`); null goes back to the bot default. */
+  setLocale(guildId: string, locale: string | null): Promise<GuildSettingsRow>;
 }
 
 export function createGuildSettingsRepository(sql: SQL): GuildSettingsRepository {
@@ -41,6 +43,16 @@ export function createGuildSettingsRepository(sql: SQL): GuildSettingsRepository
       const [row] = await sql<GuildSettingsRow[]>`
         INSERT INTO guild_settings (guild_id, time_zone) VALUES (${guildId}, ${timeZone})
         ON CONFLICT (guild_id) DO UPDATE SET time_zone = EXCLUDED.time_zone, updated_at = now()
+        RETURNING *
+      `;
+      if (!row) throw new Error("Upsert into guild_settings returned no row");
+      return row;
+    },
+
+    async setLocale(guildId, locale) {
+      const [row] = await sql<GuildSettingsRow[]>`
+        INSERT INTO guild_settings (guild_id, locale) VALUES (${guildId}, ${locale})
+        ON CONFLICT (guild_id) DO UPDATE SET locale = EXCLUDED.locale, updated_at = now()
         RETURNING *
       `;
       if (!row) throw new Error("Upsert into guild_settings returned no row");

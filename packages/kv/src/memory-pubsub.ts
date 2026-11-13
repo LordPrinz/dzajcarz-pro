@@ -1,7 +1,12 @@
 import type { PubSub, PubSubListener } from "./pubsub.ts";
+import type { PubSubLog } from "./redis-pubsub.ts";
 
 /** In-process `PubSub` for tests and local tools. Delivers synchronously; not shared between processes. */
-export function createMemoryPubSub(): PubSub {
+export function createMemoryPubSub({
+  log = { debug() {}, warn() {} },
+}: {
+  log?: PubSubLog;
+} = {}): PubSub {
   const channels = new Map<string, Set<PubSubListener>>();
 
   return {
@@ -12,7 +17,9 @@ export function createMemoryPubSub(): PubSub {
         // A throwing listener must not stop the others or fail the publisher, as with Redis.
         try {
           listener(message);
-        } catch {}
+        } catch (error) {
+          log.warn("A pub/sub listener threw", { error });
+        }
       }
       // Redis counts subscribed connections, so one process listening twice is still one receiver.
       return 1;

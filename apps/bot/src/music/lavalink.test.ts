@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { type LogFields, type Logger, silentLogger } from "@dzajcarz/core";
+import { settle } from "@dzajcarz/core/testing/settle";
 import type { MusicListener, MusicTrack } from "@dzajcarz/module-music";
 import type { Client } from "discord.js";
 import { EQList, FilterManager, type LavalinkManager } from "lavalink-client";
@@ -141,6 +142,12 @@ class StubPlayer {
 
   async skip(skipTo = 0) {
     this.calls.push(skipTo === 0 ? "skip" : `skip to ${skipTo}`);
+    // The client's queueTrackEnd: a queue loop puts the ended track at the end, then the next one starts.
+    const ended = this.queue.current;
+    if (this.repeatMode !== "queue" || !ended) return;
+    this.queue.tracks.push(ended);
+    this.queue.current = this.queue.tracks.shift() ?? null;
+    this.manager.emit("trackEnd", this, ended, {});
   }
 
   async setRepeatMode(mode: "off" | "track" | "queue") {
@@ -310,7 +317,6 @@ function setup({ localFileGraceMs }: { localFileGraceMs?: number } = {}) {
 }
 
 /** Lets fire-and-forget recovery work finish. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("lavalink music player", () => {
   describe("forwarding voice packets", () => {
@@ -628,6 +634,9 @@ describe("lavalink music player", () => {
       await settle();
       idle.queue.tracks.push(song("B"), song("C"), song("D"));
       expect(await music.jump(GUILD, 2, "enc-D")).toBe(true);
+      // The player's own loop is off meanwhile: the file is not queued again, the passed tracks rejoin.
+      manager.emit("trackEnd", idle, idle.queue.current, {});
+      await settle();
       expect(idle.queue.tracks.map((track) => track.info.title)).toEqual(["D", "B", "C"]);
       expect(idle.calls.at(-1)).toBe("skip");
     });
@@ -830,7 +839,8 @@ describe("lavalink music player", () => {
     test("two skips of the same track send one skip", async () => {
       const { manager, music } = setup();
       const player = manager.playing(GUILD, song("A"), [song("B")]);
-      await Promise.all([music.skip(GUILD, "enc-A"), music.skip(GUILD, "enc-A")]);
+      const results = await Promise.all([music.skip(GUILD, "enc-A"), music.skip(GUILD, "enc-A")]);
+      expect(results).toEqual([true, false]);
       expect(player.calls).toEqual(["skip"]);
       // The node moved on: B starts, and a skip of B goes through.
       player.queue.current = player.queue.tracks.shift() ?? null;
@@ -987,12 +997,14 @@ describe("lavalink music player", () => {
       expect(player.queue.tracks.map((track) => track.info.title)).toEqual(["B", "C"]);
     });
 
-    test("jump with the queue loop moves the passed tracks to the end", async () => {
+    test("jump with the queue loop continues the loop as D, A, B, C", async () => {
       const { manager, music } = setup();
       const player = manager.playing(GUILD, song("A"), [song("B"), song("C"), song("D")]);
       player.repeatMode = "queue";
       expect(await music.jump(GUILD, 2, "enc-D")).toBe(true);
-      expect(player.queue.tracks.map((track) => track.info.title)).toEqual(["D", "B", "C"]);
+      await settle();
+      expect(player.queue.current?.info.title).toBe("D");
+      expect(player.queue.tracks.map((track) => track.info.title)).toEqual(["A", "B", "C"]);
       expect(player.calls).toEqual(["skip"]);
     });
 

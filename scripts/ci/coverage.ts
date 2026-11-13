@@ -58,6 +58,10 @@ if (import.meta.main) {
     process.exit(1);
   }
   const totals = sumLcov(await file.text());
+  if (totals.lines.found === 0) {
+    console.error("coverage/lcov.info holds no line data; the report is empty or cut short");
+    process.exit(1);
+  }
   const problems = belowMinimum(totals);
   const percent = (metric: keyof CoverageTotals) =>
     ((totals[metric].hit / Math.max(1, totals[metric].found)) * 100).toFixed(2);

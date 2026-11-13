@@ -4,17 +4,18 @@ import {
   type ComponentKind,
   type CooldownStore,
   checkPrefixAccess,
+  coreMessages,
+  DEFAULT_LOCALE,
   executeCommand,
   executeComponent,
   executeModal,
+  type Locale,
   type Logger,
   matchPrefix,
   type PrefixInvocation,
   parsePrefixArgs,
   type RegisteredEvent,
   splitInvocation,
-  UNKNOWN_COMPONENT,
-  UNKNOWN_MODAL,
 } from "@dzajcarz/core";
 import {
   type Client,
@@ -30,6 +31,8 @@ import { contextFromModal } from "./discord/modal-context.ts";
 import { readModalValues } from "./discord/modals.ts";
 import { NO_MENTIONS } from "./discord/reply.ts";
 import { eventScope, toggleChannelId } from "./event-scope.ts";
+import type { LocalePlace } from "./locales.ts";
+import { t } from "./messages.ts";
 import type { ModuleGate } from "./module-gate.ts";
 import type { PrefixResolver } from "./prefix-resolver.ts";
 
@@ -41,10 +44,25 @@ export interface BotDeps {
   botInGuild: (guildId: string) => boolean;
   /** Counts command calls for `cooldownMs`; without it cooldowns are not enforced. */
   cooldowns?: CooldownStore;
+  /** The language to answer in where a member used the bot; without it everything is Polish. */
+  locales?: { of(place: LocalePlace): Promise<Locale> };
   logger: Logger;
 }
 
-const MODULE_DISABLED_REPLY = "Ten moduł jest wyłączony na tym serwerze albo kanale.";
+/**
+ * The language of the place a member used the bot. A server the bot is not in (user install) has no
+ * language of its own, so the member's applies there, as in a DM.
+ */
+function localeOf(
+  { locales, botInGuild }: Pick<BotDeps, "locales" | "botInGuild">,
+  guildId: string | null,
+  userId: string,
+  clientLocale?: string,
+): Promise<Locale> {
+  if (!locales) return Promise.resolve(DEFAULT_LOCALE);
+  const ownGuild = guildId !== null && botInGuild(guildId) ? guildId : null;
+  return locales.of({ guildId: ownGuild, userId, clientLocale });
+}
 
 /**
  * Whether `module` is on where it was used. A guild the bot is not in (user install) has no toggle rows,
@@ -130,10 +148,16 @@ export function attachHandlers(client: Client, deps: BotDeps): void {
         logger.warn("Unknown slash command", { command: interaction.commandName });
         return;
       }
-      const ctx = contextFromInteraction(interaction, logger);
+      const locale = await localeOf(
+        deps,
+        interaction.guildId,
+        interaction.user.id,
+        interaction.locale,
+      );
+      const ctx = contextFromInteraction(interaction, logger, locale);
       const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
       if (!(await commandEnabled(deps, command, ctx.guildId, toggleChannel))) {
-        await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
+        await ctx.reply({ content: t(locale).moduleDisabled, ephemeral: true });
         return;
       }
       await executeCommand(command, ctx, logger, deps.cooldowns);
@@ -182,21 +206,22 @@ export async function handleComponent(
   const found = supported ? registry.resolveComponent(interaction.customId) : undefined;
   // A handler written for a button must not receive a select's values, whatever custom_id arrives.
   const resolved = found?.component.kind === componentKind(interaction) ? found : undefined;
+  const locale = await localeOf(deps, interaction.guildId, interaction.user.id, interaction.locale);
   if (!supported || !resolved) {
     // Posted by an older build or by another bot sharing the application, or a select type no module
     // handles yet (role, channel, mentionable): answer instead of leaving the click to time out.
     logger.warn("Unknown component", { customId: interaction.customId });
     await interaction.reply({
-      content: UNKNOWN_COMPONENT,
+      content: coreMessages(locale).unknownComponent,
       flags: MessageFlags.Ephemeral,
       allowedMentions: NO_MENTIONS,
     });
     return;
   }
-  const ctx = contextFromComponent(interaction, resolved);
+  const ctx = contextFromComponent(interaction, resolved, locale);
   const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
   if (!(await moduleOn(deps, resolved.module, ctx.guildId, toggleChannel))) {
-    await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
+    await ctx.reply({ content: t(locale).moduleDisabled, ephemeral: true });
     return;
   }
   await executeComponent(resolved, ctx, logger);
@@ -212,19 +237,20 @@ export async function handleModal(
 ): Promise<void> {
   const { registry, logger } = deps;
   const resolved = registry.resolveModal(interaction.customId);
+  const locale = await localeOf(deps, interaction.guildId, interaction.user.id, interaction.locale);
   if (!resolved) {
     logger.warn("Unknown modal", { customId: interaction.customId });
     await interaction.reply({
-      content: UNKNOWN_MODAL,
+      content: coreMessages(locale).unknownModal,
       flags: MessageFlags.Ephemeral,
       allowedMentions: NO_MENTIONS,
     });
     return;
   }
-  const ctx = contextFromModal(interaction, resolved.state);
+  const ctx = contextFromModal(interaction, resolved.state, locale);
   const toggleChannel = toggleChannelId(interaction.channel, ctx.channelId);
   if (!(await moduleOn(deps, resolved.module, ctx.guildId, toggleChannel))) {
-    await ctx.reply({ content: MODULE_DISABLED_REPLY, ephemeral: true });
+    await ctx.reply({ content: t(locale).moduleDisabled, ephemeral: true });
     return;
   }
   await executeModal(resolved, ctx, readModalValues(resolved.modal, interaction), logger);
@@ -258,21 +284,22 @@ export async function handleMessage(
     return;
 
   // Checked before parsing so a member without access never learns the usage of a command they cannot run.
-  const context = contextFromMessage(message, {}, undefined, logger);
+  const locale = await localeOf(deps, message.guildId, message.author.id);
+  const context = contextFromMessage(message, {}, undefined, logger, locale);
   const denied = checkPrefixAccess(command, invocation.rest, context);
   if (denied) {
     await message.reply(prefixAnswer(denied));
     return;
   }
 
-  const parsed = parsePrefixArgs(command, invocation.rest);
+  const parsed = parsePrefixArgs(command, invocation.rest, locale);
   if (!parsed.ok) {
     await message.reply(prefixAnswer(parsed.error));
     return;
   }
   await executeCommand(
     command,
-    contextFromMessage(message, parsed.args, parsed.subcommand, logger),
+    contextFromMessage(message, parsed.args, parsed.subcommand, logger, locale),
     logger,
     deps.cooldowns,
   );

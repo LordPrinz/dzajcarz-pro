@@ -1,6 +1,7 @@
 import type { Logger } from "@dzajcarz/core";
 import type { DzajcoChannels, DzajcoResponder } from "@dzajcarz/module-dzajco";
 import type { Client } from "discord.js";
+import { fetchOrNull } from "./errors.ts";
 import { NO_MENTIONS } from "./reply.ts";
 
 /** Any channel of the guild members write in: text, announcement, threads and voice or stage chats. */
@@ -11,7 +12,7 @@ export function createDzajcoChannels(client: Client): DzajcoChannels {
       return channel?.isThread() ? channel.parentId : null;
     },
     async isChatOf(guildId, channelId) {
-      const channel = await client.channels.fetch(channelId).catch(() => null);
+      const channel = await fetchOrNull(client.channels.fetch(channelId));
       if (!channel?.isTextBased() || channel.isDMBased()) return false;
       return channel.guildId === guildId;
     },

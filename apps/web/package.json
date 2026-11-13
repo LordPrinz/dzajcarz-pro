@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bun --env-file=../../.env --hot src/index.ts",
     "start": "bun --env-file=../../.env src/index.ts",
-    "build": "bun build src/index.ts --compile --minify --sourcemap --outfile dist/web",
+    "build": "bun build src/index.ts --compile --minify --sourcemap --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/web",
     "typecheck": "tsc -p . && tsc -p src/ui && tsc -p tsconfig.test.json"
   },
   "dependencies": {

@@ -102,6 +102,13 @@ test("a write that throws does not make the logger throw", () => {
   expect(() => logger.error("boom")).not.toThrow();
 });
 
+test("fields cannot rewrite the level or the message", () => {
+  const lines: string[] = [];
+  const logger = createJsonLogger({ write: (line) => lines.push(line) }).child({ level: "debug" });
+  logger.error("boom", { msg: "fine", level: "info" });
+  expect(JSON.parse(lines[0] ?? "")).toMatchObject({ level: "error", msg: "boom" });
+});
+
 test("the fallback line keeps the child fields", () => {
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;

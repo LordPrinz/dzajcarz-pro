@@ -203,6 +203,36 @@ describe("Composer", () => {
     await view.unmount();
   });
 
+  test("what is changed while a send is in flight is kept, and the next send is a new message", async () => {
+    let finish: (response: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const calls = recordingFetch(() => sent());
+    const slow = globalThis.fetch;
+    globalThis.fetch = ((input: string, init?: RequestInit) => {
+      const first = calls.length === 0;
+      const answer = slow(input, init);
+      return first ? pending : answer;
+    }) as unknown as typeof fetch;
+    const reply = (id: string) =>
+      ({ id, author: { username: "ola", displayName: null }, content: "co?" }) as PanelMessage;
+    const view = mount({ replyTo: reply("500000000000000009") }, "tak");
+    await view.render();
+    await view.submit();
+    // Picked while the first message is on its way.
+    await act(() => view.checkbox()?.click());
+    await view.render({ replyTo: reply("500000000000000008") });
+    await act(async () => {
+      finish(sent());
+      await Bun.sleep(0);
+    });
+    expect(view.checkbox()?.checked).toBe(true);
+    expect(view.cancelled()).toBe(0);
+    expect(view.textarea().value).toBe("");
+    await view.unmount();
+  });
+
   test("a refusal shows its reason and keeps the draft", async () => {
     recordingFetch(() => Response.json({ error: "rejected", reason: "no_send" }, { status: 422 }));
     const view = mount({}, "hej");

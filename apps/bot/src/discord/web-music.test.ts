@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_VOICE_CHANNELS } from "@dzajcarz/web-protocol";
-import { type Client, PermissionFlagsBits } from "discord.js";
+import { ChannelType, type Client, PermissionFlagsBits } from "discord.js";
 import { createVoiceDirectory } from "./web-music.ts";
 
 const GUILD = "100000000000000001";
@@ -14,6 +14,7 @@ interface FakeVoice {
   humans?: number;
   bots?: number;
   joinable?: boolean;
+  type?: ChannelType;
   /** Permissions the bot lacks there; it has all it needs otherwise. */
   missing?: bigint[];
 }
@@ -31,6 +32,7 @@ function clientWith(voice: FakeVoice[], categories: { id: string; rawPosition: n
     ];
     cache.set(channel.id, {
       ...channel,
+      type: channel.type ?? ChannelType.GuildVoice,
       guild,
       isVoiceBased: () => true,
       get parent() {
@@ -136,6 +138,25 @@ describe("voice directory", () => {
     expect(directory.check(GUILD, "200000000000000001")).toBe("unknown_channel");
     expect(directory.check(GUILD, "400000000000000777")).toBe("unknown_channel");
     expect(directory.check("100000000000000777", "400000000000000003")).toBe("unknown_channel");
+  });
+
+  test("a stage is neither listed nor a join target", () => {
+    const directory = createVoiceDirectory(
+      clientWith([
+        { id: "400000000000000001", name: "Głosowy", rawPosition: 0, parentId: null },
+        {
+          id: "400000000000000002",
+          name: "Scena",
+          rawPosition: 1,
+          parentId: null,
+          type: ChannelType.GuildStageVoice,
+        },
+      ]),
+    );
+    expect(directory.list(GUILD)?.channels.map((channel) => channel.id)).toEqual([
+      "400000000000000001",
+    ]);
+    expect(directory.check(GUILD, "400000000000000002")).toBe("unknown_channel");
   });
 
   test("past the limit the list is cut and says so", () => {

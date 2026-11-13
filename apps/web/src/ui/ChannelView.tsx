@@ -47,6 +47,8 @@ export interface ChannelViewProps {
   subscribe: (listener: (event: LiveEvent) => void) => () => void;
   /** Goes up each time the socket comes back: events sent while it was down were missed. */
   reconnects?: number;
+  /** Whether the bot is up; what it may do here is asked again when it comes back. */
+  botOnline?: boolean;
 }
 
 /** One channel or DM: pages from the archive or live from Discord, and live events on top. */
@@ -55,6 +57,7 @@ export function ChannelView({
   focusId = null,
   subscribe,
   reconnects = 0,
+  botOnline = true,
 }: ChannelViewProps) {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const [busy, setBusy] = useState<"older" | "newer" | "backfill" | null>(null);
@@ -91,17 +94,25 @@ export function ChannelView({
     };
   }, [channel, focusId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: another channel is the reason to reset.
   useEffect(() => {
-    let cancelled = false;
     setInfo(null);
     setReplyTo(null);
+  }, [channel.id]);
+
+  // Asked again when the bot comes back or the socket reopens: a bot that was down on the first try
+  // leaves no "Edytuj" and the default upload limit until then.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a reconnect is the reason to ask again.
+  useEffect(() => {
+    if (!botOnline) return;
+    let cancelled = false;
     void fetchChannelInfo(channel.id).then((result) => {
       if (!cancelled && result.ok) setInfo(result.data);
     });
     return () => {
       cancelled = true;
     };
-  }, [channel.id]);
+  }, [channel.id, botOnline, reconnects]);
 
   useEffect(
     () =>
@@ -159,8 +170,9 @@ export function ChannelView({
   const seenReconnects = useRef(reconnects);
   useEffect(() => {
     if (reconnects === seenReconnects.current) return;
-    seenReconnects.current = reconnects;
+    // Not counted while the first page is loading: the gap is fetched once the timeline is there.
     if (!timeline) return;
+    seenReconnects.current = reconnects;
     if (timeline.hasNewer) {
       setNotice("Połączenie wznowione: odśwież, aby zobaczyć nowe wiadomości");
       return;

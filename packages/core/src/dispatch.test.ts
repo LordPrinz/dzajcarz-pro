@@ -7,12 +7,10 @@ import {
   checkPrefixAccess,
   executeCommand,
   executeComponent,
-  GENERIC_ERROR,
-  MENU_NO_PERMISSION,
-  NOT_YOUR_MENU,
 } from "./dispatch.ts";
 import { UserError } from "./errors.ts";
 import { createJsonLogger, silentLogger } from "./logger.ts";
+import { common, coreMessages } from "./messages.ts";
 import { createFakeComponentContext, createFakeContext, replyText } from "./testing/context.ts";
 
 const BAN = 1n << 2n;
@@ -75,7 +73,7 @@ describe("executeCommand", () => {
     });
     const ctx = createFakeContext({ guildId: "100000000000000001" });
     await executeCommand(command, ctx, createJsonLogger({ write: (line) => lines.push(line) }));
-    expect(replyText(ctx.replies[0])).toBe(GENERIC_ERROR);
+    expect(replyText(ctx.replies[0])).toBe(common("pl").genericError);
     expect(lines).toHaveLength(1);
     const entry = JSON.parse(lines[0] ?? "{}");
     expect(entry).toMatchObject({
@@ -131,6 +129,7 @@ describe("executeCommand", () => {
         guildId: "100000000000000001",
         place: "guild",
         memberPermissions: 0n,
+        locale: "pl",
       }),
     ).toBe("Ta komenda działa tylko w prywatnej wiadomości do bota.");
     expect(
@@ -138,6 +137,7 @@ describe("executeCommand", () => {
         guildId: null,
         place: "bot-dm",
         memberPermissions: null,
+        locale: "pl",
       }),
     ).toBe("Ta komenda działa tylko na serwerze.");
     expect(
@@ -145,6 +145,7 @@ describe("executeCommand", () => {
         guildId: null,
         place: "bot-dm",
         memberPermissions: null,
+        locale: "pl",
       }),
     ).toBeNull();
     const ctx = createFakeContext({ guildId: "100000000000000001" });
@@ -162,7 +163,12 @@ describe("executeCommand", () => {
         contexts: { places, installs: ["guild", "user"] },
         run: async () => {},
       });
-    const inGroupDm = { guildId: null, place: "private-channel", memberPermissions: null } as const;
+    const inGroupDm = {
+      guildId: null,
+      place: "private-channel",
+      memberPermissions: null,
+      locale: "pl",
+    } as const;
     expect(checkPrefixAccess(make(["guild", "bot-dm"]), "", inGroupDm)).toBe(
       "Ta komenda działa tylko na serwerze.",
     );
@@ -170,7 +176,12 @@ describe("executeCommand", () => {
     expect(checkPrefixAccess(make(["bot-dm"]), "", inGroupDm)).toBe(
       "Ta komenda nie działa w tym miejscu.",
     );
-    const inBotDm = { guildId: null, place: "bot-dm", memberPermissions: null } as const;
+    const inBotDm = {
+      guildId: null,
+      place: "bot-dm",
+      memberPermissions: null,
+      locale: "pl",
+    } as const;
     expect(checkPrefixAccess(make(["guild", "private-channel"]), "", inBotDm)).toBe(
       "Ta komenda działa tylko na serwerze.",
     );
@@ -189,11 +200,15 @@ describe("executeCommand", () => {
         runs++;
       },
     });
-    const denied = createFakeContext({ invocation: "prefix", memberPermissions: 1n });
+    const denied = createFakeContext({ invocation: "prefix", memberPermissions: 1n, locale: "pl" });
     await executeCommand(command, denied, silentLogger);
     expect(replyText(denied.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
 
-    await executeCommand(command, createFakeContext({ memberPermissions: BAN | 1n }), silentLogger);
+    await executeCommand(
+      command,
+      createFakeContext({ memberPermissions: BAN | 1n, locale: "pl" }),
+      silentLogger,
+    );
     expect(runs).toBe(1);
   });
 
@@ -223,7 +238,11 @@ test("administrators pass every permission check", async () => {
       ran = true;
     },
   });
-  await executeCommand(command, createFakeContext({ memberPermissions: 1n << 3n }), silentLogger);
+  await executeCommand(
+    command,
+    createFakeContext({ memberPermissions: 1n << 3n, locale: "pl" }),
+    silentLogger,
+  );
   expect(ran).toBe(true);
 });
 
@@ -252,6 +271,7 @@ describe("executeCommand with subcommands", () => {
       subcommand: "set",
       args: { value: "?" },
       memberPermissions: KICK | MANAGE,
+      locale: "pl",
     });
     await executeCommand(command, ctx, silentLogger);
     expect(ran).toEqual(["set ?"]);
@@ -259,17 +279,25 @@ describe("executeCommand with subcommands", () => {
 
   test("checks the command permissions, then the subcommand's own", async () => {
     ran.length = 0;
-    const noCommandPermission = createFakeContext({ subcommand: "show", memberPermissions: 0n });
+    const noCommandPermission = createFakeContext({
+      subcommand: "show",
+      memberPermissions: 0n,
+      locale: "pl",
+    });
     await executeCommand(command, noCommandPermission, silentLogger);
     expect(replyText(noCommandPermission.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
 
-    const noSubPermission = createFakeContext({ subcommand: "set", memberPermissions: KICK });
+    const noSubPermission = createFakeContext({
+      subcommand: "set",
+      memberPermissions: KICK,
+      locale: "pl",
+    });
     await executeCommand(command, noSubPermission, silentLogger);
     expect(replyText(noSubPermission.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
 
     await executeCommand(
       command,
-      createFakeContext({ subcommand: "show", memberPermissions: KICK }),
+      createFakeContext({ subcommand: "show", memberPermissions: KICK, locale: "pl" }),
       silentLogger,
     );
     expect(ran).toEqual(["show"]);
@@ -281,6 +309,7 @@ describe("executeCommand with subcommands", () => {
       subcommand: "set",
       args: { value: "x" },
       memberPermissions: 1n << 3n,
+      locale: "pl",
     });
     await executeCommand(command, ctx, silentLogger);
     expect(ran).toEqual(["set x"]);
@@ -299,7 +328,7 @@ describe("executeCommand with subcommands", () => {
 
   test("a missing or unknown subcommand gets a Polish error", async () => {
     for (const subcommand of [undefined, "nope"]) {
-      const ctx = createFakeContext({ subcommand, memberPermissions: KICK });
+      const ctx = createFakeContext({ subcommand, memberPermissions: KICK, locale: "pl" });
       await executeCommand(command, ctx, silentLogger);
       expect(replyText(ctx.replies[0])).toBe("Nieznana podkomenda. Użycie: `prefix show|set`");
     }
@@ -327,52 +356,77 @@ describe("checkPrefixAccess", () => {
 
   test("enforces the permissions of the subcommand named by the first word", () => {
     expect(
-      checkPrefixAccess(command, "create", { guildId, place: "guild", memberPermissions: 0n }),
+      checkPrefixAccess(command, "create", {
+        guildId,
+        place: "guild",
+        memberPermissions: 0n,
+        locale: "pl",
+      }),
     ).toBe("Nie masz uprawnień do tej komendy.");
     expect(
       checkPrefixAccess(command, "CREATE x", {
         guildId,
         place: "guild",
         memberPermissions: MANAGE,
+        locale: "pl",
       }),
     ).toBeNull();
   });
 
   test("leaves subcommands without permissions and unknown words to the parser", () => {
     expect(
-      checkPrefixAccess(command, "info", { guildId, place: "guild", memberPermissions: 0n }),
+      checkPrefixAccess(command, "info", {
+        guildId,
+        place: "guild",
+        memberPermissions: 0n,
+        locale: "pl",
+      }),
     ).toBeNull();
     expect(
-      checkPrefixAccess(command, "nope", { guildId, place: "guild", memberPermissions: 0n }),
+      checkPrefixAccess(command, "nope", {
+        guildId,
+        place: "guild",
+        memberPermissions: 0n,
+        locale: "pl",
+      }),
     ).toBeNull();
     expect(
-      checkPrefixAccess(command, "", { guildId, place: "guild", memberPermissions: 0n }),
+      checkPrefixAccess(command, "", {
+        guildId,
+        place: "guild",
+        memberPermissions: 0n,
+        locale: "pl",
+      }),
     ).toBeNull();
   });
 });
 
 describe("checkAccess", () => {
   test("lets a command without restrictions through, in a DM too", () => {
-    expect(checkAccess({}, { guildId: null, memberPermissions: null })).toBeNull();
+    expect(checkAccess({}, { guildId: null, memberPermissions: null, locale: "pl" })).toBeNull();
   });
 
   test("refuses guild-only and permissioned commands in a DM", () => {
     const message = "Ta komenda działa tylko na serwerze.";
-    expect(checkAccess({ guildOnly: true }, { guildId: null, memberPermissions: null })).toBe(
-      message,
-    );
-    expect(checkAccess({ permissions: BAN }, { guildId: null, memberPermissions: null })).toBe(
-      message,
-    );
+    expect(
+      checkAccess({ guildOnly: true }, { guildId: null, memberPermissions: null, locale: "pl" }),
+    ).toBe(message);
+    expect(
+      checkAccess({ permissions: BAN }, { guildId: null, memberPermissions: null, locale: "pl" }),
+    ).toBe(message);
   });
 
   test("refuses a member without the permission and lets administrators through", () => {
     const guildId = "1";
-    expect(checkAccess({ permissions: BAN }, { guildId, memberPermissions: 0n })).toBe(
-      "Nie masz uprawnień do tej komendy.",
-    );
-    expect(checkAccess({ permissions: BAN }, { guildId, memberPermissions: BAN })).toBeNull();
-    expect(checkAccess({ permissions: BAN }, { guildId, memberPermissions: 1n << 3n })).toBeNull();
+    expect(
+      checkAccess({ permissions: BAN }, { guildId, memberPermissions: 0n, locale: "pl" }),
+    ).toBe("Nie masz uprawnień do tej komendy.");
+    expect(
+      checkAccess({ permissions: BAN }, { guildId, memberPermissions: BAN, locale: "pl" }),
+    ).toBeNull();
+    expect(
+      checkAccess({ permissions: BAN }, { guildId, memberPermissions: 1n << 3n, locale: "pl" }),
+    ).toBeNull();
   });
 });
 
@@ -408,11 +462,11 @@ describe("executeComponent order of checks", () => {
 
     const stranger = click("999999999999999999", 0n, BAN);
     await stranger.done;
-    expect(replyText(stranger.ctx.replies[0])).toBe(NOT_YOUR_MENU);
+    expect(replyText(stranger.ctx.replies[0])).toBe(coreMessages("pl").notYourMenu);
 
     const denied = click(OWNER, 0n, BAN);
     await denied.done;
-    expect(replyText(denied.ctx.replies[0])).toBe(MENU_NO_PERMISSION);
+    expect(replyText(denied.ctx.replies[0])).toBe(coreMessages("pl").menuNoPermission);
     expect(log).toEqual([]);
 
     const allowed = click(OWNER, BAN, BAN);
@@ -586,12 +640,12 @@ describe("executeCommand cooldowns", () => {
         runs++;
       },
     });
-    const denied = createFakeContext({ memberPermissions: 0n });
+    const denied = createFakeContext({ memberPermissions: 0n, locale: "pl" });
     await executeCommand(command, denied, silentLogger, cooldowns);
     expect(replyText(denied.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
     await executeCommand(
       command,
-      createFakeContext({ memberPermissions: BAN }),
+      createFakeContext({ memberPermissions: BAN, locale: "pl" }),
       silentLogger,
       cooldowns,
     );
@@ -659,12 +713,12 @@ describe("executeCommand cooldowns", () => {
         }),
       },
     });
-    const denied = createFakeContext({ subcommand: "wipe", memberPermissions: 0n });
+    const denied = createFakeContext({ subcommand: "wipe", memberPermissions: 0n, locale: "pl" });
     await executeCommand(command, denied, silentLogger, cooldowns);
     expect(replyText(denied.replies[0])).toBe("Nie masz uprawnień do tej komendy.");
     await executeCommand(
       command,
-      createFakeContext({ subcommand: "wipe", memberPermissions: BAN }),
+      createFakeContext({ subcommand: "wipe", memberPermissions: BAN, locale: "pl" }),
       silentLogger,
       cooldowns,
     );

@@ -3,7 +3,7 @@ import { RedisClient } from "bun";
 import { createMemoryPubSub } from "./memory-pubsub.ts";
 import type { PubSub } from "./pubsub.ts";
 import { keepConnected } from "./redis.ts";
-import { createRedisPubSub } from "./redis-pubsub.ts";
+import { createRedisPubSub, type PubSubLog } from "./redis-pubsub.ts";
 
 // Shared contract: every PubSub adapter must pass the same suite. The Redis adapter runs only when a
 // disposable Redis is available (CI provides one). Channel names are random, so runs never collide.
@@ -25,9 +25,11 @@ async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<voi
   }
 }
 
-const adapters: [string, () => PubSub][] = [["memory", () => createMemoryPubSub()]];
+const adapters: [string, (log?: PubSubLog) => PubSub][] = [
+  ["memory", (log) => createMemoryPubSub({ log })],
+];
 if (publisher && subscriber) {
-  adapters.push(["redis", () => createRedisPubSub({ publisher, subscriber })]);
+  adapters.push(["redis", (log) => createRedisPubSub({ publisher, subscriber, log })]);
 }
 
 describe.each(adapters)("PubSub (%s)", (_name, make) => {
@@ -86,7 +88,8 @@ describe.each(adapters)("PubSub (%s)", (_name, make) => {
   });
 
   test("a throwing listener does not stop the others", async () => {
-    const pubsub = make();
+    const warnings: string[] = [];
+    const pubsub = make({ debug() {}, warn: (message) => void warnings.push(message) });
     const channel = channelName();
     const received: string[] = [];
     await pubsub.subscribe(channel, () => {
@@ -95,6 +98,7 @@ describe.each(adapters)("PubSub (%s)", (_name, make) => {
     await pubsub.subscribe(channel, (message) => received.push(message));
     await pubsub.publish(channel, "still delivered");
     await waitFor(() => received.length === 1);
+    expect(warnings).toEqual(["A pub/sub listener threw"]);
   });
 
   test("channels are independent", async () => {
@@ -178,7 +182,7 @@ describe.skipIf(!redisUrl)("createRedisPubSub", () => {
     const pubsub = createRedisPubSub({
       publisher,
       subscriber: own,
-      log: { debug: (message) => void logged.push(message) },
+      log: { debug: (message) => void logged.push(message), warn() {} },
     });
     // Not connected yet: the native subscribe fails, the listener stays registered and a handle comes back.
     await pubsub.subscribe(channel, (message) => received.push(message));
@@ -251,5 +255,26 @@ describe.skipIf(!redisUrl)("createRedisPubSub", () => {
     expect(received).toEqual(["once"]);
     own.onclose = null;
     own.close();
+  });
+});
+
+describe("createRedisPubSub unsubscribe", () => {
+  test("logs a native unsubscribe that fails instead of swallowing it", async () => {
+    const warnings: string[] = [];
+    const subscriber = {
+      connected: true,
+      subscribe: async () => 1,
+      unsubscribe: async () => {
+        throw new Error("not in subscriber mode");
+      },
+    } as unknown as RedisClient;
+    const pubsub = createRedisPubSub({
+      publisher: {} as RedisClient,
+      subscriber,
+      log: { debug() {}, warn: (message) => void warnings.push(message) },
+    });
+    const stop = await pubsub.subscribe("c", () => {});
+    await stop();
+    expect(warnings).toEqual(["Could not unsubscribe"]);
   });
 });

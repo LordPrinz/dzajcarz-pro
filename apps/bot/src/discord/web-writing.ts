@@ -12,6 +12,7 @@ import {
 import {
   type Client,
   GuildPremiumTier,
+  type Message,
   type MessageMentionOptions,
   PermissionFlagsBits,
   RESTJSONErrorCodes,
@@ -20,7 +21,7 @@ import {
   type User,
 } from "discord.js";
 import type { WritingControl } from "../web-bridge.ts";
-import { hasCode } from "./errors.ts";
+import { fetchOrNull, hasCode } from "./errors.ts";
 import { NO_MENTIONS } from "./reply.ts";
 import { cdnAvatar } from "./web-reading.ts";
 
@@ -135,7 +136,7 @@ const isRejected = (value: unknown): value is Rejected =>
 
 /** A channel the bot could send to, or null when it cannot see it or it holds no messages. */
 async function sendable(client: Client, channelId: string): Promise<SendableChannels | null> {
-  const channel = await client.channels.fetch(channelId).catch(() => null);
+  const channel = await fetchOrNull(client.channels.fetch(channelId));
   return channel?.isSendable() ? channel : null;
 }
 
@@ -144,6 +145,14 @@ const guildOf = (channel: SendableChannels) => (channel.isDMBased() ? null : cha
 /** The path segment Discord expects for a reaction: `name:id` as it is, a unicode emoji URL-encoded. */
 export const reactionIdentifier = (emoji: string): string =>
   /:\d{17,20}$/.test(emoji) ? emoji : encodeURIComponent(emoji);
+
+/** Whether the message already carries this emoji (from anyone): only a new one needs Add Reactions. */
+const hasReaction = (message: Message, emoji: string): boolean => {
+  const custom = /:(\d{17,20})$/.exec(emoji)?.[1];
+  return message.reactions.cache.some((reaction) =>
+    custom ? reaction.emoji.id === custom : reaction.emoji.name === emoji,
+  );
+};
 
 const memberResult = (user: User): MemberResult => ({
   id: user.id,
@@ -166,6 +175,14 @@ export interface WritingDeps {
  * may be stale) and answers a refusal as `{ status: "rejected", reason }`, so nothing is half done.
  */
 export function createWriting({ client, uploads, logger }: WritingDeps): WritingControl {
+  // Sends with files go one after another, so concurrent panel sends do not hammer Discord or the pool.
+  let uploadQueue: Promise<unknown> = Promise.resolve();
+  const inUploadQueue = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = uploadQueue.then(task, task);
+    uploadQueue = run.catch(() => {});
+    return run;
+  };
+
   /** The channel and the bot's rights in it, or why there is nothing to do. */
   async function target(
     channelId: string,
@@ -232,9 +249,12 @@ export function createWriting({ client, uploads, logger }: WritingDeps): Writing
       if (ids.length === 0) {
         sent = await post([]);
       } else {
-        // The files stay locked while they are sent and keep the nonce afterwards, so a concurrent or later
-        // retry of this message gets them again (and Discord deduplicates it) while another message does not.
-        const claimed = await uploads.claim(ids, nonce, post, (result) => !isRejected(result));
+        // The files stay leased while they are sent and keep the nonce afterwards, so a later retry of this
+        // message gets them again (and Discord deduplicates it) while another message does not.
+        const claimed = await inUploadQueue(() =>
+          uploads.claim(ids, nonce, post, (result) => !isRejected(result)),
+        );
+        if (claimed.status === "busy") return rejected("upload_busy");
         if (claimed.status !== "ok") return rejected("upload_missing");
         sent = claimed.value;
       }
@@ -271,7 +291,11 @@ export function createWriting({ client, uploads, logger }: WritingDeps): Writing
       const found = await target(channelId);
       if (isRejected(found)) return found;
       if (!found.can.history) return rejected("no_history");
-      if (!found.can.react) return rejected("no_react");
+      if (!found.can.react) {
+        const message = await fetchMessage(found.channel, messageId);
+        if (isRejected(message)) return message;
+        if (!hasReaction(message, emoji)) return rejected("no_react");
+      }
       const done = await attempt(() =>
         client.rest.put(
           Routes.channelMessageOwnReaction(channelId, messageId, reactionIdentifier(emoji)),

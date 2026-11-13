@@ -113,7 +113,7 @@ describe("Message", () => {
     );
     expect(html).toContain('<video class="attachment-media"');
     expect(html).toContain(">plik.zip</a>");
-    expect(html).toContain("3.0 MB");
+    expect(html).toContain("3 MB");
     // Another host: a link, not an image.
     expect(html).not.toContain('<img src="https://example.com');
     expect(html).toContain('href="https://example.com/gdzie.png"');

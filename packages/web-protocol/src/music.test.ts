@@ -62,6 +62,12 @@ describe("music tracks", () => {
     expect(trackKey("other")).not.toBe(key);
   });
 
+  test("a track without a known requester is still valid, with a null requester", () => {
+    const info = toMusicTrackInfo(source({ requesterId: "" }));
+    expect(info.requesterId).toBeNull();
+    expect(MusicTrackInfo.safeParse(info).success).toBe(true);
+  });
+
   test("a track is cut to the limits and keeps only an https link", () => {
     const info = toMusicTrackInfo(
       source({

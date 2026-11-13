@@ -307,3 +307,32 @@ describe("prefixOnly options", () => {
     expect(usageLine(command, "set", "slash")).toBe("greet set [tag]");
   });
 });
+
+describe("choice aliases", () => {
+  const loop = defineCommand({
+    name: "loop",
+    description: "Loop",
+    options: {
+      mode: {
+        type: "string",
+        description: "Mode",
+        required: true,
+        choices: [
+          { name: "wyłączone", value: "off", aliases: ["wyłącz", "Wyłączona"] },
+          { name: "utwór", value: "track" },
+        ],
+      },
+    },
+    run: noop,
+  });
+
+  test("a value, a name or an alias resolves to the value, whatever the case", () => {
+    for (const word of ["off", "wyłączone", "wyłącz", "WYŁĄCZONA", "WYŁĄCZ"]) {
+      expect(parsePrefixArgs(loop, word)).toEqual({ ok: true, args: { mode: "off" } });
+    }
+  });
+
+  test("an unlisted word is still refused", () => {
+    expect(parsePrefixArgs(loop, "nigdy").ok).toBe(false);
+  });
+});

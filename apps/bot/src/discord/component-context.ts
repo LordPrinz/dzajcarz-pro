@@ -1,4 +1,9 @@
-import type { ComponentContext, ResolvedComponent } from "@dzajcarz/core";
+import {
+  type ComponentContext,
+  DEFAULT_LOCALE,
+  type Locale,
+  type ResolvedComponent,
+} from "@dzajcarz/core";
 import {
   type ButtonInteraction,
   MessageFlags,
@@ -13,6 +18,7 @@ import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 export function contextFromComponent(
   interaction: ButtonInteraction | StringSelectMenuInteraction | UserSelectMenuInteraction,
   resolved: ResolvedComponent,
+  locale: Locale = DEFAULT_LOCALE,
 ): ComponentContext {
   // How the click was answered decides where `update` lands:
   // "update" and "defer" make the interaction response the clicked message (editReply edits it);
@@ -29,6 +35,7 @@ export function contextFromComponent(
     memberPermissions: interaction.inGuild()
       ? (interaction.memberPermissions?.bitfield ?? 0n)
       : null,
+    locale,
     get acknowledged() {
       return answer !== "none";
     },
@@ -71,7 +78,7 @@ export function contextFromComponent(
     },
     async showModal(modal) {
       if (answer !== "none") throw new Error(MODAL_NOT_FIRST);
-      await interaction.showModal(toModalPayload(modal));
+      await interaction.showModal(toModalPayload(modal, locale));
       // The modal is the response; later answers are follow-ups or webhook edits.
       answer = "reply";
     },

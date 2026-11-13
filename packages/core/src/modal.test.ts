@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  coreMessages,
   createRegistry,
   defineButton,
   defineCommand,
   defineModal,
   MODAL_MAX_TITLE,
-  NOT_YOUR_MODAL,
   parseModalValues,
   REJECTED_MODAL_VALUE,
-  UNKNOWN_MODAL,
   validateModal,
 } from "./index.ts";
 import {
@@ -353,6 +352,12 @@ describe("submitting a modal", () => {
     expect(() => parseModalValues(fields, { a: "toolong" })).toThrow("musi mieć do 5 znaków");
   });
 
+  test("text length counts code points, so three emoji fit a maxLength of 3", () => {
+    const fields = { a: { type: "short", label: "A", maxLength: 3 } } as const;
+    expect(() => parseModalValues(fields, { a: "😀😀😀" })).not.toThrow();
+    expect(() => parseModalValues(fields, { a: "😀😀😀😀" })).toThrow("do 3 znaków");
+  });
+
   test("only the owner may submit", async () => {
     const { registry, seen, feedback } = setup();
     const ctx = await submitModal({
@@ -362,7 +367,7 @@ describe("submitting a modal", () => {
       userId: "999999999999999999",
     });
     expect(seen).toEqual([]);
-    expect(replyText(ctx.replies[0])).toBe(NOT_YOUR_MODAL);
+    expect(replyText(ctx.replies[0])).toBe(coreMessages("pl").notYourModal);
   });
 
   test("permissions and guildOnly are checked on submit", async () => {
@@ -394,7 +399,7 @@ describe("submitting a modal", () => {
   test("an unknown modal gets the outdated message", async () => {
     const { registry } = setup();
     const ctx = await submitModal({ registry, customId: `fun:gone:${OWNER}:` });
-    expect(ctx.replies[0]).toEqual({ content: UNKNOWN_MODAL, ephemeral: true });
+    expect(ctx.replies[0]).toEqual({ content: coreMessages("pl").unknownModal, ephemeral: true });
   });
 
   test("a failing handler is answered with the generic message", async () => {

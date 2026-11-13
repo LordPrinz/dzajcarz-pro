@@ -31,7 +31,7 @@ const LABELS = [
   { name: "area:infra", color: "e99695", description: "CI/CD, deployment, tooling" },
   { name: "area:schedule", color: "1d76db", description: "Scheduled songs and messages" },
   { name: "area:messages", color: "f4a8c6", description: "Stored and scheduled messages" },
-  { name: "area:riot", color: "d93f0b", description: "Riot account linking and stats" },
+  { name: "area:riot", color: "d93f0b", description: "Riot stats (Valorant, League)" },
   { name: "area:dzajco", color: "fbca04", description: '"What" to gif replies' },
   { name: "area:settings", color: "c5b3f5", description: "Per-guild settings" },
   { name: "area:web", color: "0e8a16", description: "Web panel" },

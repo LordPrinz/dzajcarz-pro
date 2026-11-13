@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing/context.ts"
+    "./format": "./src/format.ts",
+    "./testing": "./src/testing/context.ts",
+    "./testing/settle": "./src/testing/settle.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."

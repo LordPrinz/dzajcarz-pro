@@ -80,4 +80,25 @@ describe("guild setting cache with a stalled Redis", () => {
     expect(await cache.resolve(GUILD)).toBe("?");
     expect(loads).toBe(1);
   });
+
+  test("two forgets for one guild cannot leave the older read cached", async () => {
+    let calls = 0;
+    const cache = createGuildSettingCache({
+      name: "prefix",
+      async load() {
+        // The first read is slow and sees the old value; the second sees the new one.
+        if (++calls === 1) {
+          await Bun.sleep(20);
+          return "old";
+        }
+        return "new";
+      },
+      fallback: "!",
+      cache: createMemoryStore(),
+      logger: silentLogger,
+    });
+    await Promise.all([cache.forget(GUILD), cache.forget(GUILD)]);
+    expect(await cache.resolve(GUILD)).toBe("new");
+    expect(calls).toBe(2);
+  });
 });

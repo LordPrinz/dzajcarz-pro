@@ -2,6 +2,9 @@ import type { Reply } from "@dzajcarz/core";
 
 /** What the music module needs from the outside world. apps/bot implements these around Lavalink and Discord. */
 
+/** Loudest volume `/volume` accepts, in percent. */
+export const MAX_VOLUME = 150;
+
 /** What a member asked for: a link, or words to search YouTube with. Never a raw Lavalink identifier. */
 export type MusicQuery = { kind: "url"; url: string } | { kind: "search"; text: string };
 
@@ -95,8 +98,9 @@ export interface MusicPlayer {
   /**
    * Ends the current track if it is still `expectedTrackId` (a `MusicTrack.id`) and was not skipped already;
    * with an empty queue that ends the queue. Two quick skips of the same track skip it once.
+   * Resolves to whether this call skipped; false when another track plays by now or a skip was on its way.
    */
-  skip(guildId: string, expectedTrackId: string): Promise<void>;
+  skip(guildId: string, expectedTrackId: string): Promise<boolean>;
   pause(guildId: string): Promise<void>;
   resume(guildId: string): Promise<void>;
   setLoop(guildId: string, mode: LoopMode): Promise<void>;

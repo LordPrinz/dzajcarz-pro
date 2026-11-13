@@ -39,8 +39,33 @@ const modal = defineModal({
 });
 
 describe("toModalPayload", () => {
+  test("shows every text in the member's language", () => {
+    const localized = defineModal({
+      module: "fun",
+      name: "sized",
+      title: { pl: "Rozmiar", en: "Size", de: "Größe" },
+      fields: {
+        size: {
+          type: "select",
+          label: { pl: "Wybierz", en: "Pick", de: "Wähle" },
+          description: { pl: "jeden", en: "one", de: "eins" },
+          placeholder: { pl: "nic", en: "nothing", de: "nichts" },
+          options: [{ label: { pl: "Mała", en: "Small", de: "Klein" }, value: "s" }],
+        },
+      },
+      async run() {},
+    });
+    const payload = toModalPayload(localized.build("1"), "de");
+    expect(payload.title).toBe("Größe");
+    expect(payload.components[0]).toMatchObject({
+      label: "Wähle",
+      description: "eins",
+      component: { placeholder: "nichts", options: [{ label: "Klein", value: "s" }] },
+    });
+  });
+
   test("wraps every field in a Label component", () => {
-    const payload = toModalPayload(modal.build("1", "d"));
+    const payload = toModalPayload(modal.build("1", "d"), "pl");
     expect(payload.custom_id).toBe("fun:form:1:d");
     expect(payload.title).toBe("Formularz");
     expect(payload.components.map((c) => ("component" in c ? c.component.type : null))).toEqual([
@@ -152,7 +177,7 @@ const attach = defineModal({
 
 describe("multi-user select and file upload", () => {
   test("the payload asks Discord for the value range and a file upload", () => {
-    const payload = toModalPayload(attach.build("1"));
+    const payload = toModalPayload(attach.build("1"), "pl");
     const inner = payload.components.map((c) => ("component" in c ? c.component : null));
     expect(inner[0]).toMatchObject({
       type: ComponentType.UserSelect,
@@ -178,7 +203,7 @@ describe("multi-user select and file upload", () => {
         fields: { f: { type: "file", label: "Plik", contentTypes } },
         async run() {},
       });
-      const field = toModalPayload(m.build("1")).components[0];
+      const field = toModalPayload(m.build("1"), "pl").components[0];
       return field && "component" in field && "file_types" in field.component
         ? field.component.file_types
         : "missing";
@@ -204,7 +229,7 @@ describe("multi-user select and file upload", () => {
         fields: { u: { type: "user", label: "Kto", required, minValues, maxValues: 5 } },
         async run() {},
       });
-      const field = toModalPayload(m.build("1")).components[0];
+      const field = toModalPayload(m.build("1"), "pl").components[0];
       return field && "component" in field && "min_values" in field.component
         ? field.component.min_values
         : "missing";
@@ -223,7 +248,7 @@ describe("multi-user select and file upload", () => {
       fields: { proof: { type: "file", label: "Plik" } },
       async run() {},
     });
-    const [label] = toModalPayload(required.build("1")).components;
+    const [label] = toModalPayload(required.build("1"), "pl").components;
     expect(label && "component" in label ? label.component : null).toMatchObject({
       required: true,
       min_values: 1,

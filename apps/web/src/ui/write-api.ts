@@ -1,6 +1,8 @@
 // The panel's writing endpoints (#147). Like reading-api.ts, the shapes mirror `@dzajcarz/web-protocol`
 // without bundling zod.
 
+import { formatBytes } from "@dzajcarz/core/format";
+
 /** Discord's limit for the text of one message. */
 export const MAX_MESSAGE_LENGTH = 2000;
 /** Discord takes at most 10 files per message. */
@@ -49,7 +51,8 @@ export type WriteError =
   | "dm_closed"
   | "file_too_large"
   | "too_many_files"
-  | "upload_missing";
+  | "upload_missing"
+  | "upload_busy";
 
 export const WRITE_ERRORS: Record<WriteError, string> = {
   unavailable: "Bot niedostępny, nic nie wysłano",
@@ -77,6 +80,7 @@ export const WRITE_ERRORS: Record<WriteError, string> = {
   file_too_large: "Pliki przekraczają limit tego kanału",
   too_many_files: `Najwyżej ${MAX_FILES} plików w jednej wiadomości`,
   upload_missing: "Załączniki wygasły, wyślij jeszcze raz",
+  upload_busy: "Załączniki są jeszcze wysyłane, spróbuj za chwilę",
 };
 
 export type WriteResult<T> = { ok: true; data: T } | { ok: false; error: WriteError };
@@ -240,14 +244,12 @@ export function checkFiles(
 ): string | null {
   if (files.length > MAX_FILES) return WRITE_ERRORS.too_many_files;
   const tooBig = files.find((file) => file.size > uploadLimit);
-  if (tooBig) return `${tooBig.name}: ${WRITE_ERRORS.file_too_large} (${formatLimit(uploadLimit)})`;
+  if (tooBig) return `${tooBig.name}: ${WRITE_ERRORS.file_too_large} (${formatBytes(uploadLimit)})`;
   if (files.some((file) => file.size === 0)) return "Pusty plik nie zostanie wysłany";
   // Like the bot: all files together within the channel's limit, which is at most MAX_UPLOAD_BYTES.
   const total = files.reduce((sum, file) => sum + file.size, 0);
   if (total > Math.min(uploadLimit, MAX_UPLOAD_BYTES)) {
-    return `Pliki razem przekraczają ${formatLimit(uploadLimit)} na jedną wiadomość`;
+    return `Pliki razem przekraczają ${formatBytes(uploadLimit)} na jedną wiadomość`;
   }
   return null;
 }
-
-export const formatLimit = (bytes: number): string => `${Math.floor(bytes / 1024 / 1024)} MB`;

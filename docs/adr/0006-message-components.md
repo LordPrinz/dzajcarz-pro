@@ -92,7 +92,7 @@ Forms use the same model and the same routing.
   stricter than the field). Discord has no size limit per field and the payload is untrusted, so type and size
   are checked on every submit regardless. A field definition is validated at startup: `maxBytes` a positive integer,
   `contentTypes` non-empty with well-formed `type/subtype` or `family/*` entries. A problem is an ephemeral
-  Polish reply ("Pole „Temat” jest wymagane.", "Pole „Kanał” ma nieprawidłową wartość.") and the handler
+  reply in the submitter's language ("Pole „Temat” jest wymagane.", "Pole „Kanał” ma nieprawidłową wartość.") and the handler
   does not run. Otherwise `ctx.values` has one entry per field: a string, or `undefined` for a field with
   `required: false` left empty. Channel and user fields hold the id. The handler gets an explicit context
   (identity, `state`, `values`, `canUpdate`, `reply`, `defer`, `update`, `acknowledged`), safe to spread.

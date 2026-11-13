@@ -43,8 +43,8 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     every start and sets `LOGIN PASSWORD` from `WEB_POSTGRES_PASSWORD`, which works on an existing volume
     where initdb scripts never run. Migration 0015 (#145) grants `SELECT` on the archive and its settings
     (`archived_message`, `archived_message_version`, `archive_settings`, `archive_dm_settings`) and nothing
-    else: the panel never writes them, settings change through the bot. #146 adds grants for any table it
-    adds. Migration 0018 (#147) grants `INSERT` on four columns of `web_upload` (files for messages) and
+    else: the panel never writes them, settings change through the bot. #146 added no
+    tables. Migration 0018 (#147) grants `INSERT` on four columns of `web_upload` (files for messages) and
     nothing else on it: the panel cannot read, change or delete a staged file, nor set its age.
   - Redis: its own ACL user `web`, limited by `infra/redis/web-user.acl` to `PUBLISH`, `SUBSCRIBE`,
     `UNSUBSCRIBE` and `PING` on `dzajcarz:web:*`, with no keys. The redis service writes it into the config
@@ -205,9 +205,10 @@ keeps Redis for losable state only, ADR 5 keeps modules free of runtime and tran
     (a new one whenever the text, files, reply or mention switch change) and is sent with `enforceNonce`,
     so Discord answers a repeat within a few minutes with the message it already created. Files stay
     staged after a send until the hourly sweep, marked with the nonce that sent them (`sent_nonce`), and
-    the bot holds a row lock on them (`SELECT … FOR UPDATE`) while it sends. A retry after `bot_timeout`,
-    or two bot instances handling the same command, therefore get the same files with the same nonce and
-    post the message once, while another message cannot take files already sent (`upload_missing`).
+    the bot leases them (`claimed_at`, a short `UPDATE` rather than a transaction held open during the
+    upload; a lease older than ten minutes is stale) while it sends, one send with files at a time. A
+    retry after `bot_timeout` gets the same files with the same nonce and posts the message once, while
+    another message cannot take files already sent or leased (`upload_missing`).
     Deleting the files after a send would turn such a retry into `upload_missing`, and the owner sending
     again would post twice. Edit, delete and reactions are idempotent on Discord's side.
   - New DMs: `members.search` (at least 2 characters, typed searches start after a 300 ms pause) asks

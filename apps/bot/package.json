@@ -7,13 +7,14 @@
     "dev": "bun --env-file=../../.env --watch src/index.ts",
     "start": "bun --env-file=../../.env src/index.ts",
     "commands:deploy": "bun --env-file=../../.env src/deploy-commands.ts",
-    "build": "bun build src/index.ts --compile --minify --sourcemap --outfile dist/bot",
+    "build": "bun build src/index.ts --compile --minify --sourcemap --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/bot",
     "typecheck": "tsc -p ."
   },
   "dependencies": {
     "@dzajcarz/core": "workspace:*",
     "@dzajcarz/db": "workspace:*",
     "@dzajcarz/kv": "workspace:*",
+    "@dzajcarz/module-birthday": "workspace:*",
     "@dzajcarz/module-dzajco": "workspace:*",
     "@dzajcarz/module-fun": "workspace:*",
     "@dzajcarz/module-general": "workspace:*",

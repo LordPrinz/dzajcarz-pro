@@ -181,7 +181,10 @@ function validateSelect(select: SelectSpec, at: string): void {
 
 /** What a handler sees. Reuses the identity fields of a command context. */
 export interface ComponentContext
-  extends Pick<CommandContext, "user" | "guildId" | "place" | "channelId" | "memberPermissions"> {
+  extends Pick<
+    CommandContext,
+    "user" | "guildId" | "place" | "channelId" | "memberPermissions" | "locale"
+  > {
   /** The `<data>` part of the custom_id. */
   readonly state: string;
   /** Chosen option values of a select menu, or the chosen user id of a user select; empty for a button. */

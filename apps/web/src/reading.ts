@@ -160,6 +160,20 @@ export function readingRoutes({
     return resolved;
   }
 
+  /** Roles and channels belong to a server, so each message is resolved against its own (a search spans many). */
+  async function resolveByGuild(messages: PanelMessage[]): Promise<Resolved> {
+    const byGuild = Map.groupBy(messages, (message) => message.guildId);
+    const merged = emptyResolved();
+    for (const part of await Promise.all(
+      [...byGuild].map(([guildId, group]) => resolveNames(guildId, group)),
+    )) {
+      Object.assign(merged.users, part.users);
+      Object.assign(merged.roles, part.roles);
+      Object.assign(merged.channels, part.channels);
+    }
+    return merged;
+  }
+
   const fromArchive = async (
     channelId: string,
     guild: string,
@@ -300,7 +314,7 @@ export function readingRoutes({
     const last = results.at(-1);
     return Response.json({
       results,
-      resolved: await resolveNames(guild && guild !== "dm" ? guild : null, results),
+      resolved: await resolveByGuild(results),
       nextBefore: found.hasMore && last ? last.id : null,
     });
   };

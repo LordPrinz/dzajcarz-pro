@@ -45,7 +45,8 @@ commits since the pinned one, then take the new index digest:
 docker buildx imagetools inspect ghcr.io/kikkia/yt-cipher:master   # "Digest: sha256:…"
 ```
 
-Put that digest in `infra/docker-compose.yml` and recreate the `yt-cipher` and `lavalink` services.
+Put that digest in `infra/docker-compose.yml` and `infra/docker-compose.prod.yml`, then recreate the
+`yt-cipher` and `lavalink` services.
 
 **A youtube-plugin snapshot.** With the cipher working, every client in 1.18.2 still failed. Only the
 IOS client update on youtube-source `main` (not in a release yet) plays, so the plugin is pinned to the

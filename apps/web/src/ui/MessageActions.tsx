@@ -40,6 +40,8 @@ export function MessageActions({ message, info, onReply, onNotice }: MessageActi
 
   if (message.deletedAt) return null;
   const own = info !== null && message.author.id === info.botUserId;
+  // Saving a cut copy would overwrite the full message on Discord.
+  const canEdit = own && !message.truncated;
   /** Why the bot cannot delete this message, or null when it can (or does not know yet). */
   const noDelete =
     own || info === null
@@ -95,7 +97,7 @@ export function MessageActions({ message, info, onReply, onNotice }: MessageActi
         >
           Reaguj
         </button>
-        {own ? (
+        {canEdit ? (
           <button
             type="button"
             aria-expanded={open === "edit"}

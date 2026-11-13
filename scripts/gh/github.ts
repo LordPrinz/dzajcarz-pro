@@ -19,7 +19,11 @@ export function createGraphql(token: string) {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ query, variables }),
     });
-    const body = (await res.json()) as { data?: T; errors?: { message: string }[] };
+    // A gateway error answers with HTML; without the catch its SyntaxError would hide the status.
+    const body = (await res.json().catch(() => ({}))) as {
+      data?: T;
+      errors?: { message: string }[];
+    };
     if (!res.ok || body.errors?.length) {
       throw new Error(
         body.errors?.map((e) => e.message).join("; ") ?? `GraphQL HTTP ${res.status}`,

@@ -11,6 +11,7 @@ import {
   tickMinute,
   UserError,
 } from "@dzajcarz/core";
+import { t } from "./messages.ts";
 
 /** A song the schedule may play. `name` is the fixed key stored in settings; `title` is what members read. */
 export interface ScheduledSong {
@@ -227,51 +228,52 @@ export function createScheduleModule({
 
   const schedule = defineCommand({
     name: "schedule",
-    description: "Piosenka o stałych porach na najbardziej zaludnionym kanale głosowym",
+    description: t.all("scheduleDescription"),
     permissions: MANAGE_GUILD,
     subcommands: {
       list: defineSubcommand({
-        description: "Pokazuje piosenkę, godziny i wykluczone kanały",
+        description: t.all("listDescription"),
         run: async (ctx) => {
           const guildId = requireGuild(ctx.guildId);
           const [song, excluded] = await Promise.all([
             chosenSong(guildId),
             settings.listExcluded(guildId),
           ]);
+          const text = t(ctx.locale);
           const lines = [
-            `Piosenka: **${song.title}**`,
-            `Harmonogram: \`${expression}\` (${await timeZones.of(guildId)}, zmienisz przez /timezone)`,
+            text.song(song.title),
+            text.timetable(expression, await timeZones.of(guildId)),
             excluded.length > 0
-              ? `Wykluczone kanały: ${excluded.map(channelLine).join(", ")}`
-              : "Brak wykluczonych kanałów.",
+              ? text.excludedChannels(excluded.map(channelLine).join(", "))
+              : text.noExcludedChannels,
           ];
           await ctx.reply({ content: lines.join("\n"), ephemeral: true });
         },
       }),
       exclude: defineSubcommand({
-        description: "Wyklucza kanał głosowy z odtwarzania",
+        description: t.all("excludeDescription"),
         options: {
-          channel: { type: "channel", description: "Kanał głosowy", required: true },
+          channel: { type: "channel", description: t.all("voiceChannelOption"), required: true },
         },
         run: async (ctx) => {
           const guildId = requireGuild(ctx.guildId);
           const { channel } = ctx.args;
           if (!(await voice.isVoiceChannelOf(guildId, channel))) {
-            throw new UserError("Wybierz kanał głosowy z tego serwera.");
+            throw new UserError((l) => t(l).notAVoiceChannel);
           }
           const added = await settings.addExcluded(guildId, channel);
           await ctx.reply({
             content: added
-              ? `Kanał ${channelLine(channel)} jest wykluczony.`
-              : `Kanał ${channelLine(channel)} był już wykluczony.`,
+              ? t(ctx.locale).excluded(channelLine(channel))
+              : t(ctx.locale).alreadyExcluded(channelLine(channel)),
             ephemeral: true,
           });
         },
       }),
       include: defineSubcommand({
-        description: "Przywraca wykluczony kanał głosowy",
+        description: t.all("includeDescription"),
         options: {
-          channel: { type: "channel", description: "Kanał głosowy", required: true },
+          channel: { type: "channel", description: t.all("voiceChannelOption"), required: true },
         },
         run: async (ctx) => {
           const guildId = requireGuild(ctx.guildId);
@@ -280,22 +282,29 @@ export function createScheduleModule({
           const removed = await settings.removeExcluded(guildId, channel);
           await ctx.reply({
             content: removed
-              ? `Kanał ${channelLine(channel)} nie jest już wykluczony.`
-              : `Kanał ${channelLine(channel)} nie był wykluczony.`,
+              ? t(ctx.locale).included(channelLine(channel))
+              : t(ctx.locale).notExcluded(channelLine(channel)),
             ephemeral: true,
           });
         },
       }),
       song: defineSubcommand({
-        description: "Wybiera piosenkę (bez nazwy: pokazuje dostępne, reset: domyślna)",
+        description: t.all("songDescription"),
         options: {
           name: {
             type: "string",
-            description: "Nazwa piosenki",
+            description: t.all("songOption"),
             required: false,
             choices: [
               ...songs.map((song) => ({ name: song.title, value: song.name })),
-              { name: `Domyślna (${defaultSong.title})`, value: RESET },
+              {
+                name: {
+                  pl: t("pl").defaultSongChoice(defaultSong.title),
+                  en: t("en").defaultSongChoice(defaultSong.title),
+                  de: t("de").defaultSongChoice(defaultSong.title),
+                },
+                value: RESET,
+              },
             ],
           },
         },
@@ -306,7 +315,7 @@ export function createScheduleModule({
             const current = await chosenSong(guildId);
             const available = songs.map((song) => `\`${song.name}\` (${song.title})`).join(", ");
             await ctx.reply({
-              content: `Teraz: **${current.title}**. Dostępne: ${available}. \`${RESET}\` przywraca domyślną.`,
+              content: t(ctx.locale).currentSong(current.title, available, RESET),
               ephemeral: true,
             });
             return;
@@ -315,20 +324,19 @@ export function createScheduleModule({
             const cleared = await settings.clearSong(guildId);
             await ctx.reply({
               content: cleared
-                ? `Przywrócono domyślną piosenkę: **${defaultSong.title}**.`
-                : `Już gra domyślna piosenka: **${defaultSong.title}**.`,
+                ? t(ctx.locale).songReset(defaultSong.title)
+                : t(ctx.locale).songAlreadyDefault(defaultSong.title),
               ephemeral: true,
             });
             return;
           }
           const song = songByName.get(name);
           if (!song) {
-            throw new UserError(
-              `Nie znam piosenki \`${name}\`. Dostępne: ${songs.map((s) => `\`${s.name}\``).join(", ")}.`,
-            );
+            const available = songs.map((s) => `\`${s.name}\``).join(", ");
+            throw new UserError((l) => t(l).unknownSong(name, available));
           }
           await settings.setSong(guildId, song.name);
-          await ctx.reply({ content: `Wybrana piosenka: **${song.title}**.`, ephemeral: true });
+          await ctx.reply({ content: t(ctx.locale).songChosen(song.title), ephemeral: true });
         },
       }),
     },

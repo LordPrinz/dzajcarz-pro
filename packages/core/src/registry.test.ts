@@ -125,6 +125,22 @@ describe("createRegistry", () => {
     expect(() => createRegistry([{ name: "m", commands: [notLast] }])).toThrow('"rest"');
     expect(() => createRegistry([{ name: "m", commands: [notString] }])).toThrow('"rest"');
   });
+
+  test("refuses rest together with choices", () => {
+    const both = command("x", {
+      options: {
+        a: {
+          type: "string",
+          description: "a",
+          rest: true,
+          choices: [{ name: "A", value: "a" }],
+        },
+      },
+    });
+    expect(() => createRegistry([{ name: "m", commands: [both] }])).toThrow(
+      '"rest" and "choices" cannot be combined',
+    );
+  });
 });
 
 describe("subcommands", () => {
@@ -211,6 +227,29 @@ describe("option limits Discord checks at deploy time", () => {
   test("minValue / maxValue only on numbers, in order", () => {
     reject({ type: "string", minValue: 1 }, "allowed only on integer");
     reject({ type: "integer", minValue: 5, maxValue: 1 }, "greater than maxValue");
+  });
+
+  test("an integer option takes integer bounds, a number option any", () => {
+    reject({ type: "integer", minValue: 1.5 }, "must be integers");
+    reject({ type: "integer", maxValue: 9.5 }, "must be integers");
+    expect(() =>
+      createRegistry([
+        { name: "m", commands: [withOption({ type: "number", minValue: 0.5, maxValue: 1.5 })] },
+      ]),
+    ).not.toThrow();
+  });
+
+  test("choice aliases may not be empty or clash with another choice", () => {
+    const choices = (...aliases: string[][]) =>
+      aliases.map((list, i) => ({ name: `Name${i}`, value: `v${i}`, aliases: list }));
+    reject({ type: "string", choices: choices(["a"], ["A"]) }, "ambiguous");
+    reject({ type: "string", choices: choices(["v1"], []) }, "ambiguous");
+    reject({ type: "string", choices: choices([" "]) }, "empty or padded");
+    expect(() =>
+      createRegistry([
+        { name: "m", commands: [withOption({ type: "string", choices: choices(["a"], ["b"]) })] },
+      ]),
+    ).not.toThrow();
   });
 });
 

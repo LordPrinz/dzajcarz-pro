@@ -13,6 +13,7 @@ function setup() {
     guild_id: guildId,
     prefix: null,
     time_zone: stored.get(guildId) ?? null,
+    locale: null,
     created_at: new Date(),
     updated_at: new Date(),
   });

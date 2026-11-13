@@ -72,7 +72,7 @@ const SELECT_FIELDS: Record<string, Option[]> = {
     {
       name: "Riot",
       color: "RED",
-      description: "Riot account linking and stats",
+      description: "Riot stats (Valorant, League)",
       label: "area:riot",
     },
     { name: "Dzajco", color: "YELLOW", description: '"What" to gif replies', label: "area:dzajco" },
@@ -178,7 +178,10 @@ await graphql(
     }
   }`,
   { projectId: project.id, repositoryId: ids.repository.id },
-).catch(() => {}); // already linked
+).catch((error: unknown) => {
+  // Only "already linked" is fine; an auth or scope failure must not pass for success.
+  if (!/already/i.test((error as Error).message)) throw error;
+});
 
 // --- 2. Status columns ----------------------------------------------------------
 const wantedStatuses = STATUS_OPTIONS.map((s) => s.name);
@@ -332,13 +335,49 @@ if (!fieldByName.has("Sprint")) {
 }
 
 // --- 4. Issues ------------------------------------------------------------------
-const issues =
-  (await gh`gh api ${`repos/${owner}/${repo}/issues?state=open&per_page=100`}`.json()) as {
+const issues = (
+  (await gh`gh api --paginate --slurp ${`repos/${owner}/${repo}/issues?state=open&per_page=100`}`.json()) as {
     number: number;
     pull_request?: unknown;
     labels: { name: string }[];
     milestone: { title: string } | null;
-  }[];
+  }[][]
+).flat();
+
+// Issues whose card already has a Status keep it: a re-run must not drag In Progress or QA back.
+const withStatus = new Set<number>();
+for (let cursor: string | null = null; ; ) {
+  const page: {
+    node: {
+      items: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        nodes: { content: { number?: number } | null; status: { optionId: string } | null }[];
+      };
+    };
+  } = await graphql(
+    `query($projectId: ID!, $cursor: String) {
+      node(id: $projectId) {
+        ... on ProjectV2 {
+          items(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              content { ... on Issue { number } }
+              status: fieldValueByName(name: "Status") {
+                ... on ProjectV2ItemFieldSingleSelectValue { optionId }
+              }
+            }
+          }
+        }
+      }
+    }`,
+    { projectId: project.id, cursor },
+  );
+  for (const item of page.node.items.nodes) {
+    if (item.content?.number !== undefined && item.status) withStatus.add(item.content.number);
+  }
+  if (!page.node.items.pageInfo.hasNextPage) break;
+  cursor = page.node.items.pageInfo.endCursor;
+}
 const todoId = project.statusOptions.get("Todo");
 const backlogId = project.statusOptions.get("Backlog");
 
@@ -346,7 +385,8 @@ for (const issue of issues.filter((i) => !i.pull_request)) {
   const itemId = await ensureIssueItem(graphql, project, owner, repo, issue.number);
   if (!itemId) continue;
   const statusId = issue.milestone?.title.startsWith("M1") ? todoId : backlogId;
-  if (statusId) await setSingleSelect(graphql, project.id, itemId, project.statusFieldId, statusId);
+  if (statusId && !withStatus.has(issue.number))
+    await setSingleSelect(graphql, project.id, itemId, project.statusFieldId, statusId);
   for (const label of issue.labels) {
     const target = labelTargets.get(label.name);
     if (target) await setSingleSelect(graphql, project.id, itemId, target.fieldId, target.optionId);

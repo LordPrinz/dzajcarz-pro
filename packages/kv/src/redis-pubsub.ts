@@ -9,9 +9,10 @@ export interface RedisPubSub extends PubSub {
   resubscribe(): Promise<void>;
 }
 
-/** Where a native subscribe that failed (and waits for `resubscribe`) is reported. */
+/** Where a native subscribe that failed (and waits for `resubscribe`) and a throwing listener are reported. */
 export interface PubSubLog {
   debug(message: string, fields?: Record<string, unknown>): void;
+  warn(message: string, fields?: Record<string, unknown>): void;
 }
 
 interface Channel {
@@ -30,7 +31,7 @@ interface Channel {
 export function createRedisPubSub({
   publisher,
   subscriber,
-  log = { debug() {} },
+  log = { debug() {}, warn() {} },
 }: {
   publisher: RedisClient;
   subscriber: RedisClient;
@@ -57,7 +58,9 @@ export function createRedisPubSub({
     // Bun throws (synchronously) when the connection is not in subscriber mode, i.e. holds none yet.
     try {
       await subscriber.unsubscribe(channel);
-    } catch {}
+    } catch (error) {
+      log.warn("Could not unsubscribe", { channel, error });
+    }
   }
 
   return {
@@ -80,7 +83,9 @@ export function createRedisPubSub({
               // One failing listener must not starve the others.
               try {
                 each(message);
-              } catch {}
+              } catch (error) {
+                log.warn("A pub/sub listener threw", { error });
+              }
             }
           },
         };

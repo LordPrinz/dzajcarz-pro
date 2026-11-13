@@ -6,7 +6,7 @@ import {
   type Logger,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext, replyText } from "@dzajcarz/core/testing";
+import { createFakeContext, renderCatalog, replyText } from "@dzajcarz/core/testing";
 import { createMemoryStore, type KeyValueStore } from "@dzajcarz/kv";
 import {
   createDzajcoModule,
@@ -16,6 +16,7 @@ import {
   type DzajcoSettings,
   type DzajcoSettingsStore,
 } from "./index.ts";
+import { t as messages } from "./messages.ts";
 
 const MANAGE_GUILD = 1n << 5n;
 const guildId = "100000000000000001";
@@ -109,8 +110,9 @@ function setup({
     args: Record<string, unknown> = {},
     memberPermissions: bigint = MANAGE_GUILD,
     guild: string | null = guildId,
+    locale: "pl" | "en" | "de" = "pl",
   ) => {
-    const ctx = createFakeContext({ args, subcommand, memberPermissions, guildId: guild });
+    const ctx = createFakeContext({ args, subcommand, memberPermissions, guildId: guild, locale });
     if (guild === null) Object.assign(ctx, { channelId: dmChannelId });
     await executeCommand(command, ctx, silentLogger);
     return ctx.replies.map((r) => replyText(r));
@@ -482,5 +484,39 @@ describe("threads, voice chats and DMs", () => {
       installs: ["guild"],
     });
     expect(t.registry.find("dzajco")?.permissions).toBeUndefined();
+  });
+});
+
+describe("languages", () => {
+  test("/dzajco answers in English", async () => {
+    const t = setup();
+    expect(await t.run("show", {}, MANAGE_GUILD, guildId, "en")).toEqual([
+      `Dżajco in <#${channelId}>: 3% chance, 60 s cooldown (default).`,
+    ]);
+    expect(await t.run("set", {}, MANAGE_GUILD, guildId, "en")).toEqual([
+      "Give a chance or a cooldown.",
+    ]);
+    expect(await t.run("reset", {}, 0n, null, "en")).toEqual([
+      "The Dżajco settings in this conversation were already the default.",
+    ]);
+  });
+
+  test("/dzajco answers in German", async () => {
+    const t = setup();
+    expect(await t.run("set", { chance: 10 }, MANAGE_GUILD, guildId, "de")).toEqual([
+      `Dżajco in <#${channelId}>: 10\u00A0% Wahrscheinlichkeit, 60\u00A0s Pause.`,
+    ]);
+    expect(await t.run("reset", {}, MANAGE_GUILD, guildId, "de")).toEqual([
+      `Die Standard-Einstellungen von Dżajco in <#${channelId}> wurden wiederhergestellt.`,
+    ]);
+    expect(await t.run("set", { channel: channelId }, 0n, null, "de")).toEqual([
+      "In einer privaten Nachricht kannst du nur diese Unterhaltung einstellen.",
+    ]);
+  });
+
+  test("every catalog text is filled in", () => {
+    for (const texts of Object.values(renderCatalog(messages))) {
+      for (const s of Object.values(texts)) expect(s.trim()).not.toBe("");
+    }
   });
 });

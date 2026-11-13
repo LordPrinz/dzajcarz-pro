@@ -99,6 +99,13 @@ describe("MessageActions", () => {
     await theirs.unmount();
   });
 
+  test("a truncated message cannot be edited: saving would overwrite the full text", async () => {
+    const view = mount({ ...message(BOT), truncated: true }, info(false));
+    await view.render();
+    expect(view.button("Edytuj")).toBeUndefined();
+    await view.unmount();
+  });
+
   test("without Manage Messages, deleting someone else's message says why and sends nothing", async () => {
     const view = mount(message(OLA), info(false));
     await view.render();

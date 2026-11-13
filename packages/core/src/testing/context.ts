@@ -1,8 +1,16 @@
 import type { CommandContext, CommandPlace, Invocation, Reply } from "../command.ts";
 import { type ComponentContext, validateRows } from "../component.ts";
-import { executeComponent, executeModal, UNKNOWN_COMPONENT, UNKNOWN_MODAL } from "../dispatch.ts";
+import { executeComponent, executeModal } from "../dispatch.ts";
+import {
+  DEFAULT_LOCALE,
+  LOCALES,
+  type Locale,
+  type LocaleResolver,
+  type Messages,
+} from "../i18n.ts";
 import { validateReplyLimits } from "../limits.ts";
 import { silentLogger } from "../logger.ts";
+import { coreMessages } from "../messages.ts";
 import {
   type ModalBaseContext,
   type ModalRawValues,
@@ -32,6 +40,8 @@ export interface FakeContextOptions<A> {
   memberPermissions?: bigint | null;
   userId?: string;
   messageId?: string;
+  /** The language the bot answers in. Default `pl`. */
+  locale?: Locale;
 }
 
 /** An in-memory CommandContext for testing commands without Discord. */
@@ -44,6 +54,7 @@ export function createFakeContext<A = Record<string, unknown>>({
   memberPermissions = 0n,
   userId = "200000000000000002",
   messageId,
+  locale = DEFAULT_LOCALE,
 }: FakeContextOptions<A> = {}): FakeContext<A> {
   const ctx: FakeContext<A> = {
     args,
@@ -54,6 +65,7 @@ export function createFakeContext<A = Record<string, unknown>>({
     channelId: "300000000000000003",
     messageId,
     memberPermissions: guildId === null ? null : memberPermissions,
+    locale,
     user: { id: userId, displayName: "tester" },
     replies: [],
     modals: [],
@@ -110,6 +122,8 @@ export interface FakeComponentContextOptions {
   place?: CommandPlace;
   memberPermissions?: bigint | null;
   userId?: string;
+  /** The language the bot answers in. Default `pl`. */
+  locale?: Locale;
 }
 
 /** An in-memory ComponentContext for calling a button or select handler directly. */
@@ -120,6 +134,7 @@ export function createFakeComponentContext({
   place = guildId === null ? "bot-dm" : "guild",
   memberPermissions = 0n,
   userId = "200000000000000002",
+  locale = DEFAULT_LOCALE,
 }: FakeComponentContextOptions = {}): FakeComponentContext {
   const ctx: FakeComponentContext = {
     state,
@@ -128,6 +143,7 @@ export function createFakeComponentContext({
     place,
     channelId: "300000000000000003",
     memberPermissions: guildId === null ? null : memberPermissions,
+    locale,
     user: { id: userId, displayName: "tester" },
     updates: [],
     replies: [],
@@ -180,7 +196,7 @@ export async function clickComponent({
     state: resolved?.state,
   });
   if (!resolved) {
-    await ctx.reply({ content: UNKNOWN_COMPONENT, ephemeral: true });
+    await ctx.reply({ content: coreMessages(ctx.locale).unknownComponent, ephemeral: true });
     return ctx;
   }
   await executeComponent(resolved, ctx, silentLogger);
@@ -207,6 +223,8 @@ export interface FakeModalContextOptions {
   place?: CommandPlace;
   memberPermissions?: bigint | null;
   userId?: string;
+  /** The language the bot answers in. Default `pl`. */
+  locale?: Locale;
 }
 
 /** An in-memory modal context; `submitModal` adds the parsed `values` for the handler. */
@@ -217,6 +235,7 @@ export function createFakeModalContext({
   place = guildId === null ? "bot-dm" : "guild",
   memberPermissions = 0n,
   userId = "200000000000000002",
+  locale = DEFAULT_LOCALE,
 }: FakeModalContextOptions = {}): FakeModalContext {
   const ctx: FakeModalContext = {
     state,
@@ -224,6 +243,7 @@ export function createFakeModalContext({
     place,
     channelId: "300000000000000003",
     memberPermissions: guildId === null ? null : memberPermissions,
+    locale,
     user: { id: userId, displayName: "tester" },
     canUpdate: fromMessage,
     updates: [],
@@ -275,11 +295,46 @@ export async function submitModal({
     state: resolved?.state,
   });
   if (!resolved) {
-    await ctx.reply({ content: UNKNOWN_MODAL, ephemeral: true });
+    await ctx.reply({ content: coreMessages(ctx.locale).unknownModal, ephemeral: true });
     return ctx;
   }
   await executeModal(resolved, ctx, values, silentLogger);
   return ctx;
+}
+
+/** Answers `locale` for every server and member; pass maps to give some of them another language. */
+export function fakeLocales(
+  locale: Locale = DEFAULT_LOCALE,
+  {
+    guilds = {},
+    users = {},
+  }: { guilds?: Record<string, Locale>; users?: Record<string, Locale> } = {},
+): LocaleResolver {
+  return {
+    guild: async (guildId) => guilds[guildId] ?? locale,
+    user: async (userId) => users[userId] ?? locale,
+  };
+}
+
+/**
+ * Every entry of a catalog rendered in every language, so one test sees a translation that throws or comes
+ * out empty. A message function gets `args[key]`, or `1` for each parameter it declares.
+ */
+export function renderCatalog<C extends Record<string, string | ((...args: never[]) => string)>>(
+  messages: Messages<C>,
+  args: Partial<Record<keyof C, readonly unknown[]>> = {},
+): Record<Locale, Record<string, string>> {
+  const rendered = {} as Record<Locale, Record<string, string>>;
+  for (const locale of LOCALES) {
+    const texts: Record<string, string> = {};
+    for (const [key, entry] of Object.entries(messages(locale))) {
+      const call = entry as string | ((...values: unknown[]) => string);
+      texts[key] =
+        typeof call === "string" ? call : call(...(args[key] ?? Array(call.length).fill(1)));
+    }
+    rendered[locale] = texts;
+  }
+  return rendered;
 }
 
 /** The text of a reply, whether it was a string or an object. */

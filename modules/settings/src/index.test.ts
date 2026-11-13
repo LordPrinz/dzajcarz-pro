@@ -2,18 +2,21 @@ import { describe, expect, test } from "bun:test";
 import {
   createRegistry,
   executeCommand,
+  type Locale,
   matchPrefix,
   parsePrefixArgs,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext, replyText } from "@dzajcarz/core/testing";
+import { createFakeContext, renderCatalog, replyText } from "@dzajcarz/core/testing";
 import {
   createSettingsModule,
   type DisabledModule,
   type GuildChannels,
+  type LanguageSettings,
   type ModuleToggles,
   type PrefixSettings,
 } from "./index.ts";
+import { t } from "./messages.ts";
 
 const MANAGE_GUILD = 1n << 5n;
 
@@ -49,6 +52,7 @@ function setup() {
       defaultTimeZone: "Europe/Warsaw",
       modules: noModules,
       channels: channelsOf([]),
+      languages: memoryLanguages(),
     }),
   ]);
   const command = registry.find("prefix");
@@ -58,12 +62,27 @@ function setup() {
     subcommand: string,
     args: Record<string, unknown> = {},
     memberPermissions: bigint = MANAGE_GUILD,
+    locale: Locale = "pl",
   ) => {
-    const ctx = createFakeContext({ args, subcommand, memberPermissions });
+    const ctx = createFakeContext({ args, subcommand, memberPermissions, locale });
     await executeCommand(command, ctx, silentLogger);
     return ctx.replies.map((r) => replyText(r));
   };
   return { run, store, command };
+}
+
+function memoryLanguages() {
+  const guilds = new Map<string, Locale>();
+  const users = new Map<string, Locale>();
+  const settings: LanguageSettings = {
+    guild: async (guildId) => guilds.get(guildId) ?? null,
+    setGuild: async (guildId, locale) =>
+      void (locale ? guilds.set(guildId, locale) : guilds.delete(guildId)),
+    user: async (userId) => users.get(userId) ?? null,
+    setUser: async (userId, locale) =>
+      void (locale ? users.set(userId, locale) : users.delete(userId)),
+  };
+  return { ...settings, guilds, users };
 }
 
 describe("settings module: /prefix", () => {
@@ -142,6 +161,7 @@ describe("settings module: /modules", () => {
   const CHANNEL = "400000000000000004";
 
   const THREAD = "500000000000000005";
+  const CATEGORY = "600000000000000006";
 
   function setupModules({ threads = [] as string[] } = {}) {
     const disabled: DisabledModule[] = [];
@@ -169,7 +189,8 @@ describe("settings module: /modules", () => {
         timeZones: memoryZones(),
         defaultTimeZone: "Europe/Warsaw",
         modules,
-        channels: channelsOf([CHANNEL, THREAD], threads),
+        channels: channelsOf([CHANNEL, THREAD, CATEGORY], threads),
+        languages: memoryLanguages(),
       }),
     ]);
     const command = registry.find("modules");
@@ -197,7 +218,7 @@ describe("settings module: /modules", () => {
     const { run, modules } = setupModules();
     modules.moduleNames = () => ["general", "messages"];
     const [onChannel] = await run("disable", { module: "messages", channel: CHANNEL });
-    expect(onChannel).toContain(`na kanale <#${CHANNEL}>`);
+    expect(onChannel).toContain(`w <#${CHANNEL}>`);
     expect(onChannel).toContain("prywatne");
     const [wholeServer] = await run("disable", { module: "messages" });
     expect(wholeServer).toBe("Moduł `messages` jest wyłączony na serwerze.");
@@ -300,6 +321,14 @@ describe("settings module: /modules", () => {
     expect(reply).toContain("i jeszcze 20");
   });
 
+  test("a category can be switched off and is listed like a channel", async () => {
+    const { run, disabled } = setupModules();
+    const [reply] = await run("disable", { module: "music", channel: CATEGORY });
+    expect(reply).toContain(`w <#${CATEGORY}>`);
+    expect(disabled).toEqual([{ module: "music", channelId: CATEGORY }]);
+    expect((await run("list")).join("\n")).toContain(`\`music\`: wyłączony w <#${CATEGORY}>`);
+  });
+
   test("list shows every module and where it is off", async () => {
     const { run } = setupModules();
     await run("disable", { module: "music" });
@@ -311,7 +340,7 @@ describe("settings module: /modules", () => {
         "`settings`: włączony",
         "`status`: włączony",
         "`music`: wyłączony na serwerze",
-        `\`welcome\`: wyłączony na kanałach <#${CHANNEL}>`,
+        `\`welcome\`: wyłączony w <#${CHANNEL}>`,
       ].join("\n"),
     );
   });
@@ -357,6 +386,7 @@ describe("settings module: /timezone", () => {
           enable: async () => false,
         },
         channels: { belongsTo: async () => true, isThread: async () => false },
+        languages: memoryLanguages(),
         now: () => new Date("2026-07-01T12:00:00Z"),
       }),
     ]);
@@ -427,4 +457,130 @@ describe("settings module: /timezone", () => {
     ]);
     expect(zones.size).toBe(0);
   });
+});
+
+describe("settings module: /language", () => {
+  const GUILD = "100000000000000001";
+  const USER = "200000000000000002";
+
+  function setupLanguage() {
+    const languages = memoryLanguages();
+    const registry = createRegistry([
+      createSettingsModule({
+        prefixes: { get: async () => null, set: async () => {}, reset: async () => {} },
+        defaultPrefix: "!",
+        timeZones: memoryZones(),
+        defaultTimeZone: "Europe/Warsaw",
+        modules: noModules,
+        channels: channelsOf([]),
+        languages,
+      }),
+    ]);
+    const command = registry.find("language");
+    if (!command) throw new Error("language command missing");
+    const run = async (
+      args: Record<string, unknown>,
+      options: { guildId?: string | null; memberPermissions?: bigint; locale?: Locale } = {},
+    ) => {
+      const ctx = createFakeContext({ args, guildId: GUILD, ...options });
+      await executeCommand(command, ctx, silentLogger);
+      return replyText(ctx.replies[0]);
+    };
+    return { run, languages, command };
+  }
+
+  test("on a server it sets the server's language and answers in the new one", async () => {
+    const { run, languages } = setupLanguage();
+    expect(await run({ language: "en" }, { memberPermissions: MANAGE_GUILD })).toBe(
+      "From now on I speak English on this server.",
+    );
+    expect(languages.guilds.get(GUILD)).toBe("en");
+    expect(await run({ language: "de" }, { memberPermissions: MANAGE_GUILD, locale: "en" })).toBe(
+      "Ab jetzt spreche ich auf diesem Server Deutsch.",
+    );
+  });
+
+  test("changing the server's language needs Manage Server; showing it does not", async () => {
+    const { run, languages } = setupLanguage();
+    expect(await run({ language: "en" }, { memberPermissions: 0n, locale: "en" })).toBe(
+      "Only members with Manage Server can change the server's language.",
+    );
+    expect(languages.guilds.size).toBe(0);
+    expect(await run({}, { memberPermissions: 0n })).toBe(
+      "Język bota na tym serwerze: **Polski** (domyślny).",
+    );
+  });
+
+  test("reset goes back to Polish and show reports a chosen language", async () => {
+    const { run, languages } = setupLanguage();
+    languages.guilds.set(GUILD, "de");
+    expect(await run({}, { locale: "de" })).toBe(
+      "Sprache des Bots auf diesem Server: **Deutsch**.",
+    );
+    expect(
+      await run({ language: "reset" }, { memberPermissions: MANAGE_GUILD, locale: "de" }),
+    ).toBe("Przywrócono domyślny język serwera: polski.");
+    expect(languages.guilds.size).toBe(0);
+  });
+
+  test("in the DM with the bot it sets the member's own language, no permission needed", async () => {
+    const { run, languages } = setupLanguage();
+    expect(await run({ language: "de" }, { guildId: null })).toBe(
+      "Ab jetzt schreibe ich dir auf Deutsch.",
+    );
+    expect(languages.users.get(USER)).toBe("de");
+    expect(languages.guilds.size).toBe(0);
+    expect(await run({}, { guildId: null, locale: "de" })).toBe(
+      "Ich schreibe dir auf **Deutsch**.",
+    );
+    expect(await run({ language: "reset" }, { guildId: null, locale: "en" })).toBe(
+      "I forgot your choice. I'll use your Discord language, or Polish if I don't speak it.",
+    );
+    expect(languages.users.size).toBe(0);
+  });
+
+  test("the prefix form takes a language by code, name or alias in any language", () => {
+    const { command } = setupLanguage();
+    for (const [word, value] of [
+      ["en", "en"],
+      ["English", "en"],
+      ["angielski", "en"],
+      ["niemiecki", "de"],
+      ["Deutsch", "de"],
+      ["polnisch", "pl"],
+      ["Standard", "reset"],
+      ["domyślny", "reset"],
+    ] as const) {
+      expect(parsePrefixArgs(command, word)).toEqual({ ok: true, args: { language: value } });
+    }
+    expect(parsePrefixArgs(command, "")).toEqual({ ok: true, args: {} });
+    const wrong = parsePrefixArgs(command, "klingon", "en");
+    expect(wrong.ok ? "" : wrong.error).toBe("Argument `language`: allowed: pl, en, de, reset");
+  });
+
+  test("works in the DM with the bot but not in a group DM", () => {
+    const { command } = setupLanguage();
+    expect(command.contexts?.places).toEqual(["guild", "bot-dm"]);
+  });
+});
+
+describe("settings module in other languages", () => {
+  test("answers /prefix and its errors in the caller's language", async () => {
+    const { run } = setup();
+    expect(await run("set", { prefix: "?" }, MANAGE_GUILD, "en")).toEqual([
+      "The prefix is now `?`.",
+    ]);
+    expect(await run("set", { prefix: "a b" }, MANAGE_GUILD, "de")).toEqual([
+      "Das Präfix darf keine Leerzeichen oder unsichtbaren Zeichen enthalten.",
+    ]);
+    expect(await run("set", { prefix: "?" }, 0n, "en")).toEqual([
+      "You don't have permission to use this command.",
+    ]);
+  });
+});
+
+test("every text of the catalog renders in every language", () => {
+  for (const texts of Object.values(renderCatalog(t))) {
+    for (const text of Object.values(texts)) expect(text.trim()).not.toBe("");
+  }
 });

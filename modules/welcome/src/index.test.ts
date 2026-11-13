@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import {
   createRegistry,
   executeCommand,
+  type Locale,
   type LogFields,
   type Logger,
+  localize,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext, replyText, submitModal } from "@dzajcarz/core/testing";
+import { createFakeContext, renderCatalog, replyText, submitModal } from "@dzajcarz/core/testing";
 import type { GuildMember } from "discord.js";
 import {
   createWelcomeModule,
@@ -16,6 +18,7 @@ import {
   type WelcomeConfigStore,
   type WelcomeSender,
 } from "./index.ts";
+import { t } from "./messages.ts";
 
 const MANAGE_GUILD = 1n << 5n;
 const guildId = "100000000000000001";
@@ -76,8 +79,9 @@ function setup({
     args: Record<string, unknown> = {},
     memberPermissions: bigint = MANAGE_GUILD,
     invocation: "slash" | "prefix" = "slash",
+    locale?: Locale,
   ) => {
-    const ctx = createFakeContext({ args, subcommand, memberPermissions, invocation });
+    const ctx = createFakeContext({ args, subcommand, memberPermissions, invocation, locale });
     await executeCommand(command, ctx, silentLogger);
     return Object.assign(
       ctx.replies.map((r) => replyText(r)),
@@ -111,7 +115,7 @@ describe("/welcome set form", () => {
     expect(fields[0]?.channelTypes).toEqual(["text", "announcement"]);
     expect(fields[0]?.value).toBeUndefined();
     for (const placeholder of ["{user}", "{username}", "{server}", "{memberCount}"]) {
-      expect(fields[1]?.description).toContain(placeholder);
+      expect(localize(fields[1]?.description ?? "", "pl")).toContain(placeholder);
     }
   });
 
@@ -394,5 +398,59 @@ describe("guildMemberAdd handler", () => {
     await broken.events?.[0]?.run(fakeMember());
     expect(warnings).toHaveLength(1);
     void event;
+  });
+});
+
+describe("languages", () => {
+  test("replies follow the caller's language", async () => {
+    const { run, configs } = setup();
+    const [en] = await run(
+      "set",
+      { channel: channelId, message: "Hi" },
+      MANAGE_GUILD,
+      "prefix",
+      "en",
+    );
+    expect(en).toBe(
+      `New members will be greeted in <#${channelId}>. See how it looks with \`welcome test\`.`,
+    );
+    const [de] = await run(
+      "set",
+      { channel: foreignChannelId, message: "Hi" },
+      MANAGE_GUILD,
+      "prefix",
+      "de",
+    );
+    expect(de).toBe("Wähl einen Textkanal dieses Servers.");
+    expect(configs.get(guildId)?.template).toBe("Hi");
+    expect((await run("off", {}, MANAGE_GUILD, "slash", "en"))[0]).toBe("Greetings turned off.");
+    expect((await run("off", {}, MANAGE_GUILD, "slash", "de"))[0]).toBe(
+      "Begrüßungen waren nicht eingerichtet.",
+    );
+    expect((await run("test", {}, MANAGE_GUILD, "slash", "en"))[0]).toBe(
+      "Greetings are not set up. Use `welcome set`.",
+    );
+  });
+
+  test("the form is localized but the stored greeting stays as the admin wrote it", async () => {
+    const { run, registry, configs } = setup();
+    const [spec] = (await run("set", {}, MANAGE_GUILD, "slash", "de")).modals;
+    if (!spec) throw new Error("modal not opened");
+    const ctx = await submitModal({
+      registry,
+      customId: spec.customId,
+      values: { channel: [channelId], message: "Witaj {user}!" },
+      guildId,
+      memberPermissions: MANAGE_GUILD,
+      locale: "de",
+    });
+    expect(configs.get(guildId)?.template).toBe("Witaj {user}!");
+    expect(replyText(ctx.replies[0])).toContain("Neue Mitglieder werden in");
+  });
+
+  test("every text exists in every language", () => {
+    for (const texts of Object.values(renderCatalog(t))) {
+      for (const s of Object.values(texts)) expect(s.trim()).not.toBe("");
+    }
   });
 });

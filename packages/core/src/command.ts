@@ -4,6 +4,7 @@
  * messages into it.
  */
 import type { ComponentRow } from "./component.ts";
+import type { Locale, Localized } from "./i18n.ts";
 import type { ModalSpec } from "./modal.ts";
 
 export type OptionType = "string" | "integer" | "number" | "boolean" | "user" | "channel" | "role";
@@ -16,13 +17,16 @@ type ValueOf<T extends OptionType> = T extends "integer" | "number"
     : string;
 
 export interface OptionChoice<V extends string | number = string | number> {
-  name: string;
+  /** Shown in Discord's picker; the prefix form accepts it in every language. */
+  name: Localized;
   value: V;
+  /** Prefix form only: extra words the parser accepts for this choice. */
+  aliases?: readonly string[];
 }
 
 export interface OptionDef<T extends OptionType = OptionType> {
   type: T;
-  description: string;
+  description: Localized;
   required?: boolean;
   choices?: readonly OptionChoice<ValueOf<T> & (string | number)>[];
   /** integer / number only. */
@@ -125,6 +129,8 @@ export interface CommandContext<A = Record<string, unknown>> {
   readonly messageId?: string;
   /** Permission bit field of the calling member; null in direct messages. */
   readonly memberPermissions: bigint | null;
+  /** The language to answer in: the server's on a server, the member's own elsewhere. */
+  readonly locale: Locale;
   reply(reply: Reply): Promise<void>;
   /**
    * Tells Discord that work is under way (slash: deferred reply, prefix: typing indicator). `ephemeral`
@@ -154,9 +160,9 @@ export interface CommandContexts {
 export const DEFAULT_CONTEXTS: CommandContexts = { places: ["guild"], installs: ["guild"] };
 
 interface CommandBase {
-  /** Lowercase, 1–32 characters: Discord's rule for slash command names. */
+  /** Lowercase, 1–32 characters: Discord's rule for slash command names. Never translated. */
   name: string;
-  description: string;
+  description: Localized;
   /** Extra names for the prefix form only (`!p` for `!play`). */
   aliases?: readonly string[];
   /**
@@ -183,7 +189,7 @@ export interface Command<O extends OptionsDef = OptionsDef> extends CommandBase 
 
 /** One action of a command (`/prefix set`). Its permissions are checked on top of the command's. */
 export interface Subcommand<O extends OptionsDef = OptionsDef> {
-  description: string;
+  description: Localized;
   options?: O;
   /** Extra permission bits, checked when the subcommand runs (Discord only gates the whole command). */
   permissions?: bigint;

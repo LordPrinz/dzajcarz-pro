@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   createRegistry,
   executeCommand,
+  type Locale,
+  type LocaleResolver,
   type LogFields,
   type Logger,
   type Reply,
@@ -11,6 +13,8 @@ import {
   clickComponent,
   createFakeContext,
   createFakeScheduler,
+  fakeLocales,
+  renderCatalog,
   replyText,
   submitModal,
 } from "@dzajcarz/core/testing";
@@ -34,6 +38,7 @@ import {
   renderChannelName,
   validateTemplate,
 } from "./index.ts";
+import { t as messages } from "./messages.ts";
 
 const MANAGE_CHANNELS = 1n << 4n;
 const guildId = "100000000000000001";
@@ -54,6 +59,7 @@ interface SetupOptions {
   allowFails?: boolean;
   allowSelfFails?: boolean;
   renameFails?: boolean;
+  locales?: LocaleResolver;
   /** What the channel's category says about @everyone. */
   inherited?: { connect: boolean | null; view: boolean | null };
 }
@@ -72,6 +78,7 @@ function setup({
   allowFails = false,
   allowSelfFails = false,
   renameFails = false,
+  locales = fakeLocales("pl"),
   inherited = { connect: null, view: null },
 }: SetupOptions = {}) {
   const areas = new Map<string, PartyArea>();
@@ -341,6 +348,7 @@ function setup({
     invites,
     scheduler,
     lock: store,
+    locales,
     logger,
   });
   const registry = createRegistry([module]);
@@ -358,8 +366,16 @@ function setup({
     memberPermissions: bigint = MANAGE_CHANNELS,
     userId?: string,
     invocation: "slash" | "prefix" = "slash",
+    locale: Locale = "pl",
   ) => {
-    const ctx = createFakeContext({ args, subcommand, memberPermissions, userId, invocation });
+    const ctx = createFakeContext({
+      args,
+      subcommand,
+      memberPermissions,
+      userId,
+      invocation,
+      locale,
+    });
     await executeCommand(command, ctx, silentLogger);
     return Object.assign(
       ctx.replies.map((r) => replyText(r)),
@@ -493,6 +509,7 @@ describe("/party create", () => {
       invites: {} as PartyInvites,
       scheduler: createFakeScheduler(),
       lock: createMemoryStore(),
+      locales: fakeLocales("pl"),
       logger: silentLogger,
     });
     const ctx = createFakeContext({
@@ -692,6 +709,17 @@ describe("party area form", () => {
       const ctx = await t.submit(spec?.customId ?? "", { ...form, categoryName: "Zabawa" });
       expect(replyText(ctx.replies[0])).toContain("Ustawienia zapisane, ale nie udało się");
       expect(t.areas.get("400")).toMatchObject({ nameTemplate: "🔥 {user}", commandChannel: true });
+    });
+
+    test("a rename Discord refused does not use up the rename limit", async () => {
+      const t = setup({ renameFails: true });
+      t.areas.set("400", area);
+      const [spec] = (await t.run("edit")).modals;
+      const id = spec?.customId ?? "";
+      for (const categoryName of ["A", "B", "C"]) {
+        const ctx = await t.submit(id, { ...form, categoryName });
+        expect(replyText(ctx.replies[0])).toContain("nie udało się zmienić nazwy kategorii");
+      }
     });
 
     test("saves the settings and skips a rename over the limit, before touching Discord", async () => {
@@ -948,12 +976,18 @@ describe("joining the party area", () => {
     const slow: KeyValueStore = {
       ...memory,
       setIfAbsent: (k, v, ttl) => inOrder(() => memory.setIfAbsent(k, v, ttl)),
-      delIfEquals: (k, v) => inOrder(() => memory.delIfEquals(k, v)),
+      delIfEquals: (k, v) => {
+        const done = inOrder(() => memory.delIfEquals(k, v));
+        releases.push(done);
+        return done;
+      },
     };
+    const releases: Promise<unknown>[] = [];
     const t = setup({ lock: createTimedStore(slow, 5) });
     t.areas.set("400", area);
     await t.voice(null, "400");
-    await Bun.sleep(60);
+    // The release is fire and forget, so wait for the one the join asked for.
+    await Promise.all(releases);
     expect(await memory.get(`party:${guildId}:u1`)).toBeNull();
   });
 
@@ -2343,7 +2377,7 @@ describe("command channel panel", () => {
       expect(fromButton.modals).toHaveLength(1);
       expect(fromSlash.modals).toHaveLength(1);
       const [button, slash] = [fromButton.modals[0], fromSlash.modals[0]];
-      expect(button?.title).toBe("Specjalne zaproszenie");
+      expect(button?.title).toMatchObject({ pl: "Specjalne zaproszenie" });
       expect(button?.fields).toEqual(slash?.fields);
       expect(button?.fields.map((f) => f.type)).toEqual([
         "user",
@@ -2542,6 +2576,17 @@ describe("command channel panel", () => {
       );
     });
 
+    test("an invite that failed does not use up the recipient's limit", async () => {
+      const failed = await withOwners({ allowFails: true });
+      await sendForm(failed, { members: [FRIEND] });
+      expect(await failed.lock.get(`party-special-to:${guildId}:${FRIEND}`)).toBeNull();
+
+      const closed = await withOwners();
+      closed.dmClosed.add(FRIEND);
+      await sendForm(closed, { members: [FRIEND] });
+      expect(await closed.lock.get(`party-special-to:${guildId}:${FRIEND}`)).toBeNull();
+    });
+
     test("the same person picked twice gets one invite", async () => {
       const t = await withOwners();
       await sendForm(t, { members: [FRIEND, FRIEND] });
@@ -2662,5 +2707,96 @@ describe("command channel panel", () => {
       expect(t.calls).toEqual([]);
       expect(t.dms).toEqual([]);
     });
+  });
+});
+
+describe("languages", () => {
+  const OWNER = "700000000000000001";
+  const FRIEND = "700000000000000003";
+
+  test("every text exists in every language", () => {
+    for (const texts of Object.values(renderCatalog(messages, { nameDone: ["category"] }))) {
+      for (const text of Object.values(texts)) expect(text.trim()).not.toBe("");
+    }
+  });
+
+  test("owner controls answer in the language of the caller", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    t.discord.set("400", new Set());
+    await t.voice(null, "400", "u1");
+    expect((await t.run("lock", {}, 0n, "u1", "slash", "en"))[0]).toBe(
+      "Channel locked. Only invited people can join.",
+    );
+    expect((await t.run("hide", {}, 0n, "u1", "slash", "de"))[0]).toBe("Kanal versteckt.");
+    expect((await t.run("limit", { count: 5 }, 0n, "u1", "slash", "de"))[0]).toBe(
+      "Nutzerlimit auf 5 gesetzt.",
+    );
+    expect((await t.run("lock", {}, 0n, "u2", "slash", "en"))[0]).toBe(
+      "You need to be in your own party channel.",
+    );
+  });
+
+  test("area settings are reported in the language of the caller", async () => {
+    const t = setup();
+    t.areas.set("400", area);
+    const [reply] = await t.run("delete", {}, MANAGE_CHANNELS, undefined, "slash", "de");
+    expect(reply).toBe("Party-Zone gelöscht.");
+    expect((await t.run("delete", {}, MANAGE_CHANNELS, undefined, "slash", "en"))[0]).toBe(
+      "There is no party zone on this server.",
+    );
+  });
+
+  test("the panel is posted in the language of the server", async () => {
+    const t = setup({ locales: fakeLocales("pl", { guilds: { [guildId]: "de" } }) });
+    t.areas.set("400", { ...area, commandChannel: true });
+    t.discord.set("400", new Set());
+    t.chats.set("400", []);
+    await t.eventFor("party-panels").run({} as never);
+    const message = t.posted[0]?.message as Exclude<Reply, string>;
+    expect(message.embeds?.[0]?.title).toBe("Panel des Party-Kanals");
+    const first = message.components?.[0]?.[0];
+    expect(first?.type === "button" ? first.label : "").toBe("Schließen");
+  });
+
+  test("a channel name with nothing left gets the language's fallback name", () => {
+    expect(renderChannelName("{user}", "\u200b", "en")).toBe("Party channel");
+    expect(renderChannelName("{user}", "\u200b", "de")).toBe("Party-Kanal");
+  });
+
+  test("a special invite goes out in the recipient's language, the summary in the owner's", async () => {
+    const t = setup({
+      locales: fakeLocales("pl", { users: { [FRIEND]: "en", [OWNER]: "de" } }),
+    });
+    t.areas.set("400", { ...area, commandChannel: true });
+    t.discord.set("400", new Set());
+    t.chats.set("400", []);
+    await t.eventFor("party-panels").run({} as never);
+    t.guildMembers.add(OWNER);
+    t.guildMembers.add(FRIEND);
+    await t.voice(null, "400", OWNER);
+    const panel = t.posted[0]?.message as Exclude<Reply, string>;
+    const special = panel.components?.[1]?.[2];
+    const opened = await clickComponent({
+      registry: t.registry,
+      customId: special?.type === "link" ? "" : (special?.customId ?? ""),
+      userId: OWNER,
+      guildId,
+      locale: "de",
+    });
+    const submitted = await submitModal({
+      registry: t.registry,
+      customId: opened.modals[0]?.customId ?? "",
+      values: { members: [FRIEND] } as never,
+      userId: OWNER,
+      guildId,
+      locale: "de",
+    });
+    expect(replyText(submitted.replies[0])).toContain("Einladung zugestellt (1)");
+    const dm = t.dms[0]?.message as Exclude<Reply, string>;
+    expect(dm.embeds?.[0]?.title).toBe("Party invitation");
+    expect(dm.embeds?.[0]?.footer).toBe("The inviter wrote this text, not the bot.");
+    const link = dm.components?.[0]?.[0];
+    expect(link?.type === "link" ? link.label : "").toBe("Join");
   });
 });

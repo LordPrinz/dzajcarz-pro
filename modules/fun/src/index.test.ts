@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createRegistry, executeCommand, silentLogger } from "@dzajcarz/core";
-import { createFakeContext } from "@dzajcarz/core/testing";
+import { createFakeContext, renderCatalog } from "@dzajcarz/core/testing";
 import { createFunModule } from "./index.ts";
+import { t } from "./messages.ts";
 
 const WARSAW = "Europe/Warsaw";
 
@@ -20,10 +21,14 @@ function setup(options: { randoms?: number[]; now?: Date; guildZone?: string } =
       },
     }),
   ]);
-  const run = async (name: string, guildId: string | null = "100000000000000001") => {
+  const run = async (
+    name: string,
+    guildId: string | null = "100000000000000001",
+    locale: "pl" | "en" | "de" = "pl",
+  ) => {
     const command = registry.find(name);
     if (!command) throw new Error(`no command ${name}`);
-    const ctx = createFakeContext({ guildId });
+    const ctx = createFakeContext({ guildId, locale });
     await executeCommand(command, ctx, silentLogger);
     return ctx.replies;
   };
@@ -84,5 +89,33 @@ describe("time in the server's zone", () => {
     const { run } = setup({ now: new Date("2026-07-01T10:00:00Z"), guildZone: "Asia/Tokyo" });
     expect(await run("time")).toEqual(["Jest 19:00:00."]);
     expect(await run("time", null)).toEqual(["Jest 12:00:00."]);
+  });
+});
+
+describe("languages", () => {
+  test("czy_wiedziałeś answers in English and German", async () => {
+    const { run } = setup({ randoms: [0.1, 0.9, 0.1, 0.9] });
+    expect(await run("czy_wiedziałeś", undefined, "en")).toEqual([
+      { content: "He knew!", reactions: ["🙋‍♂️"] },
+    ]);
+    expect(await run("czy_wiedziałeś", undefined, "en")).toEqual(["He didn't know sadge bruh"]);
+    expect(await run("czy_wiedziałeś", undefined, "de")).toEqual([
+      { content: "Er wusste es!", reactions: ["🙋‍♂️"] },
+    ]);
+    expect(await run("czy_wiedziałeś", undefined, "de")).toEqual([
+      "Er wusste es nicht, sadge bruh",
+    ]);
+  });
+
+  test("time speaks English and German", async () => {
+    const { run } = setup();
+    expect(await run("time", undefined, "en")).toEqual(["It is 12:00:00."]);
+    expect(await run("time", undefined, "de")).toEqual(["Es ist 12:00:00."]);
+  });
+
+  test("every catalog text is filled in", () => {
+    for (const texts of Object.values(renderCatalog(t))) {
+      for (const s of Object.values(texts)) expect(s.trim()).not.toBe("");
+    }
   });
 });

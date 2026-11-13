@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Client } from "discord.js";
-import { createGuildChannels } from "./guild-channels.ts";
+import { createCategoryLookup, createGuildChannels } from "./guild-channels.ts";
 
 const GUILD = "100000000000000001";
 
@@ -9,7 +9,7 @@ function clientWith(channels: Record<string, { guildId: string; thread?: boolean
     channels: {
       fetch: async (id: string) => {
         const channel = channels[id];
-        if (!channel) throw new Error("Unknown Channel");
+        if (!channel) throw Object.assign(new Error("Unknown Channel"), { code: 10003 });
         return { guildId: channel.guildId, isThread: () => channel.thread ?? false };
       },
     },
@@ -38,5 +38,22 @@ describe("guild channels adapter", () => {
     expect(await channels.isThread(GUILD, "1")).toBe(false);
     expect(await channels.isThread(GUILD, "404")).toBe(false);
     expect(await channels.isThread("999", "2")).toBe(false);
+  });
+});
+
+describe("category lookup", () => {
+  const lookup = createCategoryLookup({
+    channels: {
+      cache: new Map([
+        ["1", { parentId: "9" }],
+        ["2", { parentId: null }],
+      ]),
+    },
+  } as unknown as Client);
+
+  test("returns the category from the cache, or null", () => {
+    expect(lookup("1")).toBe("9");
+    expect(lookup("2")).toBeNull();
+    expect(lookup("404")).toBeNull();
   });
 });

@@ -1,3 +1,5 @@
+import type { Locale } from "@dzajcarz/core";
+import { t } from "./messages.ts";
 import type { MusicQuery } from "./ports.ts";
 
 /** Longest search text sent to YouTube; longer input is cut, not refused. */
@@ -63,8 +65,13 @@ export function formatDuration(ms: number): string {
 const BAR_WIDTH = 16;
 
 /** `▬▬▬▬🔘▬▬▬… 1:02 / 3:21`; a stream has no end, so it gets a live marker instead. */
-export function progressLine(positionMs: number, durationMs: number, isStream: boolean): string {
-  if (isStream || durationMs <= 0) return `🔴 Na żywo · ${formatDuration(positionMs)}`;
+export function progressLine(
+  positionMs: number,
+  durationMs: number,
+  isStream: boolean,
+  locale: Locale,
+): string {
+  if (isStream || durationMs <= 0) return `🔴 ${t(locale).live} · ${formatDuration(positionMs)}`;
   const ratio = Math.min(1, Math.max(0, positionMs / durationMs));
   const knob = Math.min(BAR_WIDTH - 1, Math.floor(ratio * BAR_WIDTH));
   const bar = `${"▬".repeat(knob)}🔘${"▬".repeat(BAR_WIDTH - 1 - knob)}`;

@@ -8,13 +8,15 @@ import {
   defineSelect,
   type Embed,
   type Invocation,
-  plural,
+  type Localized,
+  localize,
   type Reply,
   type SelectOption,
   type Viewer,
 } from "@dzajcarz/core";
+import { t } from "./messages.ts";
 
-export interface InstallLinks {
+interface InstallLinks {
   /** Adds the bot to a server. */
   guild: string;
   /** Adds the bot to the user's account. */
@@ -36,16 +38,14 @@ export interface HelpDeps {
   moduleEnabled: (guildId: string, channelId: string, module: string) => Promise<boolean>;
 }
 
-export const HELP_PAGE_SIZE = 6;
+const HELP_PAGE_SIZE = 6;
 export const BRAND_COLOR = 0xf5a623;
-
-export const COMMAND_NOT_FOUND = (name: string) => `Nie znam komendy \`${name}\`.`;
 
 /** One line of the list: a command, or one subcommand of a command. */
 interface Entry {
   usage: string;
   slashUsage: string;
-  description: string;
+  description: Localized;
 }
 
 interface Section {
@@ -59,11 +59,6 @@ interface Visibility {
   sections: Section[];
   /** null when the bot has no prefix where the caller is: a user install, or a group DM. */
   prefix: string | null;
-}
-
-/** "1 komenda", "2 komendy", "5 komend", "12 komend", "22 komendy". */
-export function commandCount(count: number): string {
-  return `${count} ${plural(count, "komenda", "komendy", "komend")}`;
 }
 
 function allowedHere(command: CommandSummary, viewer: Viewer, userInstall: boolean): boolean {
@@ -143,19 +138,23 @@ export function createHelp(deps: HelpDeps) {
     };
   }
 
-  function selectRow(sections: readonly Section[], owner: string, selected?: string): ComponentRow {
+  function selectRow(
+    sections: readonly Section[],
+    viewer: Viewer,
+    selected?: string,
+  ): ComponentRow {
     // The registry caps the module count at one select menu (25).
     const options: SelectOption[] = sections.map((section) => ({
       label: section.module,
       value: section.module,
-      description: commandCount(section.entries.length),
+      description: t(viewer.locale).commandCount(section.entries.length),
       default: section.module === selected,
     }));
     return [
       {
         type: "select",
-        customId: menu.customId(owner),
-        placeholder: "Wybierz kategorię",
+        customId: menu.customId(viewer.user.id),
+        placeholder: t(viewer.locale).pickCategory,
         options,
       },
     ];
@@ -166,34 +165,29 @@ export function createHelp(deps: HelpDeps) {
     invocation: Invocation = "slash",
   ): Promise<Exclude<Reply, string>> {
     const { sections, prefix } = await visibility(viewer);
+    const text = t(viewer.locale);
     const total = sections.reduce((sum, section) => sum + section.entries.length, 0);
-    const how =
-      prefix === null
-        ? "Komendy działają jako `/nazwa`."
-        : `Każda komenda działa jako \`/nazwa\` albo \`${prefix}nazwa\`.`;
+    const how = prefix === null ? text.slashOnly : text.slashOrPrefix(prefix);
     // The hint names the form the viewer just typed.
     const helpForm = invocation === "prefix" && prefix !== null ? prefix : "/";
     const embed: Embed = {
-      title: "Komendy Dżajcarza",
-      description: `${how} Szczegóły jednej komendy: \`${helpForm}help komenda\`.`,
+      title: text.title,
+      description: text.details(how, helpForm),
       color: BRAND_COLOR,
       fields: sections.map((section) => ({
         name: section.module,
-        value: commandCount(section.entries.length),
+        value: text.commandCount(section.entries.length),
         inline: true,
       })),
-      footer: `Razem: ${commandCount(total)}`,
+      footer: text.total(text.commandCount(total)),
     };
     const installRow: ComponentRow = [
-      { type: "link", label: "Dodaj na serwer", url: deps.installLinks.guild },
-      { type: "link", label: "Dodaj na konto", url: deps.installLinks.user },
+      { type: "link", label: text.addToServer, url: deps.installLinks.guild },
+      { type: "link", label: text.addToAccount, url: deps.installLinks.user },
     ];
     return {
       embeds: [embed],
-      components: [
-        ...(sections.length > 0 ? [selectRow(sections, viewer.user.id)] : []),
-        installRow,
-      ],
+      components: [...(sections.length > 0 ? [selectRow(sections, viewer)] : []), installRow],
     };
   }
 
@@ -205,30 +199,31 @@ export function createHelp(deps: HelpDeps) {
       const section = sections.find((candidate) => candidate.module === module);
       const entries = section?.entries ?? [];
       const slice = entries.slice(page * HELP_PAGE_SIZE, (page + 1) * HELP_PAGE_SIZE);
+      const text = t(viewer.locale);
       const embed: Embed = {
-        title: `Kategoria: ${module}`,
+        title: text.category(module),
         description:
           slice.length > 0
             ? slice
                 .map(
                   (entry) =>
-                    `${syntax({ slash: entry.slashUsage, prefix: entry.usage }, prefix)}\n${entry.description}`,
+                    `${syntax({ slash: entry.slashUsage, prefix: entry.usage }, prefix)}\n${localize(entry.description, viewer.locale)}`,
                 )
                 .join("\n\n")
-            : "Brak dostępnych komend w tej kategorii.",
+            : text.emptyCategory,
         color: BRAND_COLOR,
       };
       const back: ComponentRow = [
         {
           type: "button",
           customId: home.customId(viewer.user.id),
-          label: "Strona główna",
+          label: text.home,
           style: "primary",
         },
       ];
       return {
         embeds: [embed],
-        components: [selectRow(sections, viewer.user.id, module), back],
+        components: [selectRow(sections, viewer, module), back],
         pageCount: Math.max(1, Math.ceil(entries.length / HELP_PAGE_SIZE)),
       };
     },

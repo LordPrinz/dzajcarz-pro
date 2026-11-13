@@ -2,12 +2,16 @@ import { describe, expect, test } from "bun:test";
 import {
   type AnyCommand,
   type ButtonSpec,
+  common,
   createRegistry,
+  escapeMarkdown,
   executeCommand,
   executeComponent,
-  GENERIC_ERROR,
+  type Locale,
+  type LocaleResolver,
   type LogFields,
   type Logger,
+  parsePrefixArgs,
   type Reply,
   type SelectSpec,
   type StateStorage,
@@ -18,6 +22,8 @@ import {
   createFakeComponentContext,
   createFakeContext,
   createFakeScheduler,
+  fakeLocales,
+  renderCatalog,
   replyText,
 } from "@dzajcarz/core/testing";
 import { createStalledStore, createTimedStore } from "@dzajcarz/kv";
@@ -33,22 +39,25 @@ import {
 } from "./fakes.test-support.ts";
 import {
   createMusicModule,
-  EMPTY_QUEUE,
   FAILED_NOTE_WINDOW_MS,
   IDLE_MS,
   MAX_PLAYLIST_TRACKS,
   MAX_QUEUE_LENGTH,
-  moreTracksFailedText,
-  NOT_IN_VOICE,
-  NOTHING_PLAYING,
-  otherChannel,
-  queueChanged,
   SEARCH_COOLDOWN_MS,
-  SONG_LOCKED,
-  trackFailedText,
-  UNAVAILABLE,
-  UNSUPPORTED_LINK,
 } from "./index.ts";
+import { t } from "./messages.ts";
+
+const pl = t("pl");
+const EMPTY_QUEUE = pl.emptyQueue;
+const NOT_IN_VOICE = pl.notInVoice;
+const NOTHING_PLAYING = pl.nothingPlaying;
+const queueChanged = pl.queueChanged;
+const SONG_LOCKED = pl.songLocked;
+const UNAVAILABLE = pl.unavailable;
+const UNSUPPORTED_LINK = pl.unsupportedLink;
+const otherChannel = pl.otherChannel;
+const trackFailedText = (title: string) => pl.trackFailed(escapeMarkdown(title));
+const moreTracksFailedText = pl.moreTracksFailed;
 
 const GUILD = "100000000000000001";
 const TEXT = "300000000000000003";
@@ -57,7 +66,10 @@ const OTHER_VOICE = "400000000000000005";
 const CALLER = "200000000000000002";
 const FRIEND = "200000000000000009";
 
-function setup(stateStorage: StateStorage = createMemoryStorage()) {
+function setup(
+  stateStorage: StateStorage = createMemoryStorage(),
+  locales: LocaleResolver = fakeLocales("pl"),
+) {
   const infos: { message: string; fields?: LogFields }[] = [];
   const logger: Logger = {
     ...silentLogger,
@@ -74,6 +86,7 @@ function setup(stateStorage: StateStorage = createMemoryStorage()) {
     voice,
     panels,
     directMessages,
+    locales,
     scheduler,
     stateStorage,
     logger,
@@ -81,9 +94,21 @@ function setup(stateStorage: StateStorage = createMemoryStorage()) {
   const registry = createRegistry([module]);
   voice.members.set(CALLER, VOICE);
 
-  async function run(name: string, args: Record<string, unknown> = {}, userId = CALLER) {
+  /** What a user typing `!<name> <input>` gets: the real prefix parser decides the args. */
+  async function runPrefix(name: string, input: string, userId = CALLER) {
+    const parsed = parsePrefixArgs(registry.find(name) as AnyCommand, input);
+    if (!parsed.ok) throw new Error(parsed.error);
+    return run(name, parsed.args, userId);
+  }
+
+  async function run(
+    name: string,
+    args: Record<string, unknown> = {},
+    userId = CALLER,
+    locale: Locale = "pl",
+  ) {
     const command = registry.find(name) as AnyCommand;
-    const ctx = createFakeContext({ args, userId, guildId: GUILD });
+    const ctx = createFakeContext({ args, userId, guildId: GUILD, locale });
     await executeCommand(command, ctx, silentLogger);
     await settle();
     return ctx;
@@ -103,8 +128,20 @@ function setup(stateStorage: StateStorage = createMemoryStorage()) {
     return button;
   }
 
-  async function click(customId: string, userId = CALLER, values: string[] = []) {
-    const ctx = await clickComponent({ registry, customId, userId, guildId: GUILD, values });
+  async function click(
+    customId: string,
+    userId = CALLER,
+    values: string[] = [],
+    locale: Locale = "pl",
+  ) {
+    const ctx = await clickComponent({
+      registry,
+      customId,
+      userId,
+      guildId: GUILD,
+      values,
+      locale,
+    });
     await settle();
     return ctx;
   }
@@ -130,6 +167,7 @@ function setup(stateStorage: StateStorage = createMemoryStorage()) {
     module,
     registry,
     run,
+    runPrefix,
     panel,
     panelButton,
     click,
@@ -139,6 +177,141 @@ function setup(stateStorage: StateStorage = createMemoryStorage()) {
 }
 
 const lastText = (ctx: { replies: Reply[] }) => replyText(ctx.replies.at(-1));
+
+describe("music texts", () => {
+  test("every text renders in every language", () => {
+    for (const texts of Object.values(renderCatalog(t))) {
+      for (const text of Object.values(texts)) expect(text.trim()).not.toBe("");
+    }
+  });
+});
+
+describe("music in other languages", () => {
+  async function start(locales: LocaleResolver) {
+    const ctx = setup(createMemoryStorage(), locales);
+    ctx.player.nextResult = { kind: "tracks", tracks: [track("A"), track("B")] };
+    return ctx;
+  }
+
+  test("replies and refusals follow the context's language", async () => {
+    const { run, player } = setup();
+    player.nextResult = { kind: "tracks", tracks: [track("A")] };
+    expect(lastText(await run("skip", {}, CALLER, "en"))).toBe("Nothing is playing right now.");
+    await run("play", { query: "a" });
+    expect(lastText(await run("skip", {}, FRIEND, "en"))).toBe(t("en").notInVoice);
+    expect(lastText(await run("skip", {}, FRIEND, "de"))).toBe(t("de").notInVoice);
+    await run("stop");
+    expect(lastText(await run("pause", {}, CALLER, "en"))).toBe("Nothing is playing right now.");
+    expect(lastText(await run("pause", {}, CALLER, "de"))).toBe("Gerade läuft nichts.");
+  });
+
+  test("/play, /loop, /volume and /filter answer in English and German", async () => {
+    const { run } = await start(fakeLocales("pl"));
+    expect(lastText(await run("play", { query: "a" }, CALLER, "en"))).toStartWith("Now playing: ");
+    expect(lastText(await run("play", { query: "b" }, CALLER, "de"))).toStartWith(
+      "Zur Warteschlange hinzugefügt auf Platz 1: ",
+    );
+    expect(lastText(await run("loop", { mode: "queue" }, CALLER, "en"))).toBe("Repeat: **queue**.");
+    expect(lastText(await run("loop", { mode: "off" }, CALLER, "de"))).toBe(
+      "Wiederholung: **aus**.",
+    );
+    expect(lastText(await run("volume", { percent: 50 }, CALLER, "de"))).toBe(
+      "Lautstärke: **50%**.",
+    );
+    expect(lastText(await run("filter", { name: "off" }, CALLER, "en"))).toBe(
+      "Effects turned off.",
+    );
+    expect(lastText(await run("filter", { name: "nightcore" }, CALLER, "de"))).toBe(
+      "Effekt: **nightcore**.",
+    );
+    expect(lastText(await run("clear", {}, CALLER, "en"))).toBe("Cleared the queue (1 track).");
+  });
+
+  test("the loop and filter choices are also accepted by their English and German names", async () => {
+    const { runPrefix, player, run } = await start(fakeLocales("pl"));
+    await run("play", { query: "a" });
+    for (const [mode, loop] of [
+      ["aus", "off"],
+      ["Titel", "track"],
+      ["Warteschlange", "queue"],
+      ["off", "off"],
+    ] as const) {
+      await runPrefix("loop", mode);
+      expect(player.state(GUILD)?.loop).toBe(loop);
+    }
+    await runPrefix("filter", "aus");
+    expect(player.state(GUILD)?.filter).toBe("off");
+    await runPrefix("filter", "bas");
+    expect(player.state(GUILD)?.filter).toBe("bassboost");
+  });
+
+  test("the panel is posted in the server's language, its notes too", async () => {
+    const { run, panel } = await start(fakeLocales("pl", { guilds: { [GUILD]: "de" } }));
+    await run("play", { query: "a" });
+    await run("play", { query: "b" });
+    const embed = panel()?.embeds?.[0];
+    expect(embed?.description).toContain("**Interpret:**");
+    expect(embed?.footer).toBe(
+      "In der Warteschlange: 1 · Wiederholung: aus · Lautstärke: 100% · Filter: keiner",
+    );
+    const labels = panel()
+      ?.components?.flat()
+      .map((c) => (c.type === "button" ? c.label : ""));
+    expect(labels).toEqual([
+      "Pause",
+      "Nächster",
+      "Stopp",
+      "Warteschlange",
+      "Wiederholung: aus",
+      "Zufällig",
+    ]);
+  });
+
+  test("a click redraws the panel in the clicker's language", async () => {
+    const { run, panelButton, click } = await start(fakeLocales("pl"));
+    await run("play", { query: "a" });
+    const clicked = await click(panelButton("panel-loop").customId, CALLER, [], "en");
+    const update = clicked.updates.at(-1);
+    const labels = (typeof update === "object" ? update.components?.flat() : [])?.map((c) =>
+      c.type === "button" ? c.label : "",
+    );
+    expect(labels).toContain("Loop: track");
+  });
+
+  test("/queue and /nowplaying use the language of the context", async () => {
+    const { run } = await start(fakeLocales("pl"));
+    await run("play", { query: "a" });
+    await run("play", { query: "b" });
+    const queue = await run("queue", {}, CALLER, "en");
+    const reply = queue.replies.at(-1);
+    const embed = typeof reply === "object" ? reply.embeds?.[0] : undefined;
+    expect(embed?.title).toBe("Queue");
+    expect(embed?.description).toContain("**Now:**");
+    expect(embed?.footer).toBe("1 track · 3:20");
+    const now = await run("nowplaying", {}, CALLER, "de");
+    const nowReply = now.replies.at(-1);
+    expect(typeof nowReply === "object" ? nowReply.embeds?.[0]?.footer : "").toContain(
+      "Wiederholung:",
+    );
+  });
+
+  test("/save sends the message in the member's own language", async () => {
+    const { run, directMessages } = await start(fakeLocales("pl", { users: { [CALLER]: "en" } }));
+    await run("play", { query: "a" });
+    const ctx = await run("save", {}, CALLER, "de");
+    expect(lastText(ctx)).toBe(t("de").saveSent);
+    expect(directMessages.sent[0]?.message.content).toContain("**Artist:**");
+  });
+
+  test("a failed track is announced in the server's language", async () => {
+    const { run, player, panels } = await start(fakeLocales("pl", { guilds: { [GUILD]: "en" } }));
+    await run("play", { query: "a" });
+    player.failTrack(GUILD);
+    await settle();
+    const notes = [...panels.messages.values()].map((entry) => entry.message.content);
+    expect(notes).toContain("Couldn't play **A**, moving on.");
+  });
+});
 
 describe("music module", () => {
   test("registers in the registry with its commands and aliases", () => {
@@ -334,7 +507,7 @@ describe("music module", () => {
       const started = performance.now();
       const ctx = await run("search", { query: "lofi" });
       expect(performance.now() - started).toBeLessThan(500);
-      expect(lastText(ctx)).toBe(GENERIC_ERROR);
+      expect(lastText(ctx)).toBe(common("pl").genericError);
     });
 
     test("offers up to ten results to the caller only and queues the chosen one", async () => {
@@ -443,6 +616,14 @@ describe("music module", () => {
       expect(player.state(GUILD)?.current?.title).toBe("B");
       expect(lastText(await run("stop"))).toBe("Zatrzymano muzykę i wyczyszczono kolejkę.");
       expect(player.state(GUILD)).toBeNull();
+    });
+
+    test("a skip that did not happen (another member skipped first) says the queue changed", async () => {
+      const { run, player } = setup();
+      player.nextResult = { kind: "tracks", tracks: [track("A")] };
+      await run("play", { query: "a" });
+      player.skip = async () => false;
+      expect(lastText(await run("skip"))).toBe(queueChanged);
     });
 
     test("refuse members outside the bot's channel", async () => {
@@ -814,7 +995,7 @@ describe("music module", () => {
       const { run, player } = setup();
       player.failNext("join", new Error("Missing Connect permission"));
       const failed = await run("play", { query: "a" });
-      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(failed.replies.map(replyText)).toEqual([common("pl").genericError]);
       expect(player.state(GUILD)).toBeNull();
 
       const retried = await run("play", { query: "a" });
@@ -826,7 +1007,7 @@ describe("music module", () => {
       const { run, player } = setup();
       player.failNext("enqueue", new Error("Node disconnected"));
       const failed = await run("play", { query: "a" });
-      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(failed.replies.map(replyText)).toEqual([common("pl").genericError]);
       expect(player.state(GUILD)?.current ?? null).toBeNull();
 
       await run("play", { query: "a" });
@@ -837,7 +1018,7 @@ describe("music module", () => {
       const { run, player } = setup();
       player.failNext("search", new Error("Node unreachable"));
       const failed = await run("play", { query: "a" });
-      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(failed.replies.map(replyText)).toEqual([common("pl").genericError]);
       expect(player.joins).toEqual([]);
     });
 
@@ -847,7 +1028,7 @@ describe("music module", () => {
       await run("play", { query: "a" });
       player.failNext("skip");
       const failed = await run("skip");
-      expect(failed.replies.map(replyText)).toEqual([GENERIC_ERROR]);
+      expect(failed.replies.map(replyText)).toEqual([common("pl").genericError]);
       expect(player.state(GUILD)?.current?.title).toBe("A");
     });
   });
@@ -1165,26 +1346,26 @@ describe("music module", () => {
         expect(ctx.player.state(GUILD)?.loop).toBe("off");
       });
 
-      test("reads Polish and English words, as the prefix form gets them", async () => {
+      test("reads Polish and English words typed as a prefix command", async () => {
         const ctx = await playing(["A"]);
         for (const [mode, loop] of [
           ["utwór", "track"],
           ["wyłącz", "off"],
           ["KOLEJKA", "queue"],
           ["wyłączona", "off"],
-          [" track ", "track"],
+          ["track", "track"],
           ["off", "off"],
           ["queue", "queue"],
         ] as const) {
-          await ctx.run("loop", { mode });
+          await ctx.runPrefix("loop", mode);
           expect(ctx.player.state(GUILD)?.loop).toBe(loop);
         }
       });
 
-      test("refuses an unknown mode", async () => {
+      test("the prefix parser refuses an unknown mode", async () => {
         const ctx = await playing(["A"]);
         for (const mode of ["forever", "constructor", "toString"]) {
-          expect(lastText(await ctx.run("loop", { mode }))).toContain("`wyłącz`");
+          expect(parsePrefixArgs(ctx.registry.find("loop") as AnyCommand, mode).ok).toBe(false);
         }
         expect(ctx.player.state(GUILD)?.loop).toBe("off");
       });
@@ -1319,7 +1500,7 @@ describe("music module", () => {
         expect(ctx.player.state(GUILD)?.filter).toBe("nightcore");
       });
 
-      test("reads Polish and English words, as the prefix form gets them", async () => {
+      test("reads Polish and English words typed as a prefix command", async () => {
         const ctx = await playing(["A"]);
         for (const [name, filter] of [
           ["bas", "bassboost"],
@@ -1328,7 +1509,7 @@ describe("music module", () => {
           ["Vaporwave", "vaporwave"],
           ["off", "off"],
         ] as const) {
-          await ctx.run("filter", { name });
+          await ctx.runPrefix("filter", name);
           expect(ctx.player.state(GUILD)?.filter).toBe(filter);
         }
       });
@@ -1354,7 +1535,7 @@ describe("music module", () => {
       test("refuses an unknown effect", async () => {
         const ctx = await playing(["A"]);
         for (const name of ["reverb", "constructor"]) {
-          expect(lastText(await ctx.run("filter", { name }))).toContain("`bassboost`");
+          expect(parsePrefixArgs(ctx.registry.find("filter") as AnyCommand, name).ok).toBe(false);
         }
         expect(ctx.player.state(GUILD)?.filter).toBe("off");
       });

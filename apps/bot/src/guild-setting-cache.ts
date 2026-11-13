@@ -12,6 +12,8 @@ export interface GuildSettingCache {
 export interface GuildSettingCacheDeps {
   /** Names the setting in keys and logs, e.g. `prefix`. */
   name: string;
+  /** Whose setting it is: a guild's (default) or a member's; the ids passed in are of that kind. */
+  scope?: "guild" | "user";
   /** The guild's own value from Postgres; null when it uses the fallback. */
   load(guildId: string): Promise<string | null>;
   fallback: string;
@@ -32,6 +34,7 @@ const FALLBACK_MARKER = "";
  */
 export function createGuildSettingCache({
   name,
+  scope = "guild",
   load,
   fallback,
   cache,
@@ -39,7 +42,31 @@ export function createGuildSettingCache({
   ttlMs = 10 * 60_000,
   timeoutMs = STORE_TIMEOUT_MS,
 }: GuildSettingCacheDeps): GuildSettingCache {
-  const key = (guildId: string) => `guild:${guildId}:${name}`;
+  const key = (id: string) => `${scope}:${id}:${name}`;
+  async function refresh(guildId: string): Promise<void> {
+    try {
+      const stored = await load(guildId);
+      await withTimeout(cache.set(key(guildId), stored ?? FALLBACK_MARKER, ttlMs), timeoutMs);
+    } catch (error) {
+      logger.warn("Guild setting cache refresh failed; dropping the entry", {
+        setting: name,
+        guildId,
+        error,
+      });
+      await withTimeout(cache.del(key(guildId)), timeoutMs).catch((delError: unknown) => {
+        logger.warn("Guild setting cache invalidation failed", {
+          setting: name,
+          guildId,
+          error: delError,
+        });
+      });
+    }
+  }
+
+  // Refreshes of one guild run one after another: overlapping ones could write an older read last and keep it
+  // for the TTL. An entry leaves the map once its chain has drained. `refresh` never rejects.
+  const refreshing = new Map<string, Promise<void>>();
+
   return {
     async resolve(guildId) {
       if (guildId === null) return fallback;
@@ -73,24 +100,12 @@ export function createGuildSettingCache({
       return stored ?? fallback;
     },
 
-    async forget(guildId) {
-      try {
-        const stored = await load(guildId);
-        await withTimeout(cache.set(key(guildId), stored ?? FALLBACK_MARKER, ttlMs), timeoutMs);
-      } catch (error) {
-        logger.warn("Guild setting cache refresh failed; dropping the entry", {
-          setting: name,
-          guildId,
-          error,
-        });
-        await withTimeout(cache.del(key(guildId)), timeoutMs).catch((delError: unknown) => {
-          logger.warn("Guild setting cache invalidation failed", {
-            setting: name,
-            guildId,
-            error: delError,
-          });
-        });
-      }
+    forget(guildId) {
+      const run = (refreshing.get(guildId) ?? Promise.resolve()).then(() => refresh(guildId));
+      refreshing.set(guildId, run);
+      return run.then(() => {
+        if (refreshing.get(guildId) === run) refreshing.delete(guildId);
+      });
     },
   };
 }

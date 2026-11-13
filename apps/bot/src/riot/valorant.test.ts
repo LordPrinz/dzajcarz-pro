@@ -134,11 +134,11 @@ describe("createValorantStats", () => {
     expect(requests.some((request) => request.url.href.includes("RGAPI"))).toBe(false);
   });
 
-  test("falls back to the map's last path segment and a placeholder agent without content", async () => {
+  test("falls back to the map's last path segment and no agent name without content", async () => {
     const { stats } = setup({ "/val/content/v1/contents": () => respond(500) });
     const profile = await stats.valorant(id);
     expect(profile.matches[0]?.map).toBe("Ascent");
-    expect(profile.matches[0]?.agent).toBe("Nieznany agent");
+    expect(profile.matches[0]?.agent).toBeNull();
   });
 
   test("an empty matchlist and a 404 matchlist both give no matches", async () => {

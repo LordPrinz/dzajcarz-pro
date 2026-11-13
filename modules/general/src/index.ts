@@ -4,8 +4,11 @@ import {
   type CommandSummary,
   defineCommand,
   type Embed,
+  type Locale,
+  localize,
 } from "@dzajcarz/core";
-import { BRAND_COLOR, COMMAND_NOT_FOUND, createHelp, type HelpDeps, syntax } from "./help.ts";
+import { BRAND_COLOR, createHelp, type HelpDeps, syntax } from "./help.ts";
+import { t } from "./messages.ts";
 
 export interface GeneralModuleDeps extends HelpDeps {
   /** Gateway heartbeat in ms; -1 before the first heartbeat. */
@@ -26,11 +29,12 @@ const EVERYWHERE: CommandContexts = {
 export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
   const ping = defineCommand({
     name: "ping",
-    description: "Sprawdza, czy bot żyje, i pokazuje opóźnienie",
+    description: t.all("pingDescription"),
     contexts: EVERYWHERE,
     run: async (ctx) => {
       const ms = deps.gatewayPing();
-      await ctx.reply(ms < 0 ? "Pong!" : `Pong! ${Math.round(ms)} ms`);
+      const text = t(ctx.locale);
+      await ctx.reply(ms < 0 ? text.pong : text.pongMs(Math.round(ms)));
     },
   });
 
@@ -38,11 +42,11 @@ export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
 
   const help = defineCommand({
     name: "help",
-    description: "Lista komend albo opis jednej z nich",
-    aliases: ["pomoc"],
+    description: t.all("helpDescription"),
+    aliases: ["pomoc", "hilfe"],
     contexts: EVERYWHERE,
     options: {
-      command: { type: "string", description: "Nazwa komendy" },
+      command: { type: "string", description: t.all("helpOption") },
     },
     run: async (ctx) => {
       // Backticks would close the code span around the echoed name and let it inject markdown. No command
@@ -56,8 +60,8 @@ export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
       const { command, prefix } = await helpMenu.find(ctx, wanted);
       await ctx.reply(
         command
-          ? { embeds: [describeCommand(command, prefix)] }
-          : { content: COMMAND_NOT_FOUND(wanted), ephemeral: true },
+          ? { embeds: [describeCommand(command, prefix, ctx.locale)], ephemeral: true }
+          : { content: t(ctx.locale).commandNotFound(wanted), ephemeral: true },
       );
     },
   });
@@ -65,25 +69,30 @@ export function createGeneralModule(deps: GeneralModuleDeps): BotModule {
   return { name: "general", commands: [ping, help], components: helpMenu.components };
 }
 
-export function describeCommand(command: CommandSummary, prefix: string | null): Embed {
+export function describeCommand(
+  command: CommandSummary,
+  prefix: string | null,
+  locale: Locale,
+): Embed {
+  const text = t(locale);
   const aliases = prefix === null ? "" : command.aliases.map((a) => `\`${prefix}${a}\``).join(", ");
-  const aliasFields = aliases ? [{ name: "Aliasy", value: aliases }] : [];
+  const aliasFields = aliases ? [{ name: text.aliases, value: aliases }] : [];
   // One field per subcommand: a single field holds 1024 characters, which a long command overflows.
   const body =
     command.subcommands.length > 0
       ? command.subcommands.slice(0, MAX_EMBED_FIELDS - aliasFields.length).map((s) => ({
           name: `${command.name} ${s.name}`,
-          value: `${syntax({ slash: s.slashUsage, prefix: s.usage }, prefix)}\n${s.description}`,
+          value: `${syntax({ slash: s.slashUsage, prefix: s.usage }, prefix)}\n${localize(s.description, locale)}`,
         }))
       : [
           {
-            name: "Użycie",
+            name: text.usage,
             value: syntax({ slash: command.slashUsage, prefix: command.usage }, prefix),
           },
         ];
   return {
     title: `/${command.name}`,
-    description: command.description,
+    description: localize(command.description, locale),
     color: BRAND_COLOR,
     fields: [...body, ...aliasFields],
   };

@@ -65,6 +65,21 @@ describe("module gate", () => {
     expect(await gate.isEnabled(GUILD, null, "music")).toBe(true);
   });
 
+  test("a category entry disables the module in every channel of that category", async () => {
+    const CATEGORY = "400000000000000001";
+    const categories: Record<string, string> = { [CHANNEL]: CATEGORY };
+    const gate = createModuleGate({
+      toggles: { listDisabled: async () => [{ module: "music", channelId: CATEGORY }] },
+      cache: createMemoryStore(),
+      logger: silentLogger,
+      categoryOf: (id) => categories[id] ?? null,
+    });
+    expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(false);
+    expect(await gate.isEnabled(GUILD, OTHER_CHANNEL, "music")).toBe(true);
+    expect(await gate.isEnabled(GUILD, null, "music")).toBe(true);
+    expect(await gate.isEnabled(GUILD, CHANNEL, "welcome")).toBe(true);
+  });
+
   test("DMs and protected modules are always enabled", async () => {
     const { gate, state } = setup([
       { module: "general", channelId: null },
@@ -115,6 +130,24 @@ describe("module gate", () => {
     releaseSlowRead();
     expect(await staleRead).toBe(false);
     expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(true);
+  });
+
+  test("two forgets for one guild cannot leave the older read cached", async () => {
+    let calls = 0;
+    const toggles = {
+      async listDisabled(): Promise<DisabledModule[]> {
+        // The first read is slow and sees the old set; the second sees the new one.
+        if (++calls === 1) {
+          await Bun.sleep(20);
+          return [{ module: "music", channelId: null }];
+        }
+        return [];
+      },
+    };
+    const gate = createModuleGate({ toggles, cache: createMemoryStore(), logger: silentLogger });
+    await Promise.all([gate.forget(GUILD), gate.forget(GUILD)]);
+    expect(await gate.isEnabled(GUILD, CHANNEL, "music")).toBe(true);
+    expect(calls).toBe(2);
   });
 
   test("an empty set is cached too", async () => {

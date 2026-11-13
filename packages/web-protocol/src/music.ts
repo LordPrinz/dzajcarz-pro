@@ -49,7 +49,8 @@ export const MusicTrackInfo = z.object({
     .url({ protocol: /^https$/ })
     .max(MAX_TRACK_URI_LENGTH)
     .nullable(),
-  requesterId: Snowflake,
+  /** Null when the player does not know who asked. */
+  requesterId: Snowflake.nullable(),
   /** The bot's own song (the scheduled one): members cannot pause or skip it, the panel can. */
   byBot: z.boolean(),
   isStream: z.boolean(),
@@ -64,6 +65,7 @@ export interface MusicTrackSource {
   author: string;
   durationMs: number;
   uri: string | null;
+  /** An empty string counts as unknown. */
   requesterId: string;
   byBot?: boolean;
   isStream: boolean;
@@ -94,7 +96,7 @@ export function toMusicTrackInfo(track: MusicTrackSource): MusicTrackInfo {
     author: cut(track.author, MAX_TRACK_AUTHOR_LENGTH),
     durationMs: Math.max(0, Math.round(track.durationMs)),
     uri: httpsUri(track.uri),
-    requesterId: track.requesterId,
+    requesterId: track.requesterId === "" ? null : track.requesterId,
     byBot: track.byBot === true,
     isStream: track.isStream,
     isSeekable: track.isSeekable,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createJsonLogger } from "@dzajcarz/core";
 import { Status } from "discord.js";
-import { checkHealth, gatewayReady, type Probes, startHealthServer } from "./health.ts";
+import { gatewayReady, type Probes, startHealthServer } from "./health.ts";
 import { runHealthcheck } from "./healthcheck.ts";
 
 const up = async () => true;
@@ -23,32 +23,6 @@ function start(probes: Probes, probeTimeoutMs = 50): string {
 }
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop(true);
-});
-
-describe("checkHealth", () => {
-  test("is ok when every probe is up", async () => {
-    expect(await checkHealth(allUp)).toEqual({
-      ok: true,
-      checks: { gateway: true, postgres: true, redis: true },
-    });
-  });
-
-  test("a probe that throws counts as down", async () => {
-    const report = await checkHealth({
-      ...allUp,
-      postgres: async () => {
-        throw new Error("connection refused");
-      },
-    });
-    expect(report).toEqual({ ok: false, checks: { gateway: true, postgres: false, redis: true } });
-  });
-
-  test("a probe that hangs counts as down once its timeout passes", async () => {
-    const started = performance.now();
-    const report = await checkHealth({ ...allUp, redis: () => new Promise(() => {}) }, 50);
-    expect(report.checks).toEqual({ gateway: true, postgres: true, redis: false });
-    expect(performance.now() - started).toBeLessThan(1_000);
-  });
 });
 
 describe("health server", () => {
@@ -98,6 +72,11 @@ describe("runHealthcheck", () => {
   test("exits 0 when the endpoint is ready", async () => {
     const port = new URL(start(allUp)).port;
     expect(await runHealthcheck({ HEALTH_PORT: port })).toBe(0);
+  });
+
+  test("ignores whitespace around the port, as the bot's env does", async () => {
+    const port = new URL(start(allUp)).port;
+    expect(await runHealthcheck({ HEALTH_PORT: ` ${port} ` })).toBe(0);
   });
 
   test("exits 1 when a dependency is down", async () => {
