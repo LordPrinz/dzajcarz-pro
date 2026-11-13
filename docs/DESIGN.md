@@ -367,7 +367,8 @@ same for their recipient.
 ### Birthdays
 
 `/birthday set <day> <month>` saves a member's birthday without a year in `birthday` (29 February is
-allowed); `remove` deletes it and `show [user]` shows it. These work on servers and in the DM with the bot,
+allowed); `remove` deletes it and `show [user]` shows it (another member's only on a server they belong to, so
+the table cannot be probed by user id). These work on servers and in the DM with the bot,
 because a birthday is the member's own data: leaving a server keeps it. `/birthday channel` (Manage Server)
 opens a form with the channel and a template with `{user}`, `{username}` and `{server}`, stored in
 `birthday_config` like the welcome message; the prefix form takes `<channel> <message...>`. `test` posts a

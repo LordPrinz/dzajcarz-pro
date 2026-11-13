@@ -307,10 +307,21 @@ describe("/birthday set, remove, show", () => {
     expect((await s.run("show", { user: OLA }))[0]).toBe(`<@${OLA}> nie ma zapisanych urodzin.`);
     s.birthdays.set(OLA, { month: 2, day: 29 });
     expect((await s.run("show", { user: OLA }))[0]).toBe(`Urodziny <@${OLA}>: 29 lutego.`);
-    expect((await s.run("show", { user: OLA }, { locale: "de", guildId: null }))[0]).toBe(
+    expect((await s.run("show", { user: OLA }, { locale: "de" }))[0]).toBe(
       `Geburtstag von <@${OLA}>: 29. Februar.`,
     );
     expect((await s.run("show", { user: CALLER }))[0]).toContain("Nie masz");
+  });
+
+  test("show does not reveal the birthday of someone outside the server, or of anyone in a DM", async () => {
+    const s = setup();
+    s.birthdays.set(OLA, { month: 2, day: 29 });
+    const none = `<@${OLA}> nie ma zapisanych urodzin.`;
+    expect((await s.run("show", { user: OLA }, { guildId: null }))[0]).toBe(none);
+    delete s.memberNames[GUILD]?.[OLA];
+    expect((await s.run("show", { user: OLA }))[0]).toBe(none);
+    s.birthdays.set(CALLER, { month: 3, day: 12 });
+    expect((await s.run("show", {}, { guildId: null }))[0]).toBe("Twoje urodziny: 12 marca.");
   });
 });
 

@@ -232,7 +232,12 @@ export function createBirthdayModule({
         run: async (ctx) => {
           const userId = ctx.args.user ?? ctx.user.id;
           const self = userId === ctx.user.id;
-          const saved = await store.get(userId);
+          // Birthdays are stored globally, so another member's is shown only on a server they belong to; for
+          // anyone else the answer is the same as for "not saved", which keeps the lookup from probing user ids.
+          const visible =
+            self ||
+            (ctx.guildId !== null && (await members.displayName(ctx.guildId, userId)) !== null);
+          const saved = visible ? await store.get(userId) : null;
           const text = t(ctx.locale);
           let content: string;
           if (saved === null) content = self ? text.noneSelf : text.noneOther(userId);
