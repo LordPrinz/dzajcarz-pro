@@ -1,15 +1,21 @@
 import {
   type BotModule,
   canonicalTimeZone,
+  DEFAULT_LOCALE,
   defineCommand,
   defineSubcommand,
   fitLines,
+  hasPermissions,
+  isLocale,
+  LOCALE_NAMES,
+  type Locale,
   MANAGE_GUILD,
   MAX_PREFIX_LENGTH,
   prefixProblem,
   requireGuild,
   UserError,
 } from "@dzajcarz/core";
+import { t } from "./messages.ts";
 
 /** Where a guild's custom prefix lives. `forget`-style cache invalidation is the implementation's job. */
 export interface PrefixSettings {
@@ -31,10 +37,22 @@ export interface TimeZoneSettings {
   reset(guildId: string): Promise<void>;
 }
 
+/** Where the server's and the members' languages live; cache refresh is the implementation's job. */
+export interface LanguageSettings {
+  /** The server's own language, or null when it uses the default. */
+  guild(guildId: string): Promise<Locale | null>;
+  /** null goes back to the default. */
+  setGuild(guildId: string, locale: Locale | null): Promise<void>;
+  /** The member's own language for direct messages, or null when they never chose one. */
+  user(userId: string): Promise<Locale | null>;
+  /** null forgets the choice. */
+  setUser(userId: string, locale: Locale | null): Promise<void>;
+}
+
 /** One place a module is switched off. */
 export interface DisabledModule {
   module: string;
-  /** null: the whole server. */
+  /** A channel or category id; null: the whole server. */
   channelId: string | null;
 }
 
@@ -64,6 +82,7 @@ export interface SettingsModuleDeps {
   defaultTimeZone: string;
   modules: ModuleToggles;
   channels: GuildChannels;
+  languages: LanguageSettings;
   /** For the clock shown next to a zone; the real time unless a test pins it. */
   now?: () => Date;
 }
@@ -76,17 +95,22 @@ const MAX_ECHOED_NAME = 32;
 const MAX_LIST_LENGTH = 1900;
 const MAX_CHANNELS_PER_LINE = 10;
 
-const PREFIX_PROBLEMS = {
-  length: `Prefiks musi mieć od 1 do ${MAX_PREFIX_LENGTH} znaków.`,
-  whitespace: "Prefiks nie może zawierać spacji ani niewidocznych znaków.",
-  backtick: "Prefiks nie może zawierać znaku `.",
-} as const;
-
-/** Throws a UserError (Polish) when the prefix breaks the core rule. */
+/** Throws a UserError when the prefix breaks the core rule. */
 function validatePrefix(prefix: string): void {
   const problem = prefixProblem(prefix);
-  if (problem) throw new UserError(PREFIX_PROBLEMS[problem]);
+  if (problem === "length") throw new UserError((l) => t(l).prefixLength(MAX_PREFIX_LENGTH));
+  if (problem === "whitespace") throw new UserError((l) => t(l).prefixWhitespace);
+  if (problem === "backtick") throw new UserError((l) => t(l).prefixBacktick);
 }
+
+/** `/language` choices: each language under its own name, so everybody finds theirs, plus a reset. */
+const RESET = "reset";
+const LANGUAGE_CHOICES = [
+  { name: LOCALE_NAMES.pl, value: "pl", aliases: ["polish", "polnisch"] },
+  { name: LOCALE_NAMES.en, value: "en", aliases: ["angielski", "englisch"] },
+  { name: LOCALE_NAMES.de, value: "de", aliases: ["niemiecki", "german"] },
+  { name: t.all("languageDefault"), value: RESET, aliases: ["default", "domyslny"] },
+] as const;
 
 export function createSettingsModule({
   prefixes,
@@ -95,73 +119,64 @@ export function createSettingsModule({
   defaultTimeZone,
   modules,
   channels,
+  languages,
   now = () => new Date(),
 }: SettingsModuleDeps): BotModule {
   // These commands keep the default `contexts` (servers only), so guildId is set when they run; the check
   // below narrows the type and guards a future change of contexts.
   const prefix = defineCommand({
     name: "prefix",
-    description: "Pokazuje albo zmienia prefiks komend na tym serwerze",
+    description: t.all("prefixDescription"),
     permissions: MANAGE_GUILD,
     subcommands: {
       set: defineSubcommand({
-        description: "Ustawia prefiks komend tekstowych",
+        description: t.all("prefixSetDescription"),
         options: {
-          prefix: { type: "string", description: "Nowy prefiks (1-5 znaków)", required: true },
+          prefix: { type: "string", description: t.all("prefixOption"), required: true },
         },
         run: async (ctx) => {
           validatePrefix(ctx.args.prefix);
           await prefixes.set(requireGuild(ctx.guildId), ctx.args.prefix);
-          await ctx.reply({ content: `Prefiks to teraz \`${ctx.args.prefix}\`.`, ephemeral: true });
+          await ctx.reply({ content: t(ctx.locale).prefixSet(ctx.args.prefix), ephemeral: true });
         },
       }),
       reset: defineSubcommand({
-        description: "Przywraca domyślny prefiks",
+        description: t.all("prefixResetDescription"),
         run: async (ctx) => {
           await prefixes.reset(requireGuild(ctx.guildId));
-          await ctx.reply({
-            content: `Przywrócono domyślny prefiks \`${defaultPrefix}\`.`,
-            ephemeral: true,
-          });
+          await ctx.reply({ content: t(ctx.locale).prefixReset(defaultPrefix), ephemeral: true });
         },
       }),
       show: defineSubcommand({
-        description: "Pokazuje aktualny prefiks",
+        description: t.all("prefixShowDescription"),
         run: async (ctx) => {
           const current = (await prefixes.get(requireGuild(ctx.guildId))) ?? defaultPrefix;
-          await ctx.reply({
-            content: `Prefiks na tym serwerze to \`${current}\`. Możesz też wspomnieć bota.`,
-            ephemeral: true,
-          });
+          await ctx.reply({ content: t(ctx.locale).prefixShow(current), ephemeral: true });
         },
       }),
     },
   });
 
   /** `Europe/Warsaw (teraz 14:05)`: the name and what its clock reads, so a wrong pick shows at once. */
-  const describeZone = (zone: string) => {
+  const describeZone = (zone: string, locale: Locale) => {
     const clock = new Intl.DateTimeFormat("pl-PL", {
       timeZone: zone,
       hour: "2-digit",
       minute: "2-digit",
       hourCycle: "h23",
     }).format(now());
-    return `\`${zone}\` (teraz ${clock})`;
+    return t(locale).zone(zone, clock);
   };
 
   const timezone = defineCommand({
     name: "timezone",
-    description: "Strefa czasowa serwera: zaplanowane wiadomości i piosenki, /time, daty",
+    description: t.all("zoneDescription"),
     permissions: MANAGE_GUILD,
     subcommands: {
       set: defineSubcommand({
-        description: "Ustawia strefę czasową serwera",
+        description: t.all("zoneSetDescription"),
         options: {
-          zone: {
-            type: "string",
-            description: "Nazwa strefy IANA, np. Europe/Warsaw, Europe/London, America/New_York",
-            required: true,
-          },
+          zone: { type: "string", description: t.all("zoneOption"), required: true },
         },
         run: async (ctx) => {
           const canonical = canonicalTimeZone(ctx.args.zone);
@@ -169,41 +184,37 @@ export function createSettingsModule({
             canonical !== null && (await timeZones.isKnown(canonical)) ? canonical : null;
           if (zone === null) {
             const shown = [...ctx.args.zone.replaceAll("`", "")].slice(0, 64).join("");
-            throw new UserError(
-              `Nie znam strefy \`${shown}\`. Podaj nazwę IANA, np. \`Europe/Warsaw\`, \`Europe/London\` albo \`America/New_York\`.`,
-            );
+            throw new UserError((l) => t(l).unknownZone(shown));
           }
           await timeZones.set(requireGuild(ctx.guildId), zone);
           await ctx.reply({
-            content: `Strefa czasowa serwera to teraz ${describeZone(zone)}. Zaplanowane wiadomości i piosenki idą według niej.`,
+            content: t(ctx.locale).zoneSet(describeZone(zone, ctx.locale)),
             ephemeral: true,
           });
         },
       }),
       reset: defineSubcommand({
-        description: "Przywraca domyślną strefę czasową",
+        description: t.all("zoneResetDescription"),
         run: async (ctx) => {
           await timeZones.reset(requireGuild(ctx.guildId));
           await ctx.reply({
-            content: `Przywrócono domyślną strefę ${describeZone(defaultTimeZone)}.`,
+            content: t(ctx.locale).zoneReset(describeZone(defaultTimeZone, ctx.locale)),
             ephemeral: true,
           });
         },
       }),
       show: defineSubcommand({
-        description: "Pokazuje strefę czasową serwera",
+        description: t.all("zoneShowDescription"),
         run: async (ctx) => {
           const own = await timeZones.get(requireGuild(ctx.guildId));
-          await ctx.reply({
-            content: `Strefa czasowa serwera: ${describeZone(own ?? defaultTimeZone)}${own === null ? " (domyślna)" : ""}.`,
-            ephemeral: true,
-          });
+          const zone = describeZone(own ?? defaultTimeZone, ctx.locale);
+          await ctx.reply({ content: t(ctx.locale).zoneShow(zone, own === null), ephemeral: true });
         },
       }),
     },
   });
 
-  /** Throws a UserError (Polish) listing the valid names unless `name` is a module that can be toggled. */
+  /** Throws a UserError listing the valid names unless `name` is a module that can be toggled. */
   const toggleable = (name: string): string => {
     const module = name.toLowerCase();
     const known = modules.moduleNames();
@@ -211,12 +222,11 @@ export function createSettingsModule({
       const valid = known.filter((n) => !PROTECTED_MODULES.has(n));
       // The name is echoed inside a code span: a backtick would close it, and length is capped for Discord's limit.
       const shown = [...name.replaceAll("`", "")].slice(0, MAX_ECHOED_NAME).join("");
-      throw new UserError(
-        `Nie ma modułu \`${shown}\`. Dostępne moduły: ${valid.map((n) => `\`${n}\``).join(", ") || "brak"}.`,
-      );
+      const list = valid.map((n) => `\`${n}\``).join(", ");
+      throw new UserError((l) => t(l).unknownModule(shown, list));
     }
     if (PROTECTED_MODULES.has(module)) {
-      throw new UserError(`Modułu \`${module}\` nie można wyłączyć.`);
+      throw new UserError((l) => t(l).protectedModule(module));
     }
     return module;
   };
@@ -228,78 +238,75 @@ export function createSettingsModule({
   const requireToggleableChannel = async (guildId: string, channelId: string | null) => {
     if (channelId === null) return;
     if (!(await channels.belongsTo(guildId, channelId))) {
-      throw new UserError("Nie znalazłem takiego kanału na tym serwerze.");
+      throw new UserError((l) => t(l).channelNotFound);
     }
     if (await channels.isThread(guildId, channelId)) {
-      throw new UserError(
-        "Wątki dziedziczą ustawienia kanału nadrzędnego. Wybierz kanał, w którym wątek leży.",
-      );
+      throw new UserError((l) => t(l).threadChannel);
     }
   };
 
-  const where = (channelId: string | null) =>
-    channelId ? `na kanale <#${channelId}>` : "na serwerze";
+  const where = (channelId: string | null, locale: Locale) =>
+    channelId ? t(locale).inChannel(channelId) : t(locale).onServer;
+
+  const toggleOptions = {
+    module: { type: "string", description: t.all("moduleOption"), required: true },
+    channel: { type: "channel", description: t.all("channelOption") },
+  } as const;
 
   const modulesCommand = defineCommand({
     name: "modules",
-    description: "Włącza i wyłącza moduły bota na serwerze albo na wybranym kanale",
+    description: t.all("modulesDescription"),
     permissions: MANAGE_GUILD,
     subcommands: {
       list: defineSubcommand({
-        description: "Pokazuje moduły i miejsca, w których są wyłączone",
+        description: t.all("modulesListDescription"),
         run: async (ctx) => {
+          const text = t(ctx.locale);
           const disabled = await modules.list(requireGuild(ctx.guildId));
           const lines = modules.moduleNames().map((name) => {
             const entries = disabled.filter((d) => d.module === name);
-            if (entries.length === 0) return `\`${name}\`: włączony`;
-            if (entries.some((d) => d.channelId === null))
-              return `\`${name}\`: wyłączony na serwerze`;
+            if (entries.length === 0) return text.moduleOn(name);
+            if (entries.some((d) => d.channelId === null)) return text.moduleOffServer(name);
             const shown = entries.slice(0, MAX_CHANNELS_PER_LINE).map((d) => `<#${d.channelId}>`);
-            const hidden = entries.length - shown.length;
-            const more = hidden > 0 ? ` i jeszcze ${hidden}` : "";
-            return `\`${name}\`: wyłączony na kanałach ${shown.join(", ")}${more}`;
+            return text.moduleOffIn(name, shown.join(", "), entries.length - shown.length);
           });
-          await ctx.reply({ content: fitLines(lines, MAX_LIST_LENGTH), ephemeral: true });
+          await ctx.reply({
+            content: fitLines(lines, MAX_LIST_LENGTH, ctx.locale),
+            ephemeral: true,
+          });
         },
       }),
       disable: defineSubcommand({
-        description: "Wyłącza moduł na serwerze albo na jednym kanale",
-        options: {
-          module: { type: "string", description: "Nazwa modułu", required: true },
-          channel: { type: "channel", description: "Kanał (domyślnie cały serwer)" },
-        },
+        description: t.all("modulesDisableDescription"),
+        options: toggleOptions,
         run: async (ctx) => {
           const module = toggleable(ctx.args.module);
           const channelId = ctx.args.channel ?? null;
           const guildId = requireGuild(ctx.guildId);
           await requireToggleableChannel(guildId, channelId);
           await modules.disable(guildId, module, channelId);
+          const text = t(ctx.locale);
           // Scheduled DMs belong to no channel, so only a server-wide switch-off stops them.
-          const dmNote =
-            module === "messages" && channelId !== null
-              ? " Zaplanowane wiadomości prywatne wyłączysz tylko na całym serwerze."
-              : "";
+          const dmNote = module === "messages" && channelId !== null ? text.dmNote : "";
           await ctx.reply({
-            content: `Moduł \`${module}\` jest wyłączony ${where(channelId)}.${dmNote}`,
+            content: text.moduleDisabled(module, where(channelId, ctx.locale), dmNote),
             ephemeral: true,
           });
         },
       }),
       enable: defineSubcommand({
-        description: "Włącza moduł z powrotem na serwerze albo na jednym kanale",
-        options: {
-          module: { type: "string", description: "Nazwa modułu", required: true },
-          channel: { type: "channel", description: "Kanał (domyślnie cały serwer)" },
-        },
+        description: t.all("modulesEnableDescription"),
+        options: toggleOptions,
         run: async (ctx) => {
           const module = toggleable(ctx.args.module);
           const channelId = ctx.args.channel ?? null;
           const guildId = requireGuild(ctx.guildId);
           const changed = await modules.enable(guildId, module, channelId);
+          const place = where(channelId, ctx.locale);
           await ctx.reply({
             content: changed
-              ? `Moduł \`${module}\` jest znów włączony ${where(channelId)}.`
-              : `Moduł \`${module}\` nie był wyłączony ${where(channelId)}.`,
+              ? t(ctx.locale).moduleEnabled(module, place)
+              : t(ctx.locale).moduleNotDisabled(module, place),
             ephemeral: true,
           });
         },
@@ -307,5 +314,50 @@ export function createSettingsModule({
     },
   });
 
-  return { name: "settings", commands: [prefix, timezone, modulesCommand] };
+  // On a server it is the server's language (Manage Server to change it); in the DM with the bot, the
+  // member's own. Discord cannot gate only the change, so the permission check is ours.
+  const language = defineCommand({
+    name: "language",
+    description: t.all("languageDescription"),
+    aliases: ["jezyk", "sprache"],
+    contexts: { places: ["guild", "bot-dm"], installs: ["guild"] },
+    options: {
+      language: { type: "string", description: t.all("languageOption"), choices: LANGUAGE_CHOICES },
+    },
+    run: async (ctx) => {
+      const picked = ctx.args.language;
+      const { guildId } = ctx;
+      if (picked === undefined) {
+        const own =
+          guildId === null ? await languages.user(ctx.user.id) : await languages.guild(guildId);
+        const name = LOCALE_NAMES[own ?? ctx.locale];
+        const text = t(ctx.locale);
+        await ctx.reply({
+          content:
+            guildId === null
+              ? text.languageOfUser(name, own !== null)
+              : text.languageOfGuild(name, own !== null),
+          ephemeral: true,
+        });
+        return;
+      }
+      // The parser and Discord only let the choices through, so anything else is the reset.
+      const chosen = isLocale(picked) ? picked : null;
+      if (guildId === null) {
+        await languages.setUser(ctx.user.id, chosen);
+        // After a reset the client's language may apply, which only the adapter knows: stay in this one.
+        const content = chosen ? t(chosen).languageSetUser : t(ctx.locale).languageResetUser;
+        await ctx.reply({ content, ephemeral: true });
+        return;
+      }
+      if (!hasPermissions(ctx.memberPermissions, MANAGE_GUILD)) {
+        throw new UserError((l) => t(l).languageNeedsManageGuild);
+      }
+      await languages.setGuild(guildId, chosen);
+      const content = chosen ? t(chosen).languageSetGuild : t(DEFAULT_LOCALE).languageResetGuild;
+      await ctx.reply({ content, ephemeral: true });
+    },
+  });
+
+  return { name: "settings", commands: [prefix, timezone, modulesCommand, language] };
 }

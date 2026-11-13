@@ -2,6 +2,8 @@ import type { SQL } from "bun";
 
 /** How long a staged file waits before it is deleted, sent or not. */
 export const UPLOAD_TTL_MINUTES = 60;
+/** How long a send may hold its files; a longer lease is stale (migration 0019). */
+export const UPLOAD_LEASE_MINUTES = 10;
 /** At most this many bytes of unexpired files at once (the trigger in migration 0018). */
 export const MAX_STAGED_BYTES = 500 * 1024 * 1024;
 
@@ -37,16 +39,19 @@ export type ClaimResult<T> =
   /** One of the ids is unknown or expired. */
   | { status: "missing" }
   /** One of the files was sent by a message with another nonce. */
-  | { status: "taken" };
+  | { status: "taken" }
+  /** Another send holds the files right now. */
+  | { status: "busy" };
 
 /** The bot's side: it reads what the panel staged and deletes it once expired. */
 export interface UploadStore {
   /** Id and size of the unexpired uploads among `ids`, without their bytes. */
   sizes(ids: readonly string[]): Promise<{ id: string; size: number }[]>;
   /**
-   * Locks the uploads `ids` (in the order of `ids`) for one send with `nonce` and hands them to `send`; when
-   * `sent` says the message went out, they are marked as sent with that nonce. A concurrent send of the same
-   * files waits for the lock, then gets them only with the same nonce, so Discord can deduplicate it.
+   * Leases the uploads `ids` (in the order of `ids`) for one send with `nonce` and hands them to `send`, which
+   * runs outside any transaction; when `sent` says the message went out, they are marked as sent with that
+   * nonce, otherwise (or when `send` throws) the lease is given back. Files another send holds are "busy",
+   * and files sent with another nonce are "taken"; the same nonce gets them again, so Discord can deduplicate.
    */
   claim<T>(
     ids: readonly string[],
@@ -80,35 +85,58 @@ export function createUploadStore(sql: SQL): UploadStore {
       `;
     },
 
-    claim<T>(
+    async claim<T>(
       ids: readonly string[],
       nonce: string,
       send: (files: StagedUpload[]) => Promise<T>,
       sent: (value: T) => boolean,
     ): Promise<ClaimResult<T>> {
-      return sql.begin(async (tx) => {
-        const rows = await tx<(StagedUpload & { sent_nonce: string | null })[]>`
-          SELECT id::text AS id, name, size, data, sent_nonce FROM web_upload
-          WHERE id = ANY(${[...ids]}::uuid[])
+      // Postgres prints a uuid in lowercase, whatever case the caller sent.
+      const wanted = [...new Set(ids.map((id) => id.toLowerCase()))];
+      const rows = await sql<StagedUpload[]>`
+        UPDATE web_upload SET claimed_at = now()
+        WHERE id = ANY(${wanted}::uuid[])
+          AND created_at > now() - make_interval(mins => ${UPLOAD_TTL_MINUTES})
+          AND (claimed_at IS NULL OR claimed_at < now() - make_interval(mins => ${UPLOAD_LEASE_MINUTES}))
+          AND (sent_nonce IS NULL OR sent_nonce = ${nonce})
+        RETURNING id::text AS id, name, size, data
+      `;
+      const leased = rows.map((row) => row.id);
+      const release = () =>
+        sql`UPDATE web_upload SET claimed_at = NULL WHERE id = ANY(${leased}::uuid[])`;
+      if (rows.length !== wanted.length) {
+        if (leased.length > 0) await release();
+        const present = await sql<{ sent_nonce: string | null }[]>`
+          SELECT sent_nonce FROM web_upload
+          WHERE id = ANY(${wanted}::uuid[])
             AND created_at > now() - make_interval(mins => ${UPLOAD_TTL_MINUTES})
-          ORDER BY id
-          FOR UPDATE
         `;
-        if (rows.length !== new Set(ids).size) return { status: "missing" as const };
-        if (rows.some((row) => row.sent_nonce !== null && row.sent_nonce !== nonce)) {
-          return { status: "taken" as const };
-        }
-        const byId = new Map(rows.map((row) => [row.id, row]));
-        const files = ids.flatMap((id) => {
-          const row = byId.get(id);
-          return row ? [{ id: row.id, name: row.name, size: row.size, data: row.data }] : [];
-        });
-        const value = await send(files);
-        if (sent(value)) {
-          await tx`UPDATE web_upload SET sent_nonce = ${nonce} WHERE id = ANY(${[...ids]}::uuid[])`;
-        }
-        return { status: "ok" as const, value } satisfies ClaimResult<T>;
-      }) as Promise<ClaimResult<T>>;
+        if (present.length !== wanted.length) return { status: "missing" };
+        return present.some((row) => row.sent_nonce !== null && row.sent_nonce !== nonce)
+          ? { status: "taken" }
+          : { status: "busy" };
+      }
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const files = ids.flatMap((id) => {
+        const row = byId.get(id.toLowerCase());
+        return row ? [row] : [];
+      });
+      let value: T;
+      try {
+        value = await send(files);
+      } catch (error) {
+        await release().catch(() => {});
+        throw error;
+      }
+      if (sent(value)) {
+        await sql`
+          UPDATE web_upload SET sent_nonce = ${nonce}, claimed_at = NULL
+          WHERE id = ANY(${leased}::uuid[])
+        `;
+      } else {
+        await release();
+      }
+      return { status: "ok", value };
     },
 
     async purgeExpired() {

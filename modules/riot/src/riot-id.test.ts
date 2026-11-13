@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { UserError } from "@dzajcarz/core";
-import { parseRiotId, RIOT_ID_HELP } from "./riot-id.ts";
+import { t } from "./messages.ts";
+import { parseRiotId } from "./riot-id.ts";
 
 describe("parseRiotId", () => {
   test("splits name and tag", () => {
@@ -36,6 +37,6 @@ describe("parseRiotId", () => {
     ["doubled hash", "Nazwa##TAG"],
     ["hash inside the name", "Na#zwa#TAG"],
   ])("rejects %s", (_label, input) => {
-    expect(() => parseRiotId(input)).toThrow(new UserError(RIOT_ID_HELP));
+    expect(() => parseRiotId(input)).toThrow(new UserError(t("pl").riotIdHelp));
   });
 });

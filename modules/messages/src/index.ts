@@ -11,14 +11,19 @@ import {
   defineSubcommand,
   fitLines,
   type GuildTimeZones,
+  LOCALES,
+  type Locale,
+  type LocaleResolver,
   type Logger,
   MANAGE_GUILD,
   requireGuild,
   type TextChannels,
   tickMinute,
+  truncate,
   UserError,
 } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
+import { t } from "./messages.ts";
 import { parseTimeOfDay } from "./time.ts";
 
 export type MessageTarget = { kind: "channel"; channelId: string } | { kind: "dm"; userId: string };
@@ -127,6 +132,8 @@ export interface MessagesModuleDeps {
   /** The zone each server reads its times of day in (`/timezone`). */
   timeZones: GuildTimeZones;
   logger: Logger;
+  /** The language of a member's DMs (the delivered message's footer and button). */
+  locales: LocaleResolver;
 }
 
 const MODULE_NAME = "messages";
@@ -151,20 +158,6 @@ const CHANNEL_MENTION = /^<#(\d{17,20})>$/;
 const USER_MENTION = /^<@!?(\d{17,20})>$/;
 const USER_PLACEHOLDER = "{user}";
 
-const BAD_TIME = "Podaj godzinę jako HH:MM, np. 19:00.";
-const ONE_TARGET = "Wybierz kanał albo osobę (jedno z dwóch).";
-const BAD_CHANNEL = "Wybierz kanał tekstowy z tego serwera.";
-const NOT_A_MEMBER = "Wiadomości prywatne mogę wysyłać tylko członkom tego serwera (nie botom).";
-const BAD_LENGTH = `Treść musi mieć od 1 do ${MAX_CONTENT_LENGTH} znaków.`;
-const LIMIT_REACHED = `Ten serwer ma już ${MAX_MESSAGES_PER_GUILD} zaplanowanych wiadomości. Usuń którąś przez \`messages remove\`.`;
-const RECIPIENT_FULL = `Ta osoba ma już ${MAX_DMS_PER_RECIPIENT} zaplanowane wiadomości prywatne z tego serwera. Usuń którąś przez \`messages remove\`.`;
-const DUPLICATE = "Na ten kanał albo do tej osoby jest już zaplanowana wiadomość o tej godzinie.";
-const CANNOT_POST = (channelId: string) =>
-  `Nie mogę pisać na <#${channelId}>. Daj mi tam uprawnienia „Wyświetlanie kanałów” i „Wysyłanie wiadomości”.`;
-const USER_IN_CHANNEL =
-  " `{user}` działa tylko w wiadomościach prywatnych, na kanale zostanie wpisane dosłownie.";
-const EMPTY_LIST = "Brak zaplanowanych wiadomości. Dodaj przez `messages add`.";
-
 /**
  * The server name as plain text: the server's owner picks it, so markdown and mention characters are dropped
  * before it goes into the bot's own footer or reply.
@@ -176,17 +169,27 @@ function plainGuildName(name: string): string {
     .trim();
 }
 
-const dmFooter = (guildName: string) => `\n-# Zaplanowana wiadomość z serwera ${guildName}.`;
-
 /** What a member gets in a DM: `{user}` becomes a ping of them, and a footer says which server sent it. */
-function renderDirectMessage(content: string, userId: string, guildName: string): string {
-  return content.replaceAll(USER_PLACEHOLDER, `<@${userId}>`) + dmFooter(guildName);
+function renderDirectMessage(
+  content: string,
+  userId: string,
+  guildName: string,
+  locale: Locale,
+): string {
+  return content.replaceAll(USER_PLACEHOLDER, `<@${userId}>`) + t(locale).dmFooter(guildName);
 }
 
-/** How far over Discord's limit a DM could end up, with the longest server name; 0 when it fits. */
+/**
+ * How far over Discord's limit a DM could end up, with the longest server name and the longest footer of any
+ * language (the recipient's language is not known here); 0 when it fits.
+ */
 function directMessageOverflow(content: string, userId: string): number {
-  const worstCase = renderDirectMessage(content, userId, "x".repeat(MAX_GUILD_NAME));
-  return Math.max(0, characterCount(worstCase) - DISCORD_MESSAGE_LIMIT);
+  const longest = Math.max(
+    ...LOCALES.map((locale) =>
+      characterCount(renderDirectMessage(content, userId, "x".repeat(MAX_GUILD_NAME), locale)),
+    ),
+  );
+  return Math.max(0, longest - DISCORD_MESSAGE_LIMIT);
 }
 
 /**
@@ -196,9 +199,7 @@ function directMessageOverflow(content: string, userId: string): number {
  */
 function preview(content: string): string {
   const line = content.replace(/\s+/g, " ").trim().replaceAll("`", "\u02cb");
-  const chars = [...line];
-  const cut = chars.length > PREVIEW_LENGTH ? `${chars.slice(0, PREVIEW_LENGTH).join("")}…` : line;
-  return `\`${cut}\``;
+  return `\`${truncate(line, PREVIEW_LENGTH)}\``;
 }
 
 /** Splits `items` into runs of `size`, in order. */
@@ -241,38 +242,44 @@ export function createMessagesModule({
   now,
   timeZones,
   logger,
+  locales,
 }: MessagesModuleDeps): BotModule {
   /** Shared by the form and the prefix form, so both refuse the same input with the same words. */
-  async function addMessage(guildId: string, createdBy: string, draft: Draft): Promise<string> {
+  async function addMessage(
+    guildId: string,
+    createdBy: string,
+    draft: Draft,
+    locale: Locale,
+  ): Promise<string> {
     const time = parseTimeOfDay(draft.time ?? "");
-    if (time === null) throw new UserError(BAD_TIME);
+    if (time === null) throw new UserError((l) => t(l).badTime);
     if ((draft.channelId === undefined) === (draft.userId === undefined)) {
-      throw new UserError(ONE_TARGET);
+      throw new UserError((l) => t(l).oneTarget);
     }
     const content = draft.text.trim();
     const length = characterCount(content);
-    if (length < 1 || length > MAX_CONTENT_LENGTH) throw new UserError(BAD_LENGTH);
+    if (length < 1 || length > MAX_CONTENT_LENGTH)
+      throw new UserError((l) => t(l).badLength(MAX_CONTENT_LENGTH));
     if (draft.userId !== undefined) {
       const overflow = directMessageOverflow(content, draft.userId);
       if (overflow > 0) {
-        throw new UserError(
-          `Po wstawieniu oznaczeń {user} i stopki z nazwą serwera wiadomość prywatna przekroczy ${DISCORD_MESSAGE_LIMIT} znaków. Skróć ją o ${overflow}.`,
-        );
+        throw new UserError((l) => t(l).directOverflow(DISCORD_MESSAGE_LIMIT, overflow));
       }
     }
     let target: MessageTarget;
     if (draft.channelId !== undefined) {
-      if (!(await channels.isTextChannelOf(guildId, draft.channelId))) {
-        throw new UserError(BAD_CHANNEL);
+      const channelId = draft.channelId;
+      if (!(await channels.isTextChannelOf(guildId, channelId))) {
+        throw new UserError((l) => t(l).badChannel);
       }
-      if (!(await channels.botCanPostIn(guildId, draft.channelId))) {
-        throw new UserError(CANNOT_POST(draft.channelId));
+      if (!(await channels.botCanPostIn(guildId, channelId))) {
+        throw new UserError((l) => t(l).cannotPost(channelId));
       }
-      target = { kind: "channel", channelId: draft.channelId };
+      target = { kind: "channel", channelId };
     } else {
       const userId = draft.userId as string;
       if ((await sender.memberStatus(guildId, userId)) !== "member") {
-        throw new UserError(NOT_A_MEMBER);
+        throw new UserError((l) => t(l).notAMember);
       }
       target = { kind: "dm", userId };
     }
@@ -280,50 +287,52 @@ export function createMessagesModule({
       { guildId, time, content, target, createdBy },
       { perGuild: MAX_MESSAGES_PER_GUILD, perRecipient: MAX_DMS_PER_RECIPIENT },
     );
-    if (result.status === "guild-full") throw new UserError(LIMIT_REACHED);
-    if (result.status === "recipient-full") throw new UserError(RECIPIENT_FULL);
-    if (result.status === "duplicate") throw new UserError(DUPLICATE);
+    if (result.status === "guild-full")
+      throw new UserError((l) => t(l).limitReached(MAX_MESSAGES_PER_GUILD));
+    if (result.status === "recipient-full")
+      throw new UserError((l) => t(l).recipientFull(MAX_DMS_PER_RECIPIENT));
+    if (result.status === "duplicate") throw new UserError((l) => t(l).duplicate);
     const saved = result.message;
     const when = `${saved.time} (${await timeZones.of(guildId)})`;
     // Whether the recipient opted out stays private to them, so the reply does not say.
     if (target.kind === "dm") {
-      return `Zaplanowano wiadomość #${saved.id} na ${when} → DM do <@${target.userId}>.`;
+      return t(locale).scheduledDm(saved.id, when, target.userId);
     }
-    const note = content.includes(USER_PLACEHOLDER) ? USER_IN_CHANNEL : "";
-    return `Zaplanowano wiadomość #${saved.id} na ${when} → <#${target.channelId}>.${note}`;
+    const note = content.includes(USER_PLACEHOLDER) ? t(locale).userInChannel : "";
+    return t(locale).scheduledChannel(saved.id, when, target.channelId, note);
   }
 
   const addForm = defineModal({
     module: MODULE_NAME,
     name: "add",
-    title: "Zaplanowana wiadomość",
+    title: t.all("formTitle"),
     permissions: MANAGE_GUILD,
     fields: {
       time: {
         type: "short",
-        label: "Godzina (strefa czasowa serwera)",
-        description: "HH:MM, wiadomość wychodzi codziennie o tej porze.",
+        label: t.all("formTimeLabel"),
+        description: t.all("formTimeDescription"),
         placeholder: "19:00",
         maxLength: 5,
       },
       channel: {
         type: "channel",
-        label: "Kanał",
-        description: "Wybierz kanał albo osobę poniżej.",
+        label: t.all("formChannelLabel"),
+        description: t.all("formChannelDescription"),
         channelTypes: ["text", "announcement"],
         required: false,
       },
       user: {
         type: "user",
-        label: "Osoba (wiadomość prywatna)",
-        description: "Członek serwera, który dostanie DM.",
+        label: t.all("formUserLabel"),
+        description: t.all("formUserDescription"),
         required: false,
       },
       text: {
         type: "paragraph",
-        label: "Treść",
-        description: "{user} wstawia oznaczenie odbiorcy (tylko w DM).",
-        placeholder: "Bonżur!",
+        label: t.all("formTextLabel"),
+        description: t.all("formTextDescription"),
+        placeholder: t.all("formTextPlaceholder"),
         maxLength: MAX_CONTENT_LENGTH,
         // Optional so an empty answer gets the same wording as the prefix form.
         required: false,
@@ -332,17 +341,22 @@ export function createMessagesModule({
     run: async (ctx) => {
       const text = ctx.values.text ?? "";
       try {
-        const content = await addMessage(requireGuild(ctx.guildId), ctx.user.id, {
-          time: ctx.values.time,
-          channelId: ctx.values.channel,
-          userId: ctx.values.user,
-          text,
-        });
+        const content = await addMessage(
+          requireGuild(ctx.guildId),
+          ctx.user.id,
+          {
+            time: ctx.values.time,
+            channelId: ctx.values.channel,
+            userId: ctx.values.user,
+            text,
+          },
+          ctx.locale,
+        );
         await ctx.reply({ content, ephemeral: true });
       } catch (error) {
         if (!(error instanceof UserError) || text.trim() === "") throw error;
         // The form is gone with everything typed in it: hand the text back so it can be pasted again.
-        await ctx.reply({ content: error.message, ephemeral: true });
+        await ctx.reply({ content: error.messageIn(ctx.locale), ephemeral: true });
         for (const block of codeBlocks(text)) await ctx.reply({ content: block, ephemeral: true });
       }
     },
@@ -356,12 +370,12 @@ export function createMessagesModule({
     run: async (ctx) => {
       // The guild id rides in the custom_id, which the client sends back: trust its shape only.
       const guildId = ctx.state;
-      if (!SNOWFLAKE.test(guildId)) throw new UserError("Ten przycisk jest nieaktualny.");
+      if (!SNOWFLAKE.test(guildId)) throw new UserError((l) => t(l).staleButton);
       await store.optOut(ctx.user.id, guildId);
       const raw = await sender.guildName(guildId);
       const name = raw === null ? "" : plainGuildName(raw);
       await ctx.reply({
-        content: `Nie dostaniesz już zaplanowanych wiadomości z ${name !== "" ? `serwera ${name}` : "tego serwera"}. Włączysz je z powrotem przez \`/dm on\` na tym serwerze.`,
+        content: t(ctx.locale).optedOutOfServer(name),
         ephemeral: true,
       });
     },
@@ -392,16 +406,17 @@ export function createMessagesModule({
     if ((await sender.memberStatus(guildId, target.userId)) !== "member") return;
     if (await store.isOptedOut(target.userId, guildId)) return;
     const guildName = plainGuildName((await sender.guildName(guildId)) ?? "") || guildId;
+    const locale = await locales.user(target.userId);
     const delivered = await sender.toMember(
       guildId,
       target.userId,
-      renderDirectMessage(message.content, target.userId, guildName),
+      renderDirectMessage(message.content, target.userId, guildName, locale),
       [
         [
           {
             type: "button",
             customId: optOutButton.customId(target.userId, guildId),
-            label: "Nie wysyłaj mi więcej",
+            label: t(locale).optOutLabel,
             style: "secondary",
             emoji: "🔕",
           },
@@ -496,27 +511,27 @@ export function createMessagesModule({
 
   const messages = defineCommand({
     name: "messages",
-    description: "Zaplanowane wiadomości na serwerze",
+    description: t.all("messagesDescription"),
     permissions: MANAGE_GUILD,
     subcommands: {
       add: defineSubcommand({
-        description: "Planuje codzienną wiadomość na kanał albo w DM do członka serwera",
+        description: t.all("addDescription"),
         options: {
           time: {
             type: "string",
-            description: "Godzina HH:MM w strefie czasowej serwera (/timezone)",
+            description: t.all("addTimeOption"),
             required: true,
             prefixOnly: true,
           },
           target: {
             type: "string",
-            description: "#kanał albo @osoba",
+            description: t.all("addTargetOption"),
             required: true,
             prefixOnly: true,
           },
           text: {
             type: "string",
-            description: "Treść ({user} oznacza odbiorcę DM)",
+            description: t.all("addTextOption"),
             required: true,
             rest: true,
             prefixOnly: true,
@@ -529,40 +544,49 @@ export function createMessagesModule({
             return;
           }
           const target = parseTarget(ctx.args.target ?? "");
-          if (target === null) throw new UserError(ONE_TARGET);
-          const content = await addMessage(guildId, ctx.user.id, {
-            time: ctx.args.time,
-            channelId: target.kind === "channel" ? target.channelId : undefined,
-            userId: target.kind === "dm" ? target.userId : undefined,
-            text: ctx.args.text ?? "",
-          });
+          if (target === null) throw new UserError((l) => t(l).oneTarget);
+          const content = await addMessage(
+            guildId,
+            ctx.user.id,
+            {
+              time: ctx.args.time,
+              channelId: target.kind === "channel" ? target.channelId : undefined,
+              userId: target.kind === "dm" ? target.userId : undefined,
+              text: ctx.args.text ?? "",
+            },
+            ctx.locale,
+          );
           await ctx.reply({ content, ephemeral: true });
         },
       }),
       list: defineSubcommand({
-        description: "Pokazuje zaplanowane wiadomości serwera",
+        description: t.all("listDescription"),
         run: async (ctx) => {
           const guildId = requireGuild(ctx.guildId);
           const rows = await store.list(guildId);
           const content =
             rows.length === 0
-              ? EMPTY_LIST
-              : fitLines([
-                  `Godziny w strefie ${await timeZones.of(guildId)}:`,
-                  ...rows.map(
-                    (row) =>
-                      `#${row.id} ${row.time} → ${targetLabel(row.target)}: ${preview(row.content)}`,
-                  ),
-                ]);
+              ? t(ctx.locale).emptyList
+              : fitLines(
+                  [
+                    t(ctx.locale).listHeader(await timeZones.of(guildId)),
+                    ...rows.map(
+                      (row) =>
+                        `#${row.id} ${row.time} → ${targetLabel(row.target)}: ${preview(row.content)}`,
+                    ),
+                  ],
+                  undefined,
+                  ctx.locale,
+                );
           await ctx.reply({ content, ephemeral: true });
         },
       }),
       remove: defineSubcommand({
-        description: "Usuwa zaplanowaną wiadomość",
+        description: t.all("removeDescription"),
         options: {
           id: {
             type: "integer",
-            description: "Numer z `messages list`",
+            description: t.all("removeIdOption"),
             required: true,
             minValue: 1,
           },
@@ -570,9 +594,9 @@ export function createMessagesModule({
         run: async (ctx) => {
           const { id } = ctx.args;
           if (!(await store.remove(requireGuild(ctx.guildId), id))) {
-            throw new UserError(`Nie ma wiadomości #${id} na tym serwerze.`);
+            throw new UserError((l) => t(l).noSuchMessage(id));
           }
-          await ctx.reply({ content: `Usunięto wiadomość #${id}.`, ephemeral: true });
+          await ctx.reply({ content: t(ctx.locale).removed(id), ephemeral: true });
         },
       }),
     },
@@ -580,32 +604,27 @@ export function createMessagesModule({
 
   const dm = defineCommand({
     name: "dm",
-    description: "Zaplanowane wiadomości prywatne od bota",
+    description: t.all("dmDescription"),
     contexts: { places: ["guild", "bot-dm"], installs: ["guild"] },
     subcommands: {
       off: defineSubcommand({
-        description: "Wyłącza je z tego serwera (w DM z botem: ze wszystkich)",
+        description: t.all("dmOffDescription"),
         run: async (ctx) => {
           await store.optOut(ctx.user.id, ctx.guildId);
           await ctx.reply({
-            content:
-              ctx.guildId === null
-                ? "Nie dostaniesz już zaplanowanych wiadomości z żadnego serwera."
-                : "Nie dostaniesz już zaplanowanych wiadomości z tego serwera.",
+            content: ctx.guildId === null ? t(ctx.locale).dmOffEverywhere : t(ctx.locale).dmOffHere,
             ephemeral: true,
           });
         },
       }),
       on: defineSubcommand({
-        description: "Włącza je dla tego serwera (w DM z botem: zdejmuje wyłączenie wszystkich)",
+        description: t.all("dmOnDescription"),
         run: async (ctx) => {
           const { guildId } = ctx;
           const removed = await store.optIn(ctx.user.id, guildId);
           if (guildId === null) {
             await ctx.reply({
-              content: removed
-                ? "Włączone ponownie dla wszystkich serwerów, poza tymi wyłączonymi osobno."
-                : "Nie masz wyłączenia dla wszystkich serwerów. Wyłączenie jednego serwera zdejmiesz przez `/dm on` na tym serwerze.",
+              content: removed ? t(ctx.locale).dmOnEverywhere : t(ctx.locale).dmOnEverywhereNone,
               ephemeral: true,
             });
             return;
@@ -613,15 +632,13 @@ export function createMessagesModule({
           // After removing this guild's row, only the every-server opt-out can still block messages.
           if (await store.isOptedOut(ctx.user.id, guildId)) {
             await ctx.reply({
-              content: `${removed ? "Włączono dla tego serwera, ale n" : "N"}adal masz wyłączone wiadomości ze wszystkich serwerów, więc stąd też nic nie przyjdzie. Wpisz \`/dm on\` w prywatnej wiadomości do bota, żeby to zmienić.`,
+              content: removed ? t(ctx.locale).stillOptedOutAfterOn : t(ctx.locale).stillOptedOut,
               ephemeral: true,
             });
             return;
           }
           await ctx.reply({
-            content: removed
-              ? "Znowu dostaniesz zaplanowane wiadomości z tego serwera."
-              : "Nie były wyłączone.",
+            content: removed ? t(ctx.locale).dmOnHere : t(ctx.locale).dmOnNotOff,
             ephemeral: true,
           });
         },

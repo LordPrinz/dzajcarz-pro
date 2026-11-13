@@ -1,8 +1,7 @@
-import type { Logger } from "@dzajcarz/core";
+import { createHealthChecker, healthHandlers, type Logger } from "@dzajcarz/core";
 import { type BotClient, MAX_UPLOAD_BYTES } from "@dzajcarz/web-protocol";
 import { type ArchiveRouteDeps, archiveRoutes } from "./archive.ts";
 import type { AuditedResult, Auditor } from "./audit.ts";
-import { createHealth, type Probes } from "./health.ts";
 import { createGuard, guarded, guardRoutes } from "./http/guard.ts";
 import { withSecurityHeaders } from "./http/headers.ts";
 import { MAX_BODY_BYTES } from "./http/json.ts";
@@ -30,7 +29,8 @@ export interface WebServerDeps {
   archive: ReadingRouteDeps["archive"];
   uploads: WritingRouteDeps["uploads"];
   live: LiveState;
-  probes: Probes;
+  /** Readiness: Postgres and Redis. A bot that is down is not a failure, the panel says so itself. */
+  probes: Record<"postgres" | "redis", () => Promise<boolean>>;
   logger: Logger;
   /** The UI, from `loadPage`. */
   page: PageFiles;
@@ -97,7 +97,7 @@ export function createWebServer(
 ) {
   const { bot, live, logger } = deps;
   const guard = createGuard({ publicOrigin: deps.publicOrigin, port: deps.port, logger });
-  const health = createHealth(deps.probes);
+  const { readiness, liveness } = healthHandlers(createHealthChecker(deps.probes));
 
   const listGuilds = async () => {
     const result = await bot.request("guilds.list", {});
@@ -110,11 +110,6 @@ export function createWebServer(
       lastSeen: lastSeen === null ? null : new Date(lastSeen).toISOString(),
     });
   };
-  const readiness = async () => {
-    const report = await health.check();
-    return Response.json(report, { status: report.ok ? 200 : 503 });
-  };
-  const liveness = () => Response.json({ ok: true });
   // The page links its bundled icon; this answers browsers that ask for /favicon.ico anyway.
   const icon = [...deps.page].find(([path]) => path.startsWith("/favicon"))?.[1];
   const favicon = () =>

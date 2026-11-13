@@ -56,8 +56,11 @@ export interface WebBridgeOptions {
 }
 
 export interface WebBridge {
-  /** Publishes `bot.status` now and then every heartbeat interval. Call it once the gateway is ready. */
-  onReady(): void;
+  /**
+   * Starts answering the panel's commands and publishes `bot.status` now and then every heartbeat interval.
+   * Call it once the gateway is ready: until then nobody listens, so the panel gets "unavailable" at once.
+   */
+  onReady(): Promise<void>;
   /** Fire and forget; never rejects. */
   publishEvent<N extends EventName>(name: N, payload: EventPayload<N>): Promise<void>;
   stop(): Promise<void>;
@@ -65,8 +68,8 @@ export interface WebBridge {
 
 /**
  * The bot's one adapter for the web panel (ADR 9): it answers the panel's commands from discord.js state and
- * announces that the bot is alive. Modules do not know it exists. A subscription that fails is retried when
- * Redis reconnects, so this never blocks the bot's start.
+ * announces that the bot is alive. Modules do not know it exists. It subscribes on `onReady`, and a
+ * subscription that fails is retried when Redis reconnects, so this never blocks the bot's start.
  */
 export async function startWebBridge({
   pubsub,
@@ -96,17 +99,17 @@ export async function startWebBridge({
       ...music,
     },
   });
-  await server.start();
 
   let timer: Timer | undefined;
   const beat = () => void server.publishEvent("bot.status", botStatus());
 
   return {
-    onReady() {
+    async onReady() {
       if (timer) return;
-      beat();
       timer = setInterval(beat, heartbeatMs);
       timer.unref();
+      await server.start();
+      beat();
     },
     publishEvent: (name, payload) => server.publishEvent(name, payload),
     async stop() {

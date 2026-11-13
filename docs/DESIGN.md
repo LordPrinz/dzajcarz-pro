@@ -66,12 +66,12 @@ for every module on shutdown, before the Discord client is destroyed.
 Replies carry `components` as plain data; handlers are `defineButton` / `defineSelect` on
 `BotModule.components`. A click is routed by `custom_id` (`<module>:<component>:<owner>:<data>`), checked
 against the module toggle like a command, and refused ephemerally for anyone but the member who ran the
-command (`owner`). Small state rides in `<data>`; larger state goes to `KeyValueStore` for 15 minutes and
-an expired one answers "To menu wygasło". The state store (`createComponentStateStore`) lives in core; a module
-creates one from the storage it is given (music does, through `componentState` in the composition root). `createPaginator` renders `◀ | Strona N/M | ▶`; its `data` shares the
-100-character `custom_id` with the names, the owner id and the page number, so keep it short or pass a state
-store key. A click that the handler leaves unanswered is acknowledged automatically. Slash and prefix
-replies work alike. See ADR 6.
+command (`owner`). Small state rides in `<data>`; larger state goes to `KeyValueStore` for 15 minutes and an
+expired one answers "To menu wygasło". The state store (`createComponentStateStore`) lives in core; a module
+creates one from the storage it is given (music does, through `componentState` in the composition root).
+`createPaginator` renders `◀ | Strona N/M | ▶`; its `data` shares the 100-character `custom_id` with the
+names, the owner id and the page number, so keep it short or pass a state store key. A click that the handler
+leaves unanswered is acknowledged automatically. Slash and prefix replies work alike. See ADR 6.
 
 `defineUserSelect` adds a single-choice user select (`{ type: "user-select" }`, a whole row); the handler
 gets the chosen id in `ctx.values`. A component declared `public: true` skips the owner check: its
@@ -82,14 +82,14 @@ select) matches the component's kind before running it.
 
 ### Modals
 
-`defineModal` describes a form (up to 5 text, select, channel, user or file fields) as plain data; the module opens it
-with `ctx.showModal(modal.build(ctx.user.id, data))` from a slash command or a button/select handler and
-gets typed `ctx.values` in `run`. The submit is routed like a click (`<module>:<modal>:<owner>:<data>`,
+`defineModal` describes a form (up to 5 text, select, channel, user or file fields) as plain data; the module
+opens it with `ctx.showModal(modal.build(ctx.user.id, data))` from a slash command or a button/select handler
+and gets typed `ctx.values` in `run`. The submit is routed like a click (`<module>:<modal>:<owner>:<data>`,
 owner, permissions and module toggle checks), invalid input is answered with an ephemeral Polish message.
 Prefix commands cannot open modals: `ctx.canShowModal` is false and the argument form stays. Limits are
-checked at startup by the registry. A user field can take several people (`minValues`/`maxValues`, handed over as
-`string[]`) and a `file` field is one upload whose type and size are checked on submit (`ModalFile`: url, name,
-contentType, size). See ADR 6.
+checked at startup by the registry. A user field can take several people (`minValues`/`maxValues`, handed over
+as `string[]`) and a `file` field is one upload whose type and size are checked on submit (`ModalFile`: url,
+name, contentType, size). See ADR 6.
 
 ### Private commands
 
@@ -110,29 +110,29 @@ See ADR 7.
 ### Help
 
 `/help` (or `!help`) opens an ephemeral menu: a start page with the categories (modules) and their command
-counts, a select to open one, and "Dodaj na serwer" / "Dodaj na konto" link buttons built from the client
-id. A category lists its commands six per page (`createPaginator`), each subcommand as its own entry with
-the slash and the prefix syntax; the select stays so the user can switch, and "Strona główna" goes back.
-The state is the category name in the `custom_id` (plus the page), so nothing is stored. Every render
-recomputes what the caller may see: commands and subcommands behind permissions the member lacks are
-hidden (administrators see all), so are modules switched off in the channel (the module gate behind the
-`moduleEnabled` port; a thread follows its parent) and commands whose `contexts` do not allow the place. Places
-match exactly: a DM with the bot lists the commands that allow `bot-dm`, a group DM those that allow
-`private-channel`. In a server where the bot is not a member (user install) and in a group DM the menu
-shows slash syntax only and reads neither the prefix nor the toggles; the gateway also skips the module gate
-for such servers. The start page hint names the form the member typed (`!help komenda` or `/help komenda`).
-The registry allows at most 25 modules, the size of one select menu. `/help <command>` shows one
-command with the same filters; an unknown or hidden name gets the same "not found" answer.
+counts, a select to open one, and "Dodaj na serwer" / "Dodaj na konto" link buttons built from the client id.
+A category lists its commands six per page (`createPaginator`), each subcommand as its own entry with the
+slash and the prefix syntax; the select stays so the user can switch, and "Strona główna" goes back. The state
+is the category name in the `custom_id` (plus the page), so nothing is stored. Every render recomputes what
+the caller may see: commands and subcommands behind permissions the member lacks are hidden (administrators
+see all), so are modules switched off in the channel (the module gate behind the `moduleEnabled` port; a
+thread follows its parent) and commands whose `contexts` do not allow the place. Places match exactly: a DM
+with the bot lists the commands that allow `bot-dm`, a group DM those that allow `private-channel`. In a
+server where the bot is not a member (user install) and in a group DM the menu shows slash syntax only and
+reads neither the prefix nor the toggles; the gateway also skips the module gate for such servers. The start
+page hint names the form the member typed (`!help komenda` or `/help komenda`). The registry allows at most 25
+modules, the size of one select menu. `/help <command>` shows one command with the same filters; an unknown or
+hidden name gets the same "not found" answer.
 
 ### Errors
 
-`UserError` messages go to the caller as they are (Polish). Any other error is logged with the command,
-guild and user, and the caller gets a generic message. On slash both are private even after a public
-`defer()`: the adapter sends an ephemeral follow-up, then deletes the deferred reply (a failure in either step is
-only logged). A prefix reply cannot be ephemeral, so it is a normal reply. Event handlers are wrapped the same way, so one
-failing module cannot take the process down. An unhandled rejection is logged and the process keeps
-running; an uncaught exception is logged and the process exits with code 1, so the container's restart
-policy starts a clean instance.
+`UserError` messages go to the caller as they are, in the caller's language (see Languages). Any other error is logged with the command, guild
+and user, and the caller gets a generic message. On slash both are private even after a public `defer()`: the
+adapter sends an ephemeral follow-up, then deletes the deferred reply (a failure in either step is only
+logged). A prefix reply cannot be ephemeral, so it is a normal reply. Event handlers are wrapped the same way,
+so one failing module cannot take the process down. An unhandled rejection is logged and the process keeps
+running; an uncaught exception is logged and the process exits with code 1, so the container's restart policy
+starts a clean instance.
 
 ### Web panel
 
@@ -152,7 +152,8 @@ read. It is off for every server and for DMs until switched on, and a server can
 follows its parent). The bot archives what it sees from then on, bot messages included; "Wczytaj starsze" in
 the panel asks the bot to page one channel's history back from the oldest stored message, at most two pages
 of 100 per call, and to store what is missing. Backfill only goes back from the oldest stored message, so
-messages sent while the bot was down, after archiving began, are not filled in. An edit moves the previous content, attachments and embeds to
+messages sent while the bot was down, after archiving began, are not filled in. An edit moves the previous
+content, attachments and embeds to
 `archived_message_version` (a link preview arriving changes the row in place); a delete sets `deleted_at` and
 keeps the row; attachments are stored as links and metadata. There is no retention limit, and the archive
 outlives the bot leaving a server, while that server's archive settings are deleted with its other data.
@@ -245,9 +246,7 @@ does a port that is already taken (a warning is logged and the bot keeps running
   Redis (`ping`) in parallel, each with a 2 second timeout; a probe that throws or hangs counts as down.
   Concurrent requests share one run. It answers `200` when all three are up and `503` otherwise:
 
-  ```json
-  { "ok": false, "checks": { "gateway": true, "postgres": true, "redis": false } }
-  ```
+  `json { "ok": false, "checks": { "gateway": true, "postgres": true, "redis": false } } `
 
 - `GET /health/live` (liveness) answers `200 {"ok":true}` whenever the process responds. It is for
   supervisors that restart on no answer; a `503` on `/health` means a dependency is down, which a restart
@@ -289,7 +288,8 @@ down or silent for 500 ms the command runs anyway and a warning is logged: Redis
 
 The prefix is stored in `guild_settings.prefix` (null means the default from `BOT_PREFIX`) and cached in
 Redis for 10 minutes, because every message in every guild needs it. If Redis is down or does not answer
-within 500 ms the bot reads Postgres; if Postgres is down too it uses the default. Mentioning the bot always works as a prefix.
+within 500 ms the bot reads Postgres; if Postgres is down too it uses the default. Mentioning the bot always
+works as a prefix.
 
 ### Time zone per guild
 
@@ -300,36 +300,59 @@ abbreviations (`CET`) are refused, since Postgres reads a bare offset with the o
 the zone and what its clock reads now, `reset` goes back to `DEFAULT_TIME_ZONE` (`Europe/Warsaw`), which is
 also the zone outside servers. The zone must also be known to Postgres (`pg_timezone_names`), whose tzdata
 can lack names the runtime accepts; scheduled messages are converted there. There is no autocomplete for the
-zone; the option description and the refusal give examples. Modules get the zone through the `GuildTimeZones` port from core; apps/bot
+zone; the option description and the refusal give examples. Modules get the zone through the `GuildTimeZones`
+port from core; apps/bot
 caches it in Redis like the prefix (`createGuildSettingCache`).
+
+### Languages
+
+The bot speaks Polish (default), English and German (ADR 11). Each context has `ctx.locale`: the server's
+language on a server; elsewhere the member's choice, then their Discord client language
+(`fromDiscordLocale`), then Polish. apps/bot resolves it before building the context (`createLocales`,
+cached in Redis like the prefix); prefix messages carry no client language. `/language [language]` shows the
+language, or sets it: the server's on a server (Manage Server), the member's own in the DM with the bot;
+`reset` drops the choice. A changed language answers in the new one.
+
+Modules write their texts in a typed catalog per module (`modules/<name>/src/messages.ts`, `defineMessages`)
+and read it with `t(ctx.locale)`. Descriptions, choice names and modal texts take a `Localized` value
+(`t.all(key)` gives one entry in every language); the registry checks Discord's limits in every language,
+and deploy sends Polish as the base text plus `description_localizations` / `name_localizations` for
+`en-US`, `en-GB` and `de`, and reads Discord's set with `with_localizations=true` to compare it. Command
+names are not translated. A choice is accepted by its value, its name in any language or its aliases.
+`UserError((l) => …)` is rendered in the caller's language. Core's own texts (refusals, parser errors,
+modal validation, pagination) live in `coreMessages`; `common` holds the ones modules reuse (generic error,
+"try again later", guild only, no permission). Background code gets a language from the `LocaleResolver`
+port (`guild`, `user`).
 
 ### Leaving a server
 
 When the bot is removed from a server (`guildDelete`: kicked, or the server deleted), apps/bot deletes
 everything stored for it in one transaction (`createGuildDataRepository().forget`): settings, module
-toggles, welcome, party areas and channels, scheduled songs and messages, Dżajco overrides and the
-moderation history. Members' opt-outs from the server's scheduled DMs stay (`KEPT_GUILD_TABLES`): they are the
-member's choice, and dropping them would let the server DM them again after re-adding the bot. A server that adds the bot again starts fresh. An outage is
+toggles, welcome, birthday config and wishes, party areas and channels, scheduled songs and messages, Dżajco
+overrides and the moderation history. Members' opt-outs from the server's scheduled DMs stay (`KEPT_GUILD_TABLES`): they are the
+member's choice, and dropping them would let the server DM them again after re-adding the bot. A server that
+adds the bot again starts fresh. An outage is
 `guildUnavailable` in discord.js and deletes nothing; DM rows (`guild_id` NULL) are not touched.
 A database test compares `GUILD_TABLES` and `KEPT_GUILD_TABLES` with every table that has a `guild_id`, so a
-new one cannot be forgotten. The Redis copies of the prefix, zone and toggles are reloaded right after, so a server that re-adds the bot
+new one cannot be forgotten. The Redis copies of the prefix, zone, language and toggles are reloaded right after, so a
+server that re-adds the bot
 at once does not get its old settings back; Dżajco's per-channel cache expires within 10 minutes.
 
 ### Module toggles
 
-A server can switch a module off entirely or in chosen channels (`/modules disable <module> [channel]`).
-Rows live in `module_disabled` (`channel_id = ''` means the whole guild) and a guild's set is cached in
-Redis as JSON for 10 minutes, with the same fallbacks as the prefix, except that when Postgres is down too
-every module counts as enabled. The check is central, not in the modules: `bot.ts` asks the gate before a
-command runs (slash answers ephemerally, prefix stays silent) and wraps every event handler, using
-`eventScope` to find the guild and channel of the event. Events that are not in `eventScope` and events
-outside a guild are never gated. `guildMemberAdd` has no channel, so the gate only applies guild-wide
-switch-offs; the welcome module then checks the channel it will post to, and the messages module checks
-the target channel of each scheduled message. Scheduled DMs are gated on the server only, and `/modules
-disable messages <channel>` says so. A thread has no toggle of its own and follows its parent channel, both for
-events and for commands. The lookup is bounded to 1.5 s (Discord wants an answer to an interaction within
-3 s); a slower lookup counts as enabled. `/modules` only accepts channels the guild really has, checked
-through the `GuildChannels` port. `general`, `settings` and `status` cannot be disabled (the last has no per-server behaviour to switch).
+A server can switch a module off entirely or in chosen channels (`/modules disable <module> [channel]`). Rows
+live in `module_disabled` (`channel_id = ''` means the whole guild) and a guild's set is cached in Redis as
+JSON for 10 minutes, with the same fallbacks as the prefix, except that when Postgres is down too every module
+counts as enabled. The check is central, not in the modules: `bot.ts` asks the gate before a command runs
+(slash answers ephemerally, prefix stays silent) and wraps every event handler, using `eventScope` to find the
+guild and channel of the event. Events that are not in `eventScope` and events outside a guild are never
+gated. `guildMemberAdd` has no channel, so the gate only applies guild-wide switch-offs; the welcome module
+then checks the channel it will post to, and the messages module checks the target channel of each scheduled
+message. Scheduled DMs are gated on the server only, and `/modules disable messages <channel>` says so. A
+thread has no toggle of its own and follows its parent channel, both for events and for commands. The lookup
+is bounded to 1.5 s (Discord wants an answer to an interaction within 3 s); a slower lookup counts as enabled.
+`/modules` only accepts channels the guild really has, checked through the `GuildChannels` port. `general`,
+`settings` and `status` cannot be disabled (the last has no per-server behaviour to switch).
 
 ### Welcome messages
 
@@ -341,12 +364,33 @@ warning. It needs the privileged `GuildMembers` intent. The welcome sender overr
 to allow a ping for the joining member only (`allowedMentions: { users: [memberId] }`); scheduled DMs do the
 same for their recipient.
 
+### Birthdays
+
+`/birthday set <day> <month>` saves a member's birthday without a year in `birthday` (29 February is
+allowed); `remove` deletes it and `show [user]` shows it. These work on servers and in the DM with the bot,
+because a birthday is the member's own data: leaving a server keeps it. `/birthday channel` (Manage Server)
+opens a form with the channel and a template with `{user}`, `{username}` and `{server}`, stored in
+`birthday_config` like the welcome message; the prefix form takes `<channel> <message...>`. `test` posts a
+preview for the caller and `disable` deletes the config.
+
+One cron job runs every 15 minutes of UTC, which is a quarter of an hour in every zone. From 9:00 on the
+birthday on a server's clock (`/timezone`) it posts the template in that server's channel for each member
+born that day who is on the server, pinging only them; the DM goes out from 9:00 in the default zone, in
+the member's own language. 29 February birthdays are wished on 28 February in common years. Every wish is
+claimed in `birthday_wish` (member, target = guild id or `dm`, year) before it is sent, so it goes out at
+most once per server and year, also across restarts, and a run after downtime still catches up the same
+day. A failure a retry may fix (rate limit, Discord down) gives the claim back for the next run; a
+permanent one (channel gone or forbidden, DMs closed) keeps it and is logged. The module toggle of the
+channel holds back a server's wishes without claiming them; the DM has no server, so it is not gated.
+Leaving a server deletes its `birthday_config` and its `birthday_wish` rows.
+
 ### Dżajco
 
 The `dzajco` module answers a message that says "what" in any language with an egg reaction and the DŻAJCO
-gif. The word list comes from the old bot, minus the words that are everyday English, German, Spanish or French
-(`was`, `me`, `mit`, `que`, ...), which left 100 entries; `normalizeWords` strips zero-width spaces, folds to
-NFC lowercase and drops repeats, which leaves 94. The Polish `co` and the deliberate misspellings stay.
+gif. The word list comes from the old bot, minus the words that are everyday English, German, Spanish or
+French (`was`, `me`, `mit`, `que`, ...), which left 100 entries; `normalizeWords` strips zero-width spaces,
+folds to NFC lowercase and drops repeats, which leaves 94. The Polish `co` and the deliberate misspellings
+stay.
 
 `createWhatMatcher` compiles the list into one regex, once. Every character of a word may repeat (`whaaat`)
 and inner whitespace is any run of whitespace. Words in scripts written without spaces (Han, kana, Thai, Lao,
@@ -358,7 +402,8 @@ The `messageCreate` handler stops at the first failing check, in this order:
 1. a bot or webhook author, or empty text (a DM with the bot is handled like a channel, with the default
    prefix);
 2. no word matches (a regex test, so most messages cost no I/O);
-3. the text starts with the guild prefix (a command such as `!play what is love`) or with a mention of the bot;
+3. the text starts with the guild prefix (a command such as `!play what is love`) or with a mention of the
+   bot;
 4. the channel's cooldown key is set;
 5. the dice roll (`random() * 100 >= chancePercent`) fails;
 6. another message took the cooldown key first.
@@ -382,7 +427,8 @@ of at least 10 s (every answer costs two requests against the bot's shared rate 
 that it carries no `permissions` (core allows those only on guild-only commands) and checks Manage Server
 itself, so Discord shows it to every member. A channel without a row uses the defaults. The handler reads
 settings through a Redis cache (`dzajco:settings:<channelId>`, 10 minutes, an unreadable entry is reloaded);
-`set` and `reset` write the new value to that key and end the running cooldown, so new values apply at once. If the invalidation fails, or a read races a
+`set` and `reset` write the new value to that key and end the running cooldown, so new values apply at once.
+If the invalidation fails, or a read races a
 write, the old settings can stay for up to the cache TTL. We accept that. Chance 0 switches the gif off in a
 channel. The random source is injected (`Math.random` in `modules.ts`), so the tests are deterministic. The
 reaction needs the Add Reactions permission; without it the bot logs a warning and still sends the gif.
@@ -390,26 +436,26 @@ reaction needs the Add Reactions permission; without it the bot logs a warning a
 ### Party areas
 
 `/party create` opens a form (a modal, see Modals) with the category name, the join channel name, a channel
-name template and whether the area wants a command channel (a select with "Włączony" / "Wyłączony"). Submitting makes a category and a
-join voice channel and stores them in `party_area` (`join_channel_id` is the key, `category_id` is unique, plus
-`name_template`, default `Kanał {user}`, `command_channel`, default false, and `panel_message_id`, see Command
-channel below). `/party edit [channel]` opens the same form filled with the area's current values
-(`PartyChannels.areaNames`); submitting saves the template and the flag first, then renames only the channels whose name changed
-(`renameArea`), each checked against the rename limit (2 per 10 minutes) before Discord is called, and the
-reply says exactly what was and was not renamed. The `channel` option picks the
-area when a server has several. The prefix forms keep arguments: `party create <name>` uses the default
-template and no command channel, `party edit` answers that editing needs the slash command. The template must
-contain `{user}` and be at most 90 characters; names are at most 100. Joining the join channel creates a voice
-channel in that category named by the template, with `{user}` replaced by the member's display name
-(whitespace collapsed, cut to 100 characters, never empty), stores it in `party_channel` and moves the member
-into it. The bot
-needs Manage Channels (create and delete channels), Move Members (put the member into their channel) and
-Manage Roles (permission overwrites on the channels it makes); `/party create` says so when Discord refuses. A member owns **one party channel per server**, across all
-areas (`UNIQUE (guild_id, owner_id)`): joining again moves them back to it. A composite foreign key keeps
-a channel's `guild_id` equal to its area's. `create`, `edit`, `delete` and the area form need Manage Channels
-for the caller, from their guild-level roles (`PartyGuild.memberPermissions`; a grant on one channel does
-not count, Administrator does). That check is on the subcommands, not on `/party` itself, because a
-command-level permission would hide the owner controls from regular members.
+name template and whether the area wants a command channel (a select with "Włączony" / "Wyłączony").
+Submitting makes a category and a join voice channel and stores them in `party_area` (`join_channel_id` is the
+key, `category_id` is unique, plus `name_template`, default `Kanał {user}`, `command_channel`, default false,
+and `panel_message_id`, see Command channel below). `/party edit [channel]` opens the same form filled with
+the area's current values (`PartyChannels.areaNames`); submitting saves the template and the flag first, then
+renames only the channels whose name changed (`renameArea`), each checked against the rename limit (2 per 10
+minutes) before Discord is called, and the reply says exactly what was and was not renamed. The `channel`
+option picks the area when a server has several. The prefix forms keep arguments: `party create <name>` uses
+the default template and no command channel, `party edit` answers that editing needs the slash command. The
+template must contain `{user}` and be at most 90 characters; names are at most 100. Joining the join channel
+creates a voice channel in that category named by the template, with `{user}` replaced by the member's display
+name (whitespace collapsed, cut to 100 characters, never empty), stores it in `party_channel` and moves the
+member into it. The bot needs Manage Channels (create and delete channels), Move Members (put the member into
+their channel) and Manage Roles (permission overwrites on the channels it makes); `/party create` says so when
+Discord refuses. A member owns **one party channel per server**, across all areas (`UNIQUE (guild_id,
+owner_id)`): joining again moves them back to it. A composite foreign key keeps a channel's `guild_id` equal
+to its area's. `create`, `edit`, `delete` and the area form need Manage Channels for the caller, from their
+guild-level roles (`PartyGuild.memberPermissions`; a grant on one channel does not count, Administrator does).
+That check is on the subcommands, not on `/party` itself, because a command-level permission would hide the
+owner controls from regular members.
 
 Owner controls are further subcommands: `lock`, `unlock`, `limit <0-99>`, `rename <name>`, `invite <user>`,
 `block <user>`, `hide`, `show`. The caller must be in a party channel (their current voice channel, from
@@ -438,30 +484,30 @@ action and channel. `/party` is guild-only.
 
 `/party invite-special` and the panel's Specjalne zaproszenie button open the same form: members (user select,
 1 to 10), title (optional, up to 256), message (optional paragraph, a default invite text when empty), colour
-(string select, fixed palette with Polish names, default blue) and an optional attachment (image, video or PDF,
-up to 10 MB). Only the **owner** of the party channel the caller is in may open or submit it (Manage Channels is not
-enough, the DM goes out in the owner's name); the prefix form answers that it needs the slash command. On submit
-the module defers with a private reply (also when the form came from the panel, whose message stays untouched; access
-changes and DMs take longer than three seconds), downloads the attachment once through the `PartyInvites` port
-(Discord CDN only, size and time limited; if that fails the invites go out without it and the summary says so),
-then per distinct member: skips the caller, bots, people who are not on the server, members blocked on the channel
-(`PartyPermissions.isBlocked`) and people over their limit, grants access with the same `allowMember` call as
-`/party invite`, and sends a DM through the port (the module never imports discord.js). The DM is an embed whose author
-line carries the sender's avatar and "Zaproszenie od <display name> (@username) z serwera <server>", then the title,
-the owner's message, the channel, and the footer "Treść napisał zapraszający, nie bot." A link button "Dołącz" leads
-to the voice channel. The file is a real DM attachment; an image (png, jpeg, gif, webp) is also shown in the embed
-through `attachment://<name>`. Closed DMs (the port answers false) and failed ones are collected, not thrown, and
-the owner gets an ephemeral summary: delivered, DMs failed, skipped with a neutral reason. A member whose DM failed
-**keeps their access** and the summary says so, so the owner can tell them.
-Limits (Redis, `party-special:min|hour:{guild}:{user}`, `party-special-to:{guild}:{recipient}`): per owner 1 a minute
-and 5 an hour, per recipient 3 an hour from one server. The form refuses to open while the owner is over a limit
-(read without counting); the send counts. This action **fails closed**: with Redis down it answers "Specjalne
-zaproszenia są chwilowo niedostępne.", unlike the control cooldown, because each use is a DM to up to ten people. All
-output uses NO_MENTIONS.
+(string select, fixed palette with Polish names, default blue) and an optional attachment (image, video or
+PDF, up to 10 MB). Only the **owner** of the party channel the caller is in may open or submit it (Manage
+Channels is not enough, the DM goes out in the owner's name); the prefix form answers that it needs the slash
+command. On submit the module defers with a private reply (also when the form came from the panel, whose
+message stays untouched; access changes and DMs take longer than three seconds), downloads the attachment once
+through the `PartyInvites` port (Discord CDN only, size and time limited; if that fails the invites go out
+without it and the summary says so), then per distinct member: skips the caller, bots, people who are not on
+the server, members blocked on the channel (`PartyPermissions.isBlocked`) and people over their limit, grants
+access with the same `allowMember` call as `/party invite`, and sends a DM through the port (the module never
+imports discord.js). The DM is an embed whose author line carries the sender's avatar and "Zaproszenie od
+<display name> (@username) z serwera <server>", then the title, the owner's message, the channel, and the
+footer "Treść napisał zapraszający, nie bot." A link button "Dołącz" leads to the voice channel. The file is a
+real DM attachment; an image (png, jpeg, gif, webp) is also shown in the embed through `attachment://<name>`.
+Closed DMs (the port answers false) and failed ones are collected, not thrown, and the owner gets an ephemeral
+summary: delivered, DMs failed, skipped with a neutral reason. A member whose DM failed **keeps their access**
+and the summary says so, so the owner can tell them. Limits (Redis, `party-special:min|hour:{guild}:{user}`,
+`party-special-to:{guild}:{recipient}`): per owner 1 a minute and 5 an hour, per recipient 3 an hour from one
+server. The form refuses to open while the owner is over a limit (read without counting); the send counts.
+This action **fails closed**: with Redis down it answers "Specjalne zaproszenia są chwilowo niedostępne.",
+unlike the control cooldown, because each use is a DM to up to ten people. All output uses NO_MENTIONS.
 
-`/party delete` defers first, ephemerally (it makes several Discord calls). `deleteArea` removes the area and its channel
-rows in one transaction and returns them; the module then deletes those Discord channels, the join channel
-and the category.
+`/party delete` defers first, ephemerally (it makes several Discord calls). `deleteArea` removes the area and
+its channel rows in one transaction and returns them; the module then deletes those Discord channels, the join
+channel and the category.
 
 Joins are serialised per member by a Redis lock (`party:{guild}:{user}`, `setIfAbsent` with a random token,
 30 s TTL, released with `delIfEquals` so an expired lock never frees its new holder); the loser is ignored.
@@ -482,7 +528,8 @@ deleting the join channel or the category removes the whole area (its party chan
 the category); deleting a party channel removes its row. The whole area goes because party channels outside
 their category would be orphaned and an area missing either channel is useless. The bot does this with its
 own permissions, so anyone who can delete the join channel or the category (Manage Channels granted by an
-overwrite on that one channel is enough) can dismantle the area. That is accepted. On `clientReady` the bot drops areas whose join
+overwrite on that one channel is enough) can dismantle the area. That is accepted. On `clientReady` the bot
+drops areas whose join
 channel or category no longer exists and removes stored channels that are empty or gone, skipping channels
 younger than 15 s so a fresh join is not raced. All handlers log and never throw. It needs the
 `GuildVoiceStates` intent, which the client already has.
@@ -496,13 +543,15 @@ the join channel hands over or frees the old channel first.
 #### Command channel
 
 An area with `command_channel` on uses the text chat of its join voice channel as a command channel. The bot
-posts one panel there (an embed plus buttons Zamknij, Otwórz, Ukryj, Pokaż, Limit, Zmień nazwę, Specjalne zaproszenie and two user
+posts one panel there (an embed plus buttons Zamknij, Otwórz, Ukryj, Pokaż, Limit, Zmień nazwę, Specjalne
+zaproszenie and two user
 selects, Zaproś and Zablokuj) and stores its message id in `party_area.panel_message_id`. The panel is
 shared: its components are `public`, so anyone may press them, and each press acts on the presser's own
 party channel through the same functions the `/party lock|unlock|hide|show|limit|rename|invite|block`
 subcommands call (`controlledChannel`: in the channel, owner or Manage Channels, control cooldown, audit
 reason). Replies are ephemeral; a member without a party channel is told "Musisz być na swoim kanale party.".
-Limit, Zmień nazwę and Specjalne zaproszenie open a modal (owned by the presser, checked on submit like any modal) after the same
+Limit, Zmień nazwę and Specjalne zaproszenie open a modal (owned by the presser, checked on submit like any
+modal) after the same
 checks, cooldown included. That work runs inside the three seconds Discord gives for answering with a modal
 (a later answer fails with 10062), so it stays small: one Redis increment, the cached voice state, one row,
 and a member lookup only for someone who is not the owner. The cooldown also stops repeated presses from
@@ -512,12 +561,14 @@ then answer with a follow-up.
 Everything in that chat except the panel and the bot's own messages is deleted 15 seconds after it appears.
 The bot's messages stay because commands run from this chat (`/play`, for one) answer here, and deleting the
 now-playing panel would make `showPanel` post another one that is deleted in turn. The event carries the
-author id; the module compares it with `PartyChat.selfId()`. A `messageCreate` handler schedules the delete through the `Scheduler`
+author id; the module compares it with `PartyChat.selfId()`. A `messageCreate` handler schedules the delete
+through the `Scheduler`
 port (`@dzajcarz/core`: `after(ms, task)`, `createScheduler()` is `setTimeout`, `createFakeScheduler()` in
 `@dzajcarz/core/testing` is advanced by hand). Messages that fall due within one second of each other are
 deleted in one request per channel, so a burst costs one call (the effective delay is 15 to 16 s). The flush
 re-reads the area, so a message that turns out to be the panel (its creation event can beat the write of its
-id) or a flag switched off meanwhile is left alone. Pinned, system and bot-authored messages are never scheduled; a message
+id) or a flag switched off meanwhile is left alone. Pinned, system and bot-authored messages are never
+scheduled; a message
 pinned inside the 15 s window is still deleted. `dispose` cancels pending timers; the startup sweep covers
 what restarts lose.
 
@@ -552,10 +603,10 @@ until a delete works again, not once per message.
 
 ### Scheduled songs
 
-`modules/schedule` keeps the old bot's tradition: at 9:00 and 21:00 on each server's clock it plays "Lato z Radiem" in
-the most crowded voice channel of every server. It is a module of its own, not part of `modules/music`: it
-shares no code with the player's commands, and ADR 5 forbids modules importing each other, so it depends on
-narrow ports only.
+`modules/schedule` keeps the old bot's tradition: at 9:00 and 21:00 on each server's clock it plays "Lato z
+Radiem" in the most crowded voice channel of every server. It is a module of its own, not part of
+`modules/music`: it shares no code with the player's commands, and ADR 5 forbids modules importing each other,
+so it depends on narrow ports only.
 
 - `CronScheduler` (`@dzajcarz/core`, `createCronScheduler()` on `Bun.cron` with its `tz` option). The zone
   is part of the schedule, so a run stays at 9:00 local time across the March and October clock changes
@@ -580,24 +631,24 @@ idle in another channel is moved to the target channel, not destroyed and create
 voice" for the old player would arrive after the new one exists and end it. A failure in one server is
 logged and does not stop the others.
 
-The song plays quietly: its track is marked `byBot` (`MusicTrack.byBot`, set by the adapter from the
-track's requester), and the music module posts no now playing panel and no failure note for such a track.
-The player's text channel is the voice channel until a member joins in. A member who runs `/play` during the
-song gets their track queued behind it, and the first such `/play` makes its channel the panel's: once the
-member's track starts, the panel appears there as usual. The song plays at the player's volume and with
-its effect: an idle player keeps what members set, a new one starts at 100 with no effect. It never
-repeats: the adapter keeps the player's loop off while the song plays, so neither the track loop nor the
-queue loop replays it. Members cannot pause, skip, stop, seek, loop or replace it: `/pause`, `/skip`, `/stop`,
-`/seek`, `/loop`, `/jump`, `/back` and the matching panel buttons answer that it plays to the end (`/resume`, `/volume` and
-`/filter` stay open, and a member's own track stays fully controllable). The song has no panel of its own, and a panel
-left from before it is removed when the song starts. `/back` during the song
-ends it without queueing it again, `/jump` follows the members' loop mode, and `/back` later passes over
-the song in the history. The schedule module and the music module never import each other; the flag on
-the track is all they share.
+The song plays quietly: its track is marked `byBot` (`MusicTrack.byBot`, set by the adapter from the track's
+requester), and the music module posts no now playing panel and no failure note for such a track. The player's
+text channel is the voice channel until a member joins in. A member who runs `/play` during the song gets
+their track queued behind it, and the first such `/play` makes its channel the panel's: once the member's
+track starts, the panel appears there as usual. The song plays at the player's volume and with its effect: an
+idle player keeps what members set, a new one starts at 100 with no effect. It never repeats: the adapter
+keeps the player's loop off while the song plays, so neither the track loop nor the queue loop replays it.
+Members cannot pause, skip, stop, seek, loop or replace it: `/pause`, `/skip`, `/stop`, `/seek`, `/loop`,
+`/jump`, `/back` and the matching panel buttons answer that it plays to the end (`/resume`, `/volume` and
+`/filter` stay open, and a member's own track stays fully controllable). The song has no panel of its own, and
+a panel left from before it is removed when the song starts. `/back` during the song ends it without queueing
+it again, `/jump` follows the members' loop mode, and `/back` later passes over the song in the history. The
+schedule module and the music module never import each other; the flag on the track is all they share.
 
 Settings (`scheduled_song_config`, `scheduled_song_exclusion`) belong to the server and need Manage Server:
 `/schedule list`, `exclude <channel>` (voice channels of the server only), `include <channel>` (also accepts a
-deleted channel) and `song [name]` (the fixed list; `song reset` goes back to the default song). The module toggle (`/modules disable schedule`) switches
+deleted channel) and `song [name]` (the fixed list; `song reset` goes back to the default song). The module
+toggle (`/modules disable schedule`) switches
 the song off per server or channel. The schedule defaults to `0 9,21 * * *`; `SCHEDULED_SONG_CRON` changes
 it and is checked at startup. One job ticks every minute in UTC; each tick rounds down to its minute (up to
 5 s early still counts as the coming one) and plays in every server whose own zone (`/timezone`) makes the
@@ -612,7 +663,8 @@ The old bot's other scheduled entries (messages at fixed times, birthdays) are n
 
 `modules/messages` posts a server's own text every day at a set time: in a text or announcement channel of
 the server, or as a DM to one of its members. Rows live in `scheduled_message` (time of day as `HH:MM` on
-the server's clock, see /timezone, 1 to 1900 characters, exactly one of `channel_id` and `user_id`). `/messages add` (Manage
+the server's clock, see /timezone, 1 to 1900 characters, exactly one of `channel_id` and `user_id`).
+`/messages add` (Manage
 Server) opens a form with the time, a channel or a member, and the text; the prefix form is
 `messages add <HH:MM> <#kanał|@osoba> <tekst...>`. Both go through the same checks: a real time, one target,
 a channel of this server that the bot can see and send messages in, or a member who is not a bot. When the
@@ -687,7 +739,8 @@ other module.
 
 ### Rotating status
 
-`modules/status` cycles the bot's activity through a list (defaults in `DEFAULT_ACTIVITIES`: the old bot's song, one phrase every 15 s;
+`modules/status` cycles the bot's activity through a list (defaults in `DEFAULT_ACTIVITIES`: the old bot's
+song, one phrase every 15 s;
 both are arguments of `createStatusModule`). The first `clientReady` sets the first activity and starts the
 interval; a repeated `clientReady` (reconnect) does not start another, and `dispose()` clears it. It talks to
 two ports, `Presence` and `Clock`, so the rotation is tested with a fake clock. A failing `setActivity` is
@@ -697,11 +750,11 @@ logged and the next tick tries again. The handler is `alwaysRun`: the status bel
 
 `modules/fun` holds `/czy_wiedziałeś` (a coin flip: "Wiedział!" with a 🙋‍♂️ reaction, or "Nie wiedział sadge
 bruh") and `/time` (the time on the server's clock as `HH:MM:SS`, midnight is `00`; outside servers the
-default zone). The random source, the clock and
-the zone are injected, so tests pin both answers and the DST changes. `/time` does not mention the caller.
-A reply may carry `reactions`, unicode emoji the adapter adds to the sent message. Adding them is best effort:
-on a user install or in a group DM the bot cannot react, so a failed reaction is logged at `warn` and never fails the
-reply. Only command replies (slash and prefix) apply it; other senders ignore it.
+default zone). The random source, the clock and the zone are injected, so tests pin both answers and the DST
+changes. `/time` does not mention the caller. A reply may carry `reactions`, unicode emoji the adapter adds to
+the sent message. Adding them is best effort: on a user install or in a group DM the bot cannot react, so a
+failed reaction is logged at `warn` and never fails the reply. Only command replies (slash and prefix) apply
+it; other senders ignore it.
 
 ### Mentions
 
@@ -779,7 +832,8 @@ the client library can be swapped:
   the id the module saw there, so a queue that moved meanwhile is left alone), `previous` (the track, `"none"`
   or `"changed"`), `moveTrack(guildId, from, to, expectedTrackId)`, `moveToChannel` and `clear`, `leave`
   (works without a node), and `subscribe` for `trackStart`, `queueEnd`, `playerDestroyed`, `trackFailed` and
-  `stateChanged` (pause, loop, volume, filter, seek, queue edits or a channel move, whoever made them). `jump`, `previous` and `seek` also answer "changed" (false) while a
+  `stateChanged` (pause, loop, volume, filter, seek, queue edits or a channel move, whoever made them).
+  `jump`, `previous` and `seek` also answer "changed" (false) while a
   skip is on its way, since the track they act on is about to end; the module tells the member to try again.
 - `VoiceChannels`: the member's voice channel and the number of people (bots excluded) in a channel, read
   from the gateway's voice state cache.
@@ -789,22 +843,22 @@ the client library can be swapped:
 - `Scheduler` (idle timeout) and the component state storage (search results).
 
 Commands are guild-only and answer in Polish: `/play <query>` (`p`), `/search <query>`, `/queue`, `/skip`,
-`/stop`, `/pause`, `/resume`, `/nowplaying` (`np`) and the controls below. A query that is an http(s) link (Discord's `<link>`
-form is unwrapped) is loaded as a link only when its host is one of youtube.com (plus `www.`, `m.`,
-`music.`), youtu.be, bandcamp.com and its subdomains, twitch.tv (plus
-`www.`, `m.`) or vimeo.com (plus `www.`, `player.`), compared exactly on the parsed, punycode hostname,
-with no user info and no explicit port; the link then goes on in the parser's normalised form, so the node
-fetches the host that was checked. Any other link is refused with "Obsługuję tylko linki z YouTube,
-Bandcamp, Twitch i Vimeo." Anything else is YouTube search text, sent as `ytsearch:<text>`
-straight to `/loadtracks`, so a typed `local:`, `scsearch:` or path never selects a source. The adapter
-builds the identifier itself instead of going through the client's search helper, which strips source
-prefixes and passes anything starting with `http` through raw. `/play` takes the first search hit, or up to
-100 tracks of a playlist, and the queue holds at most 500 tracks (current one included); the reply says how
-many were left out. `/search` shows up to ten results in a string select owned by the caller; the results
-wait in the component state store (ADR 6) and the pick is checked again against the voice rules.
-Additions run one at a time per guild: the voice check (against the channel the caller is in at that
-moment, not when the command started), the queue cap, the join and the enqueue happen inside that chain,
-so two quick `/play`s join once, never overfill the queue and only the first one answers "Gram:".
+`/stop`, `/pause`, `/resume`, `/nowplaying` (`np`) and the controls below. A query that is an http(s) link
+(Discord's `<link>` form is unwrapped) is loaded as a link only when its host is one of youtube.com (plus
+`www.`, `m.`, `music.`), youtu.be, bandcamp.com and its subdomains, twitch.tv (plus `www.`, `m.`) or vimeo.com
+(plus `www.`, `player.`), compared exactly on the parsed, punycode hostname, with no user info and no explicit
+port; the link then goes on in the parser's normalised form, so the node fetches the host that was checked.
+Any other link is refused with "Obsługuję tylko linki z YouTube, Bandcamp, Twitch i Vimeo." Anything else is
+YouTube search text, sent as `ytsearch:<text>` straight to `/loadtracks`, so a typed `local:`, `scsearch:` or
+path never selects a source. The adapter builds the identifier itself instead of going through the client's
+search helper, which strips source prefixes and passes anything starting with `http` through raw. `/play`
+takes the first search hit, or up to 100 tracks of a playlist, and the queue holds at most 500 tracks (current
+one included); the reply says how many were left out. `/search` shows up to ten results in a string select
+owned by the caller; the results wait in the component state store (ADR 6) and the pick is checked again
+against the voice rules. Additions run one at a time per guild: the voice check (against the channel the
+caller is in at that moment, not when the command started), the queue cap, the join and the enqueue happen
+inside that chain, so two quick `/play`s join once, never overfill the queue and only the first one answers
+"Gram:".
 
 Access: the caller must be in a voice channel, and once the bot plays in the guild, in the bot's channel.
 Anyone in that channel may control playback (no DJ role, no votes). `/queue` and `/nowplaying` only read and
@@ -868,30 +922,29 @@ Idle: the bot leaves 3 minutes after the queue ran out or the last person (bots 
 channel. The check runs on `trackStart`, `queueEnd`, after tracks are added and on `voiceStateUpdate`
 (`alwaysRun`, so it works where the module is switched off); a track or a person coming back cancels it.
 
-Adapter (`apps/bot/src/music`, `lavalink-client` 2.11.0): one node from `LAVALINK_URL` /
-`LAVALINK_PASSWORD` (`https` means TLS), `autoSkip` on, players join self-deafened. The node is retried
-forever: 20 times 3 s apart, then every 30 s, back to 3 s once it connects. The client is given an
-unreachable `retryAmount` because on running out it destroys the node and every player; the delay is
-changed on its `reconnecting` event instead. Music answers "niedostępny" meanwhile and comes back by
-itself.
-Searched tracks are cached (2000) so enqueueing needs no extra request; an older one is decoded by the
-node. A malformed `/loadtracks` answer becomes an error result. Discord voice events reach the client
-through the `raw` gateway event. A disconnect by someone else destroys the player. A destroy that fails on
-the node (it is down) still finishes locally: the client has already left voice and dropped the player, so
-the adapter emits `playerDestroyed` itself, and leaves through the gateway when the client got no further.
-When the node restarts, every player leaves and rejoins its channel, because the old voice session is gone
-and Discord refuses it (4006); a player with a current track then replays it from the position it had when
-the node went away, or plays the next one when that position is past the track's end (the queue ends
-when nothing is next). A player that cannot be brought back is destroyed. Shutdown removes the panels (module `dispose`), then
-destroys the players and the node connection before the Discord client.
+Adapter (`apps/bot/src/music`, `lavalink-client` 2.11.0): one node from `LAVALINK_URL` / `LAVALINK_PASSWORD`
+(`https` means TLS), `autoSkip` on, players join self-deafened. The node is retried forever: 20 times 3 s
+apart, then every 30 s, back to 3 s once it connects. The client is given an unreachable `retryAmount` because
+on running out it destroys the node and every player; the delay is changed on its `reconnecting` event
+instead. Music answers "niedostępny" meanwhile and comes back by itself. Searched tracks are cached (2000) so
+enqueueing needs no extra request; an older one is decoded by the node. A malformed `/loadtracks` answer
+becomes an error result. Discord voice events reach the client through the `raw` gateway event. A disconnect
+by someone else destroys the player. A destroy that fails on the node (it is down) still finishes locally: the
+client has already left voice and dropped the player, so the adapter emits `playerDestroyed` itself, and
+leaves through the gateway when the client got no further. When the node restarts, every player leaves and
+rejoins its channel, because the old voice session is gone and Discord refuses it (4006); a player with a
+current track then replays it from the position it had when the node went away, or plays the next one when
+that position is past the track's end (the queue ends when nothing is next). A player that cannot be brought
+back is destroyed. Shutdown removes the panels (module `dispose`), then destroys the players and the node
+connection before the Discord client.
 
 ### Riot stats
 
 `modules/riot` has `/valorant <riot_id>` and `/lol <riot_id> [region]`, both usable everywhere like `/help`.
-The module talks to a `RiotStats` port (`valorant(id)`, `lol(id, platform)`) and a small
-`KeyValueStore` slice; `apps/bot/src/riot/` implements the port (clients: ADR 8). Each game has its own key
-(`RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`); the port omits a game without its key and that command answers that
-stats are off.
+The module talks to a `RiotStats` port (`valorant(id)`, `lol(id, platform)`) and a small `KeyValueStore`
+slice; `apps/bot/src/riot/` implements the port (clients: ADR 8). Each game has its own key
+(`RIOT_VALORANT_API_KEY`, `RIOT_LOL_API_KEY`); the port omits a game without its key and that command answers
+that stats are off.
 
 - **Input.** `Name#TAG` is split on the last `#`: name 3 to 16 characters, tag 3 to 5 letters or digits.
   `/valorant` takes the rest of the line, so the name may hold spaces; `/lol` quotes such a name in the
@@ -912,43 +965,47 @@ stats are off.
   | Valorant matchlist, summoner, entries, mastery | 5 min |
 
 - **Rate limits.** A budget of 30 lookups per minute for all users together (`riot:global`, a fixed window)
-  answers "za chwilę" when spent. A per-user cooldown (`riot:user:<id>`, 10 s) comes after the shared pause check, so a
-  blocked user does not use it up. A 429 stores the deadline `now + Retry-After` (10 s without the header or with a zero one, at most 120 s)
-  as the value of `riot:retry-after:<game>`, with the same duration as its TTL; Riot limits each key on its own,
-  so the pause covers only that game, and until it ends that game's lookups answer "Spróbuj za N s" without
-  calling Riot.
+  answers "za chwilę" when spent. A per-user cooldown (`riot:user:<id>`, 10 s) comes after the shared pause
+  check, so a blocked user does not use it up. A 429 stores the deadline `now + Retry-After` (10 s without the
+  header or with a zero one, at most 120 s) as the value of `riot:retry-after:<game>`, with the same duration
+  as its TTL; Riot limits each key on its own, so the pause covers only that game, and until it ends that
+  game's lookups answer "Spróbuj za N s" without calling Riot.
 - **Errors.** 404 is "not found", 401 and 403 are "the key has no access", 429 is the pause above, and
   timeouts, 5xx and malformed answers are "Riot does not respond". A development key gets a 403 on
   `val/match/v1`, so `/valorant` with one answers that match history needs a production key; `/lol` says the
   key expired or has no access. One Valorant match that fails or has an unexpected shape is dropped from the
   list instead of failing the command.
-- **Valorant profile.** The five newest matches, each with result, map, agent and K/D/A; the rank is the tier of
-  the newest competitive match among them. A player with no matches gets "Brak ostatnich meczów."
+- **Valorant profile.** The five newest matches, each with result, map, agent and K/D/A; the rank is the tier
+  of the newest competitive match among them. A player with no matches gets "Brak ostatnich meczów."
 
 ## Testing
 
 - `core` and modules: unit tests with `createFakeContext`, no Discord connection.
 - `db`: integration tests against a real Postgres (`TEST_DATABASE_URL`), each run in a fresh schema.
 - `kv`: one contract suite for every adapter; the Redis run needs `TEST_REDIS_URL`.
+- `apps/bot`: the Discord adapters are tested against small fakes of the discord.js objects they touch.
+- `apps/web`: the HTTP routes run against in-memory fakes of the bot bridge and the stores; the React views
+  render into happy-dom (`@happy-dom/global-registrator`) and are driven through their DOM.
 - CI provides both services, so nothing is skipped there.
 
 ## Redis eviction
 
-Redis runs with `--maxmemory 256mb --maxmemory-policy volatile-lru`: under memory pressure it evicts only
-keys that have a TTL, least recently used first. Every key the bot writes carries one (caches, cooldown
-and rate-limit windows, locks, component state), so nothing is kept forever; a key without a TTL would
-never be evicted and could fill the memory. Locks and counters have short TTLs, so they can still be
-evicted in a real shortage, which only means a duplicate or a missed limit once (ADR 3). The store the bot hands to
-every module and handler is wrapped once (`createTimedStore`): a call that waits on Redis longer than 500 ms is
-abandoned and rejects like a failed Redis, so each caller's existing choice applies. Rate limits and cooldowns
-fail open (the command runs). Per area:
+Redis runs with `--maxmemory 256mb --maxmemory-policy volatile-lru`: under memory pressure it evicts only keys
+that have a TTL, least recently used first. Every key the bot writes carries one (caches, cooldown and
+rate-limit windows, locks, component state), so nothing is kept forever; a key without a TTL would never be
+evicted and could fill the memory. Locks and counters have short TTLs, so they can still be evicted in a real
+shortage, which only means a duplicate or a missed limit once (ADR 3). The store the bot hands to every module
+and handler is wrapped once (`createTimedStore`): a call that waits on Redis longer than 500 ms is abandoned
+and rejects like a failed Redis, so each caller's existing choice applies. Rate limits and cooldowns fail open
+(the command runs). Per area:
 
 - Party: a join lock fails open because the unique owner row still stops duplicates; a SET that timed out may
   still land, so the join asks for it to be deleted again, and a release that failed is retried once in the
-  background. The button rate limits fail open, and the special invite limits fail closed with a Polish message.
+  background. The button rate limits fail open, and the special invite limits fail closed with a Polish
+  message.
 - Music: the search state is needed to offer the results, so a stalled store fails the `/search` with the
   generic Polish error, and a pick whose state cannot be read fails the same way.
-- Dzajco: the settings cache falls back to nothing, and any Redis error skips the gif (fail closed, no
+- Dżajco: the settings cache falls back to nothing, and any Redis error skips the gif (fail closed, no
   message, as it is an event) so an outage cannot bypass the cooldown.
 - Messages: the failure counter fails open to "first failure", so the send is retried the next minute.
 - Moderation: the warning DM limit fails open, so the DM is sent.

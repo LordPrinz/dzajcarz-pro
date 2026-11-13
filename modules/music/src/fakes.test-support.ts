@@ -1,5 +1,6 @@
 /** In-memory ports for the module tests; nothing here talks to Lavalink or Discord. */
 import type { StateStorage } from "@dzajcarz/core";
+import { settle } from "@dzajcarz/core/testing/settle";
 import type {
   DirectMessages,
   LoopMode,
@@ -160,7 +161,7 @@ export function createFakePlayer(): FakePlayer {
       fake.joins.push({ guildId, voiceChannelId, textChannelId });
       failIfAsked("join");
       // Joining waits for Discord, which is where two quick additions used to overlap.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await settle();
       const existing = players.get(guildId);
       if (existing) {
         if (unclaimed.delete(guildId)) existing.textChannelId = textChannelId;
@@ -190,7 +191,9 @@ export function createFakePlayer(): FakePlayer {
       fake.skips.push({ guildId, expectedTrackId });
       failIfAsked("skip");
       const guild = need(guildId);
-      if (guild.current?.id === expectedTrackId) advance(guildId, guild);
+      if (guild.current?.id !== expectedTrackId) return false;
+      advance(guildId, guild);
+      return true;
     },
     async pause(guildId) {
       const guild = need(guildId);
@@ -418,5 +421,4 @@ export function createMemoryStorage(): StateStorage {
   };
 }
 
-/** Lets the module's fire-and-forget panel and idle work finish. */
-export const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+export { settle } from "@dzajcarz/core/testing/settle";

@@ -172,6 +172,7 @@ export function App() {
             focusId={selection.focusId ?? null}
             subscribe={subscribe}
             reconnects={reconnects}
+            botOnline={botOnline}
           />
         ) : selection.kind === "search" ? (
           <SearchView

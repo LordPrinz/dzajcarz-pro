@@ -247,6 +247,9 @@ describe("POST /api/uploads", () => {
     ["a control character", "a\nb.txt"],
     ["a right-to-left override", "zdjecie\u202Egnp.exe"],
     ["a zero-width space", "a\u200B.txt"],
+    ["a zero-width non-joiner", "a\u200C.txt"],
+    ["a left-to-right mark", "a\u200E.txt"],
+    ["a right-to-left mark", "a\u200F.txt"],
     ["a byte order mark inside", "a\uFEFF.txt"],
     ["an isolate", "a\u2066b.txt"],
     ["a name over 200 characters", "x".repeat(201)],
@@ -255,6 +258,12 @@ describe("POST /api/uploads", () => {
     started = await startTestServer({ uploads });
     expect((await upload(name, "x")).status).toBe(400);
     expect(staged).toEqual([]);
+  });
+
+  test("a zero-width joiner, as in an emoji sequence, is allowed in a name", async () => {
+    const { uploads } = stagingSpy();
+    started = await startTestServer({ uploads });
+    expect((await upload("👨\u200D👩\u200D👧.txt", "x")).status).not.toBe(400);
   });
 
   test("an empty file is 400 and one over the ceiling is 413", async () => {

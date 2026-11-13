@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+  common,
   createRegistry,
   executeCommand,
   type Invocation,
+  type Locale,
   type Logger,
   type Reply,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext, replyText } from "@dzajcarz/core/testing";
+import { createFakeContext, fakeLocales, renderCatalog, replyText } from "@dzajcarz/core/testing";
 import {
   createMemoryStore,
   createStalledStore,
@@ -15,32 +17,16 @@ import {
   type KeyValueStore,
 } from "@dzajcarz/kv";
 import {
-  BOT_TARGET,
-  HIGHER_THAN_ACTOR,
-  HIGHER_THAN_BOT,
-  OWNER_TARGET,
-  SELF_TARGET,
-} from "./hierarchy.ts";
-import {
-  ADMIN_TIMEOUT,
-  BAD_DURATION,
-  BOT_LACKS_PERMISSION,
   createModerationModule,
   type MemberInfo,
   type ModerationEntry,
   type ModerationGuild,
   type ModerationLog,
-  NO_GUILD_PERMISSION,
-  NOT_A_MEMBER,
-  NOT_RECORDED,
-  NOT_TIMED_OUT,
   type PurgeResult,
-  REASON_TOO_LONG,
   WARN_DM_WINDOW_MS,
-  WARNINGS_DM_CLOSED,
-  WARNINGS_SENT,
   type WarningRecord,
 } from "./index.ts";
+import { t } from "./messages.ts";
 
 const GUILD = "100000000000000001";
 const CALLER = "200000000000000002";
@@ -171,24 +157,34 @@ interface RunOptions {
   invocation?: Invocation;
   memberPermissions?: bigint;
   messageId?: string;
+  /** The language of the caller (server or member). */
+  locale?: Locale;
 }
 
 function setup(
   guildOptions: FakeGuildOptions = {},
   logOptions = {},
   dmLimit: Pick<KeyValueStore, "setIfAbsent"> = createMemoryStore(),
+  memberLocale: Locale = "pl",
 ) {
   const { guild, calls } = fakeGuild(guildOptions);
   const { log, entries } = fakeLog(logOptions);
   const { logger, lines } = capturingLogger();
   const timeZones = { of: async () => "Europe/Warsaw" };
   const registry = createRegistry([
-    createModerationModule({ guild, log, dmLimit, timeZones, logger }),
+    createModerationModule({
+      guild,
+      log,
+      dmLimit,
+      timeZones,
+      locales: fakeLocales("pl", { users: { [TARGET]: memberLocale } }),
+      logger,
+    }),
   ]);
   async function run(
     name: string,
     args: Record<string, unknown>,
-    { invocation = "slash", memberPermissions = ALL, messageId }: RunOptions = {},
+    { invocation = "slash", memberPermissions = ALL, messageId, locale }: RunOptions = {},
   ) {
     const command = registry.find(name);
     if (!command) throw new Error(`no command ${name}`);
@@ -198,6 +194,7 @@ function setup(
       memberPermissions,
       userId: CALLER,
       messageId,
+      locale,
     });
     await executeCommand(command, ctx, silentLogger);
     return ctx;
@@ -274,7 +271,7 @@ describe("kick", () => {
   test("someone who is not a member cannot be kicked", async () => {
     const { run, calls, entries } = setup();
     const ctx = await run("kick", { user: STRANGER });
-    expect(text(ctx.replies)).toBe(NOT_A_MEMBER);
+    expect(text(ctx.replies)).toBe(t("pl").notAMember);
     expect(calls).toEqual([]);
     expect(entries).toEqual([]);
   });
@@ -322,7 +319,7 @@ describe("timeout", () => {
     for (const duration of ["29d", "0s", "1w", "10"]) {
       const { run, calls, entries } = setup();
       const ctx = await run("timeout", { user: TARGET, duration });
-      expect(text(ctx.replies)).toBe(BAD_DURATION);
+      expect(text(ctx.replies)).toBe(t("pl").badDuration);
       expect(ctx.deferred).toBe(false);
       expect(calls).toEqual([]);
       expect(entries).toEqual([]);
@@ -338,7 +335,7 @@ describe("timeout", () => {
   test("an administrator cannot be timed out", async () => {
     const { run, calls } = setup({ members: [member(TARGET, 5, { permissions: ADMIN })] });
     const ctx = await run("timeout", { user: TARGET, duration: "1m" });
-    expect(text(ctx.replies)).toBe(ADMIN_TIMEOUT);
+    expect(text(ctx.replies)).toBe(t("pl").adminTimeout);
     expect(ctx.deferred).toBe(false);
     expect(calls).toEqual([]);
   });
@@ -363,7 +360,7 @@ describe("untimeout", () => {
   test("a member without a timeout is told so and nothing is recorded", async () => {
     const { run, calls, entries } = setup();
     const ctx = await run("untimeout", { user: TARGET });
-    expect(text(ctx.replies)).toBe(NOT_TIMED_OUT);
+    expect(text(ctx.replies)).toBe(t("pl").notTimedOut);
     expect(calls).toEqual([]);
     expect(entries).toEqual([]);
   });
@@ -410,7 +407,7 @@ describe("warn", () => {
     const { run, lines } = setup({}, { fails: true });
     const ctx = await run("warn", { user: TARGET });
     expect(text(ctx.replies)).toBe(
-      `Ostrzeżenie dla <@${TARGET}>. Powód: brak powodu${NOT_RECORDED}`,
+      `Ostrzeżenie dla <@${TARGET}>. Powód: brak powodu${t("pl").notRecorded}`,
     );
     expect(lines.some((line) => line.level === "error")).toBe(true);
   });
@@ -465,9 +462,9 @@ describe("hierarchy refusals", () => {
 
   test("each action refuses the caller, the owner and equal or higher roles", async () => {
     const refusals: [MemberInfo, string][] = [
-      [member(TARGET, 0, { isOwner: true, timedOut: true }), OWNER_TARGET],
-      [member(TARGET, 10, { timedOut: true }), HIGHER_THAN_ACTOR],
-      [member(TARGET, 15, { timedOut: true }), HIGHER_THAN_ACTOR],
+      [member(TARGET, 0, { isOwner: true, timedOut: true }), t("pl").ownerTarget],
+      [member(TARGET, 10, { timedOut: true }), t("pl").higherThanActor],
+      [member(TARGET, 15, { timedOut: true }), t("pl").higherThanActor],
     ];
     for (const [name, args] of cases) {
       for (const [target, message] of refusals) {
@@ -480,7 +477,9 @@ describe("hierarchy refusals", () => {
         expect(entries).toEqual([]);
       }
       const self = setup();
-      expect(text((await self.run(name, { ...args, user: CALLER })).replies)).toBe(SELF_TARGET);
+      expect(text((await self.run(name, { ...args, user: CALLER })).replies)).toBe(
+        t("pl").selfTarget,
+      );
       expect(self.calls).toEqual([]);
     }
   });
@@ -489,14 +488,14 @@ describe("hierarchy refusals", () => {
     const owner = member(CALLER, 0, { isOwner: true, permissions: ALL });
     const { run, calls } = setup({ members: [owner, member(TARGET, 25)] });
     const ctx = await run("ban", { user: TARGET });
-    expect(text(ctx.replies)).toBe(HIGHER_THAN_BOT);
+    expect(text(ctx.replies)).toBe(t("pl").higherThanBot);
     expect(calls).toEqual([]);
   });
 
   test("the bot itself cannot be targeted", async () => {
     const { run, calls } = setup();
     const ctx = await run("kick", { user: BOT });
-    expect(text(ctx.replies)).toBe(BOT_TARGET);
+    expect(text(ctx.replies)).toBe(t("pl").botTarget);
     expect(calls).toEqual([]);
   });
 });
@@ -553,7 +552,7 @@ describe("permissions", () => {
     for (const [name, args] of actions) {
       const { run, calls, entries } = setup({ members: [channelOnly] });
       const ctx = await run(name, args);
-      expect(text(ctx.replies)).toBe(NO_GUILD_PERMISSION);
+      expect(text(ctx.replies)).toBe(common("pl").noPermission);
       expect(calls).toEqual([]);
       expect(entries).toEqual([]);
     }
@@ -577,7 +576,7 @@ describe("permissions", () => {
     ] as const) {
       const { run, calls, entries } = setup({ members: [powerless, timedOut] });
       const ctx = await run(name, { ...args, user: TARGET });
-      expect(text(ctx.replies)).toBe(BOT_LACKS_PERMISSION);
+      expect(text(ctx.replies)).toBe(t("pl").botLacksPermission);
       expect(ctx.deferred).toBe(false);
       expect(calls).toEqual([]);
       expect(entries).toEqual([]);
@@ -612,7 +611,7 @@ describe("reasons", () => {
 
     const { run, calls, entries } = setup();
     const ctx = await run("ban", { user: TARGET, reason: "a".repeat(513) });
-    expect(text(ctx.replies)).toBe(REASON_TOO_LONG);
+    expect(text(ctx.replies)).toBe(t("pl").reasonTooLong);
     expect(calls).toEqual([]);
     expect(entries).toEqual([]);
   });
@@ -641,7 +640,7 @@ describe("history failures", () => {
       const { run, calls, lines } = setup({}, { fails: true });
       const ctx = await run(name, { ...args, user: TARGET });
       expect(calls.some((call) => call.kind === name)).toBe(true);
-      expect(text(ctx.replies)?.endsWith(NOT_RECORDED)).toBe(true);
+      expect(text(ctx.replies)?.endsWith(t("pl").notRecorded)).toBe(true);
       expect(lines.some((line) => line.level === "error")).toBe(true);
     }
   });
@@ -729,7 +728,7 @@ describe("warnings", () => {
     const records: WarningRecord[] = [{ id: 1, moderatorId: CALLER, reason: "a", createdAt: at }];
     const { run, calls } = setup({}, { warnings: records });
     const ctx = await run("warnings", { user: TARGET }, { invocation: "prefix" });
-    expect(text(ctx.replies)).toBe(WARNINGS_SENT);
+    expect(text(ctx.replies)).toBe(t("pl").warningsSent);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ kind: "dm", userId: CALLER });
     expect(calls[0]?.kind === "dm" && calls[0].text).toStartWith(`<@${TARGET}> ma 1 ostrzeżenie:`);
@@ -739,7 +738,7 @@ describe("warnings", () => {
     for (const options of [{ dmFails: true }, { dmClosed: true }]) {
       const { run } = setup(options);
       const ctx = await run("warnings", { user: TARGET }, { invocation: "prefix" });
-      expect(text(ctx.replies)).toBe(WARNINGS_DM_CLOSED);
+      expect(text(ctx.replies)).toBe(t("pl").warningsDmClosed);
     }
   });
 });
@@ -797,7 +796,7 @@ describe("purge", () => {
   test("a failed record is noted in the reply", async () => {
     const { run } = setup({}, { fails: true });
     const ctx = await run("purge", { count: 3 });
-    expect(text(ctx.replies)).toBe(`Usunięto 3 wiadomości.${NOT_RECORDED}`);
+    expect(text(ctx.replies)).toBe(`Usunięto 3 wiadomości.${t("pl").notRecorded}`);
   });
 
   test("counts outside 1–100 are refused without deleting", async () => {
@@ -813,5 +812,62 @@ describe("purge", () => {
     const { run, calls } = setup();
     await run("purge", { count: 100 });
     expect(calls[0]).toMatchObject({ count: 100 });
+  });
+});
+
+describe("languages", () => {
+  test("the warning DM uses the member's language, the reply the caller's", async () => {
+    const { run, calls } = setup({}, {}, createMemoryStore(), "de");
+    const ctx = await run("warn", { user: TARGET, reason: "spam" }, { locale: "en" });
+    expect(calls).toEqual([
+      {
+        kind: "dm",
+        userId: TARGET,
+        text: "Du hast auf Dżajcownia eine Verwarnung erhalten. Grund: spam",
+      },
+    ]);
+    expect(text(ctx.replies)).toBe(`Warning for <@${TARGET}> (warning #1). Reason: spam`);
+  });
+
+  test("ban, timeout and purge answer in German", async () => {
+    const { run, calls } = setup({}, {}, createMemoryStore(), "en");
+    expect(text((await run("ban", { user: TARGET }, { locale: "de" })).replies)).toBe(
+      `<@${TARGET}> wurde gebannt. Grund: kein Grund angegeben`,
+    );
+    expect(calls[0]).toEqual({
+      kind: "dm",
+      userId: TARGET,
+      text: "You were banned from Dżajcownia. Reason: no reason given",
+    });
+    const purged = await run("purge", { count: 3 }, { locale: "de" });
+    expect(text(purged.replies)).toBe("3 Nachrichten gelöscht.");
+  });
+
+  test("refusals are localized", async () => {
+    const { run } = setup();
+    const self = await run("ban", { user: CALLER }, { locale: "en" });
+    expect(text(self.replies)).toBe("You can't moderate yourself.");
+    const bad = await run("timeout", { user: TARGET, duration: "x" }, { locale: "de" });
+    expect(text(bad.replies)).toBe("Gib eine Zeit wie 30s, 10m, 2h oder 1d an (höchstens 28d).");
+  });
+
+  test("the /warnings list reads in the caller's language", async () => {
+    const { run } = setup(
+      {},
+      {
+        warnings: [
+          { id: 7, moderatorId: CALLER, reason: null, createdAt: new Date("2026-01-02T10:00:00Z") },
+        ],
+      },
+    );
+    const ctx = await run("warnings", { user: TARGET }, { locale: "en" });
+    expect(text(ctx.replies)).toContain(`<@${TARGET}> has 1 warning:`);
+    expect(text(ctx.replies)).toContain(`by <@${CALLER}>: no reason given`);
+  });
+
+  test("every text exists in every language", () => {
+    for (const texts of Object.values(renderCatalog(t))) {
+      for (const s of Object.values(texts)) expect(s.trim()).not.toBe("");
+    }
   });
 });

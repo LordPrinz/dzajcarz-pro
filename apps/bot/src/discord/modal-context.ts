@@ -1,4 +1,4 @@
-import type { ModalBaseContext } from "@dzajcarz/core";
+import { DEFAULT_LOCALE, type Locale, type ModalBaseContext } from "@dzajcarz/core";
 import { MessageFlags, type ModalSubmitInteraction } from "discord.js";
 import { placeOf } from "./context.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
@@ -7,6 +7,7 @@ import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 export function contextFromModal(
   interaction: ModalSubmitInteraction,
   state: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): ModalBaseContext {
   // "update" and "defer" on a modal opened from a message edit that message; otherwise the first answer
   // is an ordinary (ephemeral) reply and later ones are follow-ups.
@@ -21,6 +22,7 @@ export function contextFromModal(
     memberPermissions: interaction.inGuild()
       ? (interaction.memberPermissions?.bitfield ?? 0n)
       : null,
+    locale,
     get acknowledged() {
       return answer !== "none";
     },

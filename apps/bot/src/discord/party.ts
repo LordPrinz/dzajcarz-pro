@@ -15,7 +15,8 @@ import {
 } from "discord.js";
 import { sendDirectMessage } from "./direct.ts";
 import { downloadDiscordFile } from "./download.ts";
-import { hasCode } from "./errors.ts";
+import { fetchOrNull, hasCode } from "./errors.ts";
+import { BULK_MAX_AGE_MS } from "./limits.ts";
 import { NO_MENTIONS, toReplyPayload } from "./reply.ts";
 
 const UNKNOWN_CHANNEL = RESTJSONErrorCodes.UnknownChannel;
@@ -106,8 +107,8 @@ export function createPartyChannels(client: Client): PartyChannels {
 
     async areaNames(categoryId, joinChannelId) {
       const [category, join] = await Promise.all([
-        client.channels.fetch(categoryId).catch(() => null),
-        client.channels.fetch(joinChannelId).catch(() => null),
+        fetchOrNull(client.channels.fetch(categoryId)),
+        fetchOrNull(client.channels.fetch(joinChannelId)),
       ]);
       if (category?.type !== ChannelType.GuildCategory || join?.type !== ChannelType.GuildVoice) {
         return null;
@@ -250,7 +251,7 @@ export function createPartyPermissions(client: Client): PartyPermissions {
       try {
         member = await memberOf(guildId, userId);
       } catch (error) {
-        if (hasCode(error, UNKNOWN_MEMBER) || hasCode(error, RESTJSONErrorCodes.UnknownUser)) {
+        if (hasCode(error, UNKNOWN_MEMBER, RESTJSONErrorCodes.UnknownUser)) {
           return null;
         }
         throw error;
@@ -322,8 +323,6 @@ const BULK_TOO_OLD = RESTJSONErrorCodes.OneOfTheMessagesProvidedWasTooOldForBulk
 const HISTORY_PAGE = 100;
 const BULK_MAX = 100;
 const DISCORD_EPOCH_MS = 1_420_070_400_000;
-/** Bulk delete works up to 14 days; stay a minute inside so a message does not age out in flight. */
-const BULK_MAX_AGE_MS = 14 * 24 * 3_600_000 - 60_000;
 
 function createdAt(snowflake: string): number {
   return Number(BigInt(snowflake) >> 22n) + DISCORD_EPOCH_MS;
@@ -394,11 +393,7 @@ export function createPartyChat(client: Client, now: () => number = Date.now): P
         } catch (error) {
           // Rejected as a whole (a message vanished, is a system message or aged out): nothing was
           // deleted, so one by one is safe and each delete tolerates what the batch could not.
-          if (
-            !hasCode(error, UNKNOWN_MESSAGE) &&
-            !hasCode(error, SYSTEM_MESSAGE) &&
-            !hasCode(error, BULK_TOO_OLD)
-          ) {
+          if (!hasCode(error, UNKNOWN_MESSAGE, SYSTEM_MESSAGE, BULK_TOO_OLD)) {
             throw error;
           }
           for (const id of batch) single.add(id);
@@ -410,7 +405,7 @@ export function createPartyChat(client: Client, now: () => number = Date.now): P
           await channel.messages.delete(id);
         } catch (error) {
           // Already gone, or a system message Discord does not let anyone delete: nothing left to do.
-          if (!hasCode(error, UNKNOWN_MESSAGE) && !hasCode(error, SYSTEM_MESSAGE)) throw error;
+          if (!hasCode(error, UNKNOWN_MESSAGE, SYSTEM_MESSAGE)) throw error;
         }
       }
     },

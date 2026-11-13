@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import type { Guild } from "./api.ts";
 import { Message } from "./Message.tsx";
 import {
@@ -50,6 +50,8 @@ export function SearchView({ guilds, channelName, onOpen }: SearchViewProps) {
   const [filters, setFilters] = useState<SearchFilters>(EMPTY);
   const [state, setState] = useState<SearchState>({ kind: "idle" });
   const [loadingMore, setLoadingMore] = useState(false);
+  /** Counts searches: a "more" reply for an earlier one is dropped. */
+  const searches = useRef(0);
 
   const set = (key: keyof SearchFilters) => (value: string) =>
     setFilters((current) => ({ ...current, [key]: value }));
@@ -58,6 +60,7 @@ export function SearchView({ guilds, channelName, onOpen }: SearchViewProps) {
     event?.preventDefault();
     if (!filters.q.trim()) return;
     const used = filters;
+    searches.current += 1;
     setState({ kind: "loading" });
     const result = await searchArchive(used, null);
     setState(
@@ -69,17 +72,22 @@ export function SearchView({ guilds, channelName, onOpen }: SearchViewProps) {
 
   const more = async () => {
     if (state.kind !== "ready" || !state.nextBefore || loadingMore) return;
+    const search = searches.current;
     setLoadingMore(true);
     const result = await searchArchive(state.filters, state.nextBefore);
     setLoadingMore(false);
-    if (!result.ok) return;
-    setState({
-      kind: "ready",
-      filters: state.filters,
-      results: [...state.results, ...result.page.results],
-      resolved: mergeResolved(state.resolved, result.page.resolved),
-      nextBefore: result.page.nextBefore,
-    });
+    if (!result.ok || search !== searches.current) return;
+    setState((current) =>
+      current.kind === "ready"
+        ? {
+            kind: "ready",
+            filters: current.filters,
+            results: [...current.results, ...result.page.results],
+            resolved: mergeResolved(current.resolved, result.page.resolved),
+            nextBefore: result.page.nextBefore,
+          }
+        : current,
+    );
   };
 
   return (

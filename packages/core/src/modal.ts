@@ -1,3 +1,4 @@
+import { formatBytes } from "./format.ts";
 /**
  * Modals (forms) described as plain data. A module declares one with `defineModal`, opens it with
  * `ctx.showModal(modal.build(owner, data))` from a slash command or a component click, and receives the
@@ -10,15 +11,18 @@
 import type { ComponentContext } from "./component.ts";
 import { MAX_CUSTOM_ID, makeCustomId } from "./component.ts";
 import { UserError } from "./errors.ts";
+import { allLocalizations, DEFAULT_LOCALE, type Locale, type Localized, localize } from "./i18n.ts";
+import { characterCount } from "./limits.ts";
+import { coreMessages } from "./messages.ts";
 
 /** Channel kinds a channel select can be limited to; the adapter maps them to Discord channel types. */
 export type ModalChannelKind = "text" | "voice" | "announcement" | "category" | "stage" | "forum";
 
 interface FieldBase {
   /** Shown above the input. */
-  label: string;
+  label: Localized;
   /** Smaller text under the label. */
-  description?: string;
+  description?: Localized;
   /** Default true. An optional field arrives as `undefined` when left empty. */
   required?: boolean;
 }
@@ -26,7 +30,7 @@ interface FieldBase {
 /** A one-line (`short`) or multi-line (`paragraph`) text input. */
 export interface TextFieldDef extends FieldBase {
   type: "short" | "paragraph";
-  placeholder?: string;
+  placeholder?: Localized;
   minLength?: number;
   maxLength?: number;
   /** Prefilled text; `build(…, defaults)` can override it per opening. */
@@ -37,7 +41,7 @@ export interface TextFieldDef extends FieldBase {
 export interface ChannelFieldDef extends FieldBase {
   type: "channel";
   channelTypes?: readonly ModalChannelKind[];
-  placeholder?: string;
+  placeholder?: Localized;
   /** Preselected channel id. */
   defaultValue?: string;
 }
@@ -48,7 +52,7 @@ export interface ChannelFieldDef extends FieldBase {
  */
 export interface UserFieldDef extends FieldBase {
   type: "user";
-  placeholder?: string;
+  placeholder?: Localized;
   /** Fewest people to pick, 0-25. Default 1 for a required field, 0 for an optional one. */
   minValues?: number;
   /** Most people to pick, 1-25. Default 1. */
@@ -84,10 +88,10 @@ export interface FileFieldDef extends FieldBase {
 /** One choice of a string select. */
 export interface ModalSelectOption {
   /** Shown in the list, 1-100 characters. */
-  label: string;
+  label: Localized;
   /** What the handler receives, 1-100 characters, unique within the field. */
   value: string;
-  description?: string;
+  description?: Localized;
 }
 
 /** A single-choice string select; the value is the chosen option's `value`. */
@@ -95,7 +99,7 @@ export interface SelectFieldDef extends FieldBase {
   type: "select";
   /** 1-25 options. */
   options: readonly ModalSelectOption[];
-  placeholder?: string;
+  placeholder?: Localized;
   /** `value` of the preselected option. */
   defaultValue?: string;
 }
@@ -135,12 +139,13 @@ type FieldValue<F extends ModalFieldDef> = F extends { required: false }
  */
 export type ModalValues<F extends ModalFieldsDef> = { [K in keyof F]: FieldValue<F[K]> };
 
+/** A field of a modal spec; its texts stay `Localized` until the adapter shows it in the member's language. */
 export interface ModalFieldSpec {
   customId: string;
   type: ModalFieldDef["type"];
-  label: string;
-  description?: string;
-  placeholder?: string;
+  label: Localized;
+  description?: Localized;
+  placeholder?: Localized;
   required: boolean;
   minLength?: number;
   maxLength?: number;
@@ -157,10 +162,10 @@ export interface ModalFieldSpec {
   maxBytes?: number;
 }
 
-/** What `ctx.showModal` takes. */
+/** What `ctx.showModal` takes. The adapter localizes the texts with the context's locale. */
 export interface ModalSpec {
   customId: string;
-  title: string;
+  title: Localized;
   fields: ModalFieldSpec[];
 }
 
@@ -183,13 +188,21 @@ const CHANNEL_KINDS: readonly ModalChannelKind[] = [
   "forum",
 ];
 
-/** Discord's limits, checked before the API refuses the modal. Throws a descriptive Error. */
+/** Whether every language of `text` is `min`–`max` characters long. */
+function fits(text: Localized | undefined, min: number, max: number): boolean {
+  return (
+    text === undefined ||
+    allLocalizations(text).every((one) => one.length >= min && one.length <= max)
+  );
+}
+
+/** Discord's limits, in every language, checked before the API refuses the modal. Throws a descriptive Error. */
 export function validateModal(spec: ModalSpec): void {
-  const at = `modal "${spec.title}"`;
+  const at = `modal "${localize(spec.title, DEFAULT_LOCALE)}"`;
   if (spec.customId.length < 1 || spec.customId.length > MAX_CUSTOM_ID) {
     throw new Error(`${at}: custom_id must be 1–${MAX_CUSTOM_ID} characters`);
   }
-  if (spec.title.length < 1 || spec.title.length > MODAL_MAX_TITLE) {
+  if (!fits(spec.title, 1, MODAL_MAX_TITLE)) {
     throw new Error(`${at}: title must be 1–${MODAL_MAX_TITLE} characters`);
   }
   if (spec.fields.length < 1 || spec.fields.length > MODAL_MAX_FIELDS) {
@@ -207,13 +220,13 @@ function validateField(field: ModalFieldSpec, at: string): void {
   if (field.customId.length < 1 || field.customId.length > MAX_CUSTOM_ID) {
     throw new Error(`${at}: field id must be 1–${MAX_CUSTOM_ID} characters`);
   }
-  if (field.label.length < 1 || field.label.length > MODAL_MAX_LABEL) {
+  if (!fits(field.label, 1, MODAL_MAX_LABEL)) {
     throw new Error(`${at}: label must be 1–${MODAL_MAX_LABEL} characters`);
   }
-  if ((field.description?.length ?? 0) > MODAL_MAX_DESCRIPTION) {
+  if (!fits(field.description, 0, MODAL_MAX_DESCRIPTION)) {
     throw new Error(`${at}: description is longer than ${MODAL_MAX_DESCRIPTION} characters`);
   }
-  if ((field.placeholder?.length ?? 0) > MODAL_MAX_PLACEHOLDER) {
+  if (!fits(field.placeholder, 0, MODAL_MAX_PLACEHOLDER)) {
     throw new Error(`${at}: placeholder is longer than ${MODAL_MAX_PLACEHOLDER} characters`);
   }
   if (field.type === "short" || field.type === "paragraph") {
@@ -284,11 +297,11 @@ function validateSelectField(field: ModalFieldSpec, at: string): void {
       ["label", option.label],
       ["value", option.value],
     ] as const) {
-      if (text.length < 1 || text.length > MODAL_MAX_OPTION_TEXT) {
+      if (!fits(text, 1, MODAL_MAX_OPTION_TEXT)) {
         throw new Error(`${at}: option ${name} must be 1–${MODAL_MAX_OPTION_TEXT} characters`);
       }
     }
-    if ((option.description?.length ?? 0) > MODAL_MAX_DESCRIPTION) {
+    if (!fits(option.description, 0, MODAL_MAX_DESCRIPTION)) {
       throw new Error(
         `${at}: option description is longer than ${MODAL_MAX_DESCRIPTION} characters`,
       );
@@ -314,7 +327,7 @@ function validateTextField(field: ModalFieldSpec, at: string): void {
     throw new Error(`${at}: minLength is greater than maxLength`);
   }
   if (value !== undefined) {
-    if (value.length > (maxLength ?? MODAL_MAX_TEXT)) {
+    if (characterCount(value) > (maxLength ?? MODAL_MAX_TEXT)) {
       throw new Error(
         `${at}: default value is longer than ${maxLength ?? MODAL_MAX_TEXT} characters`,
       );
@@ -362,29 +375,38 @@ function ids(raw: AcceptedRawValue): readonly string[] | null {
 
 /**
  * Checks a submit against the modal's own definition (Discord validates in the client, but the payload
- * is untrusted) and returns the typed values. Throws a UserError with a Polish message on the first problem.
+ * is untrusted) and returns the typed values. Throws a UserError in `locale` on the first problem.
  */
 export function parseModalValues<F extends ModalFieldsDef>(
   fields: F,
   raw: ModalRawValues,
+  locale: Locale = DEFAULT_LOCALE,
 ): ModalValues<F> {
   const values: Record<string, unknown> = {};
   for (const [key, def] of Object.entries(fields)) {
     const required = def.required ?? true;
-    const given = accepted(def, raw[key]);
+    const field: Field = { label: localize(def.label, locale), t: coreMessages(locale) };
+    const given = accepted(field, raw[key]);
     if (def.type === "file") {
-      values[key] = parseFile(def, given, required);
+      values[key] = parseFile(def, field, given, required);
     } else if (def.type === "user" && (def.maxValues ?? 1) > 1) {
-      values[key] = parseUsers(def, given, required);
+      values[key] = parseUsers(def, field, given, required);
     } else {
-      values[key] = parseSingle(def, given, required);
+      values[key] = parseSingle(def, field, given, required);
     }
   }
   return values as ModalValues<F>;
 }
 
+/** The field's label in the submitter's language and the texts to complain with. */
+interface Field {
+  label: string;
+  t: ReturnType<typeof coreMessages>;
+}
+
 function parseSingle(
   def: Exclude<ModalFieldDef, FileFieldDef>,
+  field: Field,
   given: AcceptedRawValue,
   required: boolean,
 ): string | undefined {
@@ -393,15 +415,15 @@ function parseSingle(
   // Trimmed once here, so the length limits and the handler see the same text.
   const text = typeof selected === "string" && isText ? selected.trim() : selected;
   if (typeof text !== "string" || text.trim() === "") {
-    if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
+    if (required) throw new UserError(field.t.fieldRequired(field.label));
     return undefined;
   }
   if (isText) {
-    checkTextLength(def, text);
+    checkTextLength(def, field, text);
   } else if (def.type === "select") {
-    if (!def.options.some((option) => option.value === text) || oneOf(given)) invalid(def);
+    if (!def.options.some((option) => option.value === text) || oneOf(given)) invalid(field);
   } else if (!SNOWFLAKE.test(text) || oneOf(given)) {
-    invalid(def);
+    invalid(field);
   }
   return text;
 }
@@ -409,20 +431,21 @@ function parseSingle(
 /** A user select that takes several people: a list of distinct ids within `minValues`..`maxValues`. */
 function parseUsers(
   def: UserFieldDef,
+  field: Field,
   given: AcceptedRawValue,
   required: boolean,
 ): string[] | undefined {
   const list = ids(given);
-  if (list === null) invalid(def);
+  if (list === null) invalid(field);
   const distinct = [...new Set(list)];
   if (distinct.length === 0) {
-    if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
+    if (required) throw new UserError(field.t.fieldRequired(field.label));
     return undefined;
   }
   const { minValues = required ? 1 : 0, maxValues = 1 } = def;
-  if (!distinct.every((id) => SNOWFLAKE.test(id)) || distinct.length > maxValues) invalid(def);
+  if (!distinct.every((id) => SNOWFLAKE.test(id)) || distinct.length > maxValues) invalid(field);
   if (distinct.length < minValues) {
-    throw new UserError(`Pole „${def.label}” wymaga co najmniej ${minValues} wyborów.`);
+    throw new UserError(field.t.fieldMinChoices(field.label, minValues));
   }
   return distinct;
 }
@@ -430,22 +453,21 @@ function parseUsers(
 /** A single upload: the adapter resolved it from the submit; type and size are checked here. */
 function parseFile(
   def: FileFieldDef,
+  field: Field,
   given: AcceptedRawValue,
   required: boolean,
 ): ModalFile | undefined {
   if (given === undefined || (Array.isArray(given) && given.length === 0)) {
-    if (required) throw new UserError(`Pole „${def.label}” jest wymagane.`);
+    if (required) throw new UserError(field.t.fieldRequired(field.label));
     return undefined;
   }
   const file = Array.isArray(given) && given.length === 1 ? given[0] : undefined;
-  if (!isModalFile(file)) invalid(def);
+  if (!isModalFile(file)) invalid(field);
   if (def.contentTypes && !allowedType(def.contentTypes, file.contentType)) {
-    throw new UserError(`Plik w polu „${def.label}” ma niedozwolony typ.`);
+    throw new UserError(field.t.fileType(field.label));
   }
   if (def.maxBytes !== undefined && file.size > def.maxBytes) {
-    throw new UserError(
-      `Plik w polu „${def.label}” może mieć najwyżej ${formatBytes(def.maxBytes)}.`,
-    );
+    throw new UserError(field.t.fileTooBig(field.label, formatBytes(def.maxBytes)));
   }
   return { url: file.url, name: file.name, contentType: file.contentType, size: file.size };
 }
@@ -474,33 +496,28 @@ function allowedType(allowed: readonly string[], contentType: string | null): bo
   });
 }
 
-function formatBytes(bytes: number): string {
-  return bytes >= 1_048_576
-    ? `${Math.round(bytes / 1_048_576)} MB`
-    : `${Math.ceil(bytes / 1024)} KB`;
-}
-
 /** More than one value submitted to a single-choice select. */
 function oneOf(given: AcceptedRawValue): boolean {
   return Array.isArray(given) && given.length > 1;
 }
 
 /** Turns a field the adapter refused into the "invalid value" answer. */
-function accepted(def: ModalFieldDef, raw: ModalRawValue): AcceptedRawValue {
-  if (raw === REJECTED_MODAL_VALUE) invalid(def);
-  if (Array.isArray(raw) && raw.includes(REJECTED_MODAL_VALUE)) invalid(def);
+function accepted(field: Field, raw: ModalRawValue): AcceptedRawValue {
+  if (raw === REJECTED_MODAL_VALUE) invalid(field);
+  if (Array.isArray(raw) && raw.includes(REJECTED_MODAL_VALUE)) invalid(field);
   return raw as AcceptedRawValue;
 }
 
-function invalid(def: ModalFieldDef): never {
-  throw new UserError(`Pole „${def.label}” ma nieprawidłową wartość.`);
+function invalid(field: Field): never {
+  throw new UserError(field.t.fieldInvalid(field.label));
 }
 
-function checkTextLength(def: TextFieldDef, text: string): void {
+function checkTextLength(def: TextFieldDef, field: Field, text: string): void {
   const { minLength = 0, maxLength = MODAL_MAX_TEXT } = def;
-  if (text.length < minLength || text.length > maxLength) {
-    const range = minLength > 0 ? `od ${minLength} do ${maxLength}` : `do ${maxLength}`;
-    throw new UserError(`Pole „${def.label}” musi mieć ${range} znaków.`);
+  // Code points, like every other limit here; Discord's own counting of astral characters is not documented.
+  const length = characterCount(text);
+  if (length < minLength || length > maxLength) {
+    throw new UserError(field.t.fieldLength(field.label, minLength, maxLength));
   }
 }
 
@@ -513,6 +530,7 @@ export interface ModalContext<V = Record<string, string | undefined>>
     | "place"
     | "channelId"
     | "memberPermissions"
+    | "locale"
     | "state"
     | "acknowledged"
     | "reply"
@@ -541,8 +559,8 @@ export interface ModalDefinition<F extends ModalFieldsDef> {
   module: string;
   /** Lowercase letters, digits, - and _ (no colon). Unique among the module's modals. */
   name: string;
-  /** Window title, up to 45 characters. */
-  title: string;
+  /** Window title, up to 45 characters in every language. */
+  title: Localized;
   /** 1–5 fields. */
   fields: F;
   /** Discord permission bits (PermissionFlagsBits) the member needs. Implies guildOnly. */

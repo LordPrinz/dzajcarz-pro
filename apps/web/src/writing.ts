@@ -36,7 +36,7 @@ const OpenDmBody = COMMANDS["dm.open"].request;
  * as something else (`photo\u202Egnp.exe` shows as `photoexe.png`).
  */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point.
-const UNSAFE_NAME = /[\x00-\x1f\x7f/\\\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
+const UNSAFE_NAME = /[\x00-\x1f\x7f/\\\u200B\u200C\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
 
 /** Uploads handled at once; more wait in the browser instead of in this process's memory. */
 export const MAX_CONCURRENT_UPLOADS = 2;

@@ -1,11 +1,10 @@
 import { UserError } from "./errors.ts";
+import { coreMessages } from "./messages.ts";
 
-export const MENU_EXPIRED = "To menu wygasło. Wywołaj komendę jeszcze raz.";
-
-/** Thrown by `ComponentStateStore.load` once the saved state is gone; the caller sees MENU_EXPIRED. */
+/** Thrown by `ComponentStateStore.load` once the saved state is gone; the caller is told the menu expired. */
 export class ExpiredStateError extends UserError {
   constructor() {
-    super(MENU_EXPIRED);
+    super((locale) => coreMessages(locale).menuExpired);
   }
 }
 

@@ -8,6 +8,7 @@ import {
   isStagingFull,
   MAX_STAGED_BYTES,
   type StagedUpload,
+  UPLOAD_LEASE_MINUTES,
   UPLOAD_TTL_MINUTES,
 } from "./web-uploads.ts";
 
@@ -102,23 +103,66 @@ describe.skipIf(!sql)("web uploads", () => {
     expect((await store.claim([id], "n2", send, always)).status).toBe("ok");
   });
 
-  test("two concurrent sends take turns: the second sees the first's nonce", async () => {
+  test("a send in flight holds the files without a transaction: another is busy, not blocked", async () => {
     const id = crypto.randomUUID();
     await createUploadStaging(db()).stage({ id, name: "a.txt", data: bytes("x") });
     const store = createUploadStore(db());
-    const order: string[] = [];
-    const slow = (name: string) => async (files: StagedUpload[]) => {
-      order.push(`start ${name}`);
-      await Bun.sleep(30);
-      order.push(`end ${name}`);
-      return files;
-    };
-    const [a, b] = await Promise.all([
-      store.claim([id], "n1", slow("a"), always),
-      store.claim([id], "n2", slow("b"), always),
-    ]);
-    expect([a.status, b.status].sort()).toEqual(["ok", "taken"]);
-    expect(order).toEqual(order[0] === "start a" ? ["start a", "end a"] : ["start b", "end b"]);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = store.claim(
+      [id],
+      "n1",
+      async (files) => {
+        await gate;
+        return files;
+      },
+      always,
+    );
+    await Bun.sleep(30);
+    expect(await store.claim([id], "n1", send, always)).toEqual({ status: "busy" });
+    expect(await store.claim([id], "n2", send, always)).toEqual({ status: "busy" });
+    release();
+    expect((await first).status).toBe("ok");
+    expect(await store.claim([id], "n2", send, always)).toEqual({ status: "taken" });
+  });
+
+  test("a send that throws gives the lease back", async () => {
+    const id = crypto.randomUUID();
+    await createUploadStaging(db()).stage({ id, name: "a.txt", data: bytes("x") });
+    const store = createUploadStore(db());
+    await expect(
+      store.claim([id], "n1", () => Promise.reject(new Error("discord down")), always),
+    ).rejects.toThrow("discord down");
+    expect((await store.claim([id], "n2", send, always)).status).toBe("ok");
+  });
+
+  test("a stale lease is taken over, and a partly leased set leases nothing", async () => {
+    const held = crypto.randomUUID();
+    const free = crypto.randomUUID();
+    await createUploadStaging(db()).stage({ id: held, name: "a.txt", data: bytes("x") });
+    await createUploadStaging(db()).stage({ id: free, name: "b.txt", data: bytes("y") });
+    await db()`UPDATE web_upload SET claimed_at = now() WHERE id = ${held}`;
+    const store = createUploadStore(db());
+    expect(await store.claim([held, free], "n1", send, always)).toEqual({ status: "busy" });
+    const [row] = await db()<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM web_upload WHERE id = ${free} AND claimed_at IS NULL
+    `;
+    expect(row?.n).toBe(1);
+    await db()`
+      UPDATE web_upload SET claimed_at = now() - make_interval(mins => ${UPLOAD_LEASE_MINUTES + 1})
+      WHERE id = ${held}
+    `;
+    expect((await store.claim([held, free], "n1", send, always)).status).toBe("ok");
+  });
+
+  test("an uppercase id finds its file", async () => {
+    const id = crypto.randomUUID();
+    await createUploadStaging(db()).stage({ id, name: "a.txt", data: bytes("x") });
+    const result = await createUploadStore(db()).claim([id.toUpperCase()], "n1", send, always);
+    if (result.status !== "ok") throw new Error(result.status);
+    expect(result.value.map((file) => file.id)).toEqual([id]);
   });
 
   test("an expired upload is not claimed and is purged", async () => {

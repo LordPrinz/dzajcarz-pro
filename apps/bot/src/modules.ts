@@ -1,6 +1,12 @@
 import type { BotModule, CommandSummary, CronScheduler, Logger, Scheduler } from "@dzajcarz/core";
 import type { KeyValueStore } from "@dzajcarz/kv";
 import {
+  type BirthdayMembers,
+  type BirthdaySender,
+  type BirthdayStore,
+  createBirthdayModule,
+} from "@dzajcarz/module-birthday";
+import {
   createDzajcoModule,
   type DzajcoChannels,
   type DzajcoResponder,
@@ -57,6 +63,7 @@ import {
   type WelcomeConfigStore,
   type WelcomeSender,
 } from "@dzajcarz/module-welcome";
+import type { Locales } from "./locales.ts";
 import type { TimeZones } from "./time-zones.ts";
 
 /** Everything modules may ask for. Each module factory picks only what it needs. */
@@ -99,6 +106,11 @@ export interface ModuleServices {
   /** Each server's zone (`/timezone`), and its settings for the command. */
   timeZones: TimeZones;
   defaultTimeZone: string;
+  /**
+   * Each server's and member's language (`/language`). A module that sends text outside a command
+   * (events, cron jobs, DMs it starts) takes it as a `LocaleResolver`.
+   */
+  locales: Locales;
   // dzajco
   dzajcoSettings: DzajcoSettingsStore;
   dzajcoResponder: DzajcoResponder;
@@ -118,6 +130,10 @@ export interface ModuleServices {
   messageFailures: KeyValueStore;
   clientReady: () => boolean;
   messageChannels: MessageChannels;
+  // birthday
+  birthdays: BirthdayStore;
+  birthdaySender: BirthdaySender;
+  birthdayMembers: BirthdayMembers;
   logger: Logger;
 }
 
@@ -132,6 +148,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       defaultTimeZone: services.defaultTimeZone,
       modules: services.moduleToggles,
       channels: services.channels,
+      languages: services.locales.settings,
     }),
     createWelcomeModule({
       store: services.welcomeConfigs,
@@ -150,6 +167,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       invites: services.partyInvites,
       scheduler: services.scheduler,
       lock: services.partyLock,
+      locales: services.locales,
       logger: services.logger.child({ module: "party" }),
     }),
     createMusicModule({
@@ -157,6 +175,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       voice: services.voiceChannels,
       panels: services.musicPanels,
       directMessages: services.directMessages,
+      locales: services.locales,
       scheduler: services.scheduler,
       stateStorage: services.componentState,
       logger: services.logger.child({ module: "music" }),
@@ -193,6 +212,7 @@ export function createModules(services: ModuleServices): BotModule[] {
       log: services.moderationLog,
       dmLimit: services.moderationDmLimit,
       timeZones: services.timeZones,
+      locales: services.locales,
       logger: services.logger.child({ module: "moderation" }),
     }),
     createRiotModule({
@@ -211,9 +231,22 @@ export function createModules(services: ModuleServices): BotModule[] {
       botInGuild: services.botInGuild,
       moduleEnabled: services.moduleEnabled,
       guildModuleEnabled: services.guildModuleEnabled,
+      locales: services.locales,
       now: () => new Date(),
       timeZones: services.timeZones,
       logger: services.logger.child({ module: "messages" }),
+    }),
+    createBirthdayModule({
+      store: services.birthdays,
+      sender: services.birthdaySender,
+      members: services.birthdayMembers,
+      channels: services.channels,
+      cron: services.cron,
+      timeZones: services.timeZones,
+      locales: services.locales,
+      moduleEnabled: services.moduleEnabled,
+      now: () => new Date(),
+      logger: services.logger.child({ module: "birthday" }),
     }),
   ];
 }

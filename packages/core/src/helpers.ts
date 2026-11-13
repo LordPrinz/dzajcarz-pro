@@ -1,21 +1,21 @@
-import { UserError } from "./errors.ts";
+import { type MemberText, UserError } from "./errors.ts";
+import { DEFAULT_LOCALE, type Locale } from "./i18n.ts";
 import { characterCount, DISCORD_LIMITS } from "./limits.ts";
+import { common } from "./messages.ts";
 
 /**
  * Small pieces several modules need. They live here because ADR 5 forbids imports between modules; only
  * what at least two modules share belongs in this file.
  */
 
-/** PermissionFlagsBits.ManageGuild; modules do not import discord.js at runtime. */
-export const MANAGE_GUILD = 1n << 5n;
-
-export const GUILD_ONLY = "Ta komenda działa tylko na serwerze.";
-
 /**
  * The guild id of a command run in a guild. Commands are guild-only by default, so the dispatcher refuses
  * DMs first; this narrows the type and guards a future change of `contexts`.
  */
-export function requireGuild(guildId: string | null, message = GUILD_ONLY): string {
+export function requireGuild(
+  guildId: string | null,
+  message: MemberText = (locale) => common(locale).guildOnly,
+): string {
   if (guildId === null) throw new UserError(message);
   return guildId;
 }
@@ -66,11 +66,15 @@ export function codeBlocks(text: string): string[] {
   return blocks;
 }
 
-/** Room kept at the end of a cut list for "… i jeszcze N". */
+/** Room kept at the end of a cut list for "… i jeszcze N" in any language. */
 const MORE_RESERVE = 20;
 
 /** The lines that fit one message (`limit` characters); the rest is counted in a last "… i jeszcze N" line. */
-export function fitLines(lines: readonly string[], limit: number = DISCORD_LIMITS.content): string {
+export function fitLines(
+  lines: readonly string[],
+  limit: number = DISCORD_LIMITS.content,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
   const kept: string[] = [];
   let used = 0;
   for (const line of lines) {
@@ -80,5 +84,17 @@ export function fitLines(lines: readonly string[], limit: number = DISCORD_LIMIT
     used = next;
   }
   const hidden = lines.length - kept.length;
-  return hidden > 0 ? `${kept.join("\n")}\n… i jeszcze ${hidden}` : kept.join("\n");
+  return hidden > 0 ? `${kept.join("\n")}\n${common(locale).more(hidden)}` : kept.join("\n");
+}
+
+/**
+ * Fills `{name}` placeholders in one pass, so substituted text is never scanned again: a member called
+ * `{server}` shows up literally. Unknown placeholders stay as written. The values go in as given, so escape
+ * member-controlled text first. The result is cut by code points to Discord's message limit.
+ */
+export function fillTemplate(template: string, values: Readonly<Record<string, string>>): string {
+  const rendered = template.replace(/\{(\w+)\}/g, (placeholder, key: string) =>
+    Object.hasOwn(values, key) ? (values[key] as string) : placeholder,
+  );
+  return [...rendered].slice(0, DISCORD_LIMITS.content).join("");
 }

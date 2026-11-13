@@ -1,4 +1,11 @@
-import { type CommandContext, type CommandPlace, type Logger, silentLogger } from "@dzajcarz/core";
+import {
+  type CommandContext,
+  type CommandPlace,
+  DEFAULT_LOCALE,
+  type Locale,
+  type Logger,
+  silentLogger,
+} from "@dzajcarz/core";
 import {
   ApplicationCommandOptionType,
   type ChatInputCommandInteraction,
@@ -71,6 +78,7 @@ export function placeOf(
 export function contextFromInteraction(
   interaction: ChatInputCommandInteraction,
   logger: Logger = silentLogger,
+  locale: Locale = DEFAULT_LOCALE,
 ): CommandContext {
   return {
     args: slashArgs(interaction),
@@ -83,6 +91,7 @@ export function contextFromInteraction(
     memberPermissions: interaction.inGuild()
       ? (interaction.memberPermissions?.bitfield ?? 0n)
       : null,
+    locale,
     async reply(reply) {
       const { content, embeds, components, ephemeral, reactions } = toReplyPayload(reply);
       const payload = { content, embeds, components, allowedMentions: NO_MENTIONS };
@@ -126,7 +135,7 @@ export function contextFromInteraction(
     canShowModal: true,
     async showModal(modal) {
       if (interaction.deferred || interaction.replied) throw new Error(MODAL_NOT_FIRST);
-      await interaction.showModal(toModalPayload(modal));
+      await interaction.showModal(toModalPayload(modal, locale));
     },
   };
 }
@@ -136,6 +145,7 @@ export function contextFromMessage(
   args: Record<string, unknown>,
   subcommand?: string,
   logger: Logger = silentLogger,
+  locale: Locale = DEFAULT_LOCALE,
 ): CommandContext {
   const member = message.member;
   const channel = message.channel;
@@ -151,6 +161,7 @@ export function contextFromMessage(
     messageId: message.id,
     memberPermissions:
       member && !channel.isDMBased() ? member.permissionsIn(channel).bitfield : null,
+    locale,
     async reply(reply) {
       const { content, embeds, components, reactions } = toReplyPayload(reply);
       // A command may delete its own message (a purge racing a new message); the reply then goes out

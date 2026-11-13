@@ -28,7 +28,7 @@ import {
   type User,
 } from "discord.js";
 import { toArchivedMessage } from "./archive.ts";
-import { hasCode } from "./errors.ts";
+import { fetchOrNull, hasCode } from "./errors.ts";
 
 /** A discord.js message in the panel's shape. */
 export const toPanel = (message: Message): PanelMessage =>
@@ -88,7 +88,7 @@ export function createChannelReader(client: Client, resolve: ResolveNames) {
     before,
     limit,
   }: CommandRequest<"channel.messages">): Promise<ChannelMessages> => {
-    const channel = await client.channels.fetch(channelId).catch(() => null);
+    const channel = await fetchOrNull(client.channels.fetch(channelId));
     if (!channel?.isTextBased()) return { status: "unknown_channel" };
     let fetched: Message[];
     try {

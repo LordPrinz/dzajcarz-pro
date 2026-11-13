@@ -45,15 +45,17 @@ interface FakeMessageOptions {
   author?: string;
   edit?: () => Promise<unknown>;
   delete?: () => Promise<unknown>;
+  reactions?: { id: string | null; name: string }[];
 }
 
-function fakeMessage({ author = BOT, ...calls }: FakeMessageOptions = {}) {
+function fakeMessage({ author = BOT, reactions = [], ...calls }: FakeMessageOptions = {}) {
   const seen: { edit: unknown[]; deleted: number } = { edit: [], deleted: 0 };
   return {
     seen,
     message: {
       id: MESSAGE,
       author: { id: author },
+      reactions: { cache: reactions.map((emoji) => ({ emoji })) },
       edit: async (options: unknown) => {
         seen.edit.push(options);
         return calls.edit ? calls.edit() : {};
@@ -356,6 +358,19 @@ describe("message.send", () => {
     expect([...sentWith.values()]).toEqual(["abc", "abc"]);
   });
 
+  test("files another send still holds are reported as busy, not as missing", async () => {
+    const file = upload(10);
+    const { uploads } = fakeUploads([file]);
+    const { channel, sent } = fakeChannel();
+    const busy = { ...uploads, claim: async () => ({ status: "busy" as const }) };
+    const handlers = writing({ channel, uploads: busy }).handlers;
+    expect(await handlers["message.send"](send({ attachmentIds: [file.id] }), deadline)).toEqual({
+      status: "rejected",
+      reason: "upload_busy",
+    });
+    expect(sent).toEqual([]);
+  });
+
   test("a retry after a send whose answer was lost reaches Discord again with the same nonce", async () => {
     const file = upload(10);
     const { uploads } = fakeUploads([file]);
@@ -443,6 +458,28 @@ describe("message.send", () => {
       await handlers["message.send"](send({ attachmentIds: files.map((f) => f.id) }), deadline),
     ).toEqual({ status: "rejected", reason: "file_too_large" });
     expect(sent).toHaveLength(1);
+  });
+
+  test("sends with files go to Discord one at a time", async () => {
+    const [a, b] = [upload(10), upload(10)];
+    const { uploads } = fakeUploads([a, b]);
+    let running = 0;
+    let overlap = 0;
+    const { channel } = fakeChannel({
+      send: async () => {
+        running += 1;
+        overlap = Math.max(overlap, running);
+        await Bun.sleep(10);
+        running -= 1;
+        return { id: "500000000000000099" };
+      },
+    });
+    const { handlers } = writing({ channel, uploads });
+    await Promise.all([
+      handlers["message.send"](send({ attachmentIds: [a.id], nonce: "n1" }), deadline),
+      handlers["message.send"](send({ attachmentIds: [b.id], nonce: "n2" }), deadline),
+    ]);
+    expect(overlap).toBe(1);
   });
 
   test("a file named twice is sent once", async () => {
@@ -627,6 +664,31 @@ describe("reactions", () => {
       status: "ok",
     });
     expect(calls.map(([method]) => method)).toEqual(["delete"]);
+  });
+
+  test("without Add Reactions the bot may still join an emoji already on the message", async () => {
+    const { message } = fakeMessage({
+      reactions: [
+        { id: null, name: "👍" },
+        { id: "123456789012345678", name: "dzajco" },
+      ],
+    });
+    const { channel } = fakeChannel({
+      permissions: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+      fetchMessage: async () => message,
+    });
+    const { handlers, calls } = writing({ channel });
+    expect(await handlers["reaction.add"]({ ...target, emoji: "👍" }, deadline)).toEqual({
+      status: "ok",
+    });
+    expect(
+      await handlers["reaction.add"]({ ...target, emoji: "dzajco:123456789012345678" }, deadline),
+    ).toEqual({ status: "ok" });
+    expect(await handlers["reaction.add"]({ ...target, emoji: "🎉" }, deadline)).toEqual({
+      status: "rejected",
+      reason: "no_react",
+    });
+    expect(calls.map(([method]) => method)).toEqual(["put", "put"]);
   });
 
   test("an emoji the bot cannot use is rejected", async () => {

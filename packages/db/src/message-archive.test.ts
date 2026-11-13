@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { createArchiveSettingsRepository } from "./archive-settings.ts";
-import { type ArchivedMessageInput, createMessageArchiveRepository } from "./message-archive.ts";
+import {
+  type ArchivedMessageInput,
+  createMessageArchiveRepository,
+  jsonWithoutNul,
+  withoutNul,
+} from "./message-archive.ts";
 import { createTestDatabase } from "./testing.ts";
 import type { ArchivedMessageRow, ArchivedMessageVersionRow } from "./types.ts";
 import { WEB_ROLE } from "./web-audit.ts";
@@ -21,6 +26,24 @@ beforeEach(async () => {
   if (sql) {
     await sql`TRUNCATE archived_message, archived_message_version, archive_settings, archive_dm_settings`;
   }
+});
+
+describe("U+0000 stripping", () => {
+  test("removes it from text", () => {
+    expect(withoutNul("a\u0000b\u0000")).toBe("ab");
+    expect(withoutNul("plain")).toBe("plain");
+  });
+
+  test("removes it from every string value of the JSON, and only there", () => {
+    const text = jsonWithoutNul([
+      { name: "a\u0000.png", size: 3, nested: { title: ["x\u0000y", null, true] } },
+      { path: "back\\u0000slash" },
+    ]);
+    expect(JSON.parse(text)).toEqual([
+      { name: "a.png", size: 3, nested: { title: ["xy", null, true] } },
+      { path: "back\\u0000slash" },
+    ]);
+  });
 });
 
 const GUILD = "100000000000000001";

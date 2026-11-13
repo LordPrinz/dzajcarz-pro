@@ -11,9 +11,10 @@ tested on a live server, and features reached into each other's files.
 
 ## Decision
 
-- A feature is a `BotModule` `{ name, commands, events }`, built by a factory that receives only the ports
-  it needs (`createGeneralModule({ commands, gatewayPing, prefixFor })`). `apps/bot/src/modules.ts` is the
-  single list of enabled modules; `apps/bot/src/index.ts` creates the real adapters.
+- A feature is a `BotModule` `{ name, commands, events }` (ADR 6 adds `components` and `modals`), built by
+  a factory that receives only the ports it needs (`createGeneralModule({ commands, gatewayPing,
+  prefixFor })`). `apps/bot/src/modules.ts` is the single list of enabled modules;
+  `apps/bot/src/index.ts` creates the real adapters.
 - A command is defined once with `defineCommand`: name, description, typed options, optional aliases,
   `contexts` (ADR 7), `permissions`, and `run(ctx)`. `ctx.args` is typed from the options.
 - `createRegistry` validates every command at startup (Discord name rules, unique names and aliases across
@@ -30,7 +31,7 @@ tested on a live server, and features reached into each other's files.
   registry rejects both or neither. `defineSubcommand({ description, options, permissions?, run })` types
   `ctx.args` from the subcommand's own options. Aliases stay on the command.
 - Slash form: each subcommand becomes a `SUB_COMMAND` option. Prefix form: the first word picks the
-  subcommand (`!prefix set ?`); a missing or unknown one gets a Polish error listing the valid names.
+  subcommand (`!prefix set ?`); a missing or unknown one gets an error listing the valid names, in the caller's language (ADR 11).
   The chosen name reaches the handler as `ctx.subcommand`.
 - `permissions` on the command become `default_member_permissions` and a runtime check. `permissions` on
   a subcommand are an extra runtime check only, since Discord cannot gate a single subcommand. The

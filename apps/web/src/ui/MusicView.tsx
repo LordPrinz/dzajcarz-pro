@@ -99,7 +99,8 @@ export function MusicView({
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MusicSearch | null>(null);
-  const [seekDraft, setSeekDraft] = useState<number | null>(null);
+  /** The key is the track that was dragged: a commit after the track changed must not seek the new one. */
+  const [seekDraft, setSeekDraft] = useState<{ key: string; positionMs: number } | null>(null);
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
   const [, setTick] = useState(0);
   // Read through refs, so a parent passing new functions on every render does not reload the player.
@@ -134,8 +135,7 @@ export function MusicView({
     [fetcher, show],
   );
 
-  // A new server, or a socket that came back: everything is read again.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a reconnect is the reason to read again.
+  // A new server: everything is read again.
   useEffect(() => {
     if (!guildId) return;
     follow.current(guildId);
@@ -150,7 +150,15 @@ export function MusicView({
       if (shown.current.guildId === guildId) setChannels(result.ok ? result.data.channels : []);
     });
     return () => follow.current(null);
-  }, [guildId, reconnects, load, fetcher]);
+  }, [guildId, load, fetcher]);
+
+  // A socket that came back may have missed events: the player is read again, the rest stays as it is.
+  const seenReconnects = useRef(reconnects);
+  useEffect(() => {
+    if (reconnects === seenReconnects.current) return;
+    seenReconnects.current = reconnects;
+    if (guildId) void load(guildId, shown.current.offset);
+  }, [reconnects, guildId, load]);
 
   useEffect(
     () =>
@@ -205,10 +213,9 @@ export function MusicView({
   const control = (value: Parameters<typeof sendControl>[1]) =>
     run(() => sendControl(guildId, value, fetcher));
 
-  useCommitted(seekDraft, (positionMs) => {
+  useCommitted(seekDraft, ({ key, positionMs }) => {
     setSeekDraft(null);
-    const current = player?.current;
-    if (current) void control({ action: "seek", key: current.key, positionMs });
+    void control({ action: "seek", key, positionMs });
   });
   useCommitted(volumeDraft, (percent) => {
     setVolumeDraft(null);
@@ -243,6 +250,9 @@ export function MusicView({
   };
 
   const current = player?.current ?? null;
+  // Without a player the bot needs a voice channel to join.
+  const noChannel = !player && channelId === "";
+  const seeking = seekDraft && seekDraft.key === current?.key ? seekDraft.positionMs : null;
   const position = player && view ? positionAt(player, view.receivedAt, now()) : 0;
   const selected = channels?.find((channel) => channel.id === channelId);
   const queue = player?.queue;
@@ -314,12 +324,14 @@ export function MusicView({
                 min={0}
                 max={current.isStream ? 0 : current.durationMs}
                 step={1000}
-                value={seekDraft ?? position}
+                value={seeking ?? position}
                 disabled={disabled || current.isStream || !current.isSeekable}
-                onChange={(event) => setSeekDraft(Number(event.target.value))}
+                onChange={(event) =>
+                  setSeekDraft({ key: current.key, positionMs: Number(event.target.value) })
+                }
               />
               <span className="muted">
-                {formatTime(seekDraft ?? position)} /{" "}
+                {formatTime(seeking ?? position)} /{" "}
                 {current.isStream ? "na żywo" : formatTime(current.durationMs)}
               </span>
             </div>
@@ -419,19 +431,20 @@ export function MusicView({
               Playlista <strong>{results.name}</strong> ({results.total}){" "}
               <button
                 type="button"
-                disabled={disabled}
+                disabled={disabled || noChannel}
                 onClick={() => add(Array.from({ length: results.total }, (_, i) => i))}
               >
                 Dodaj wszystkie
               </button>
             </p>
           ) : null}
+          {noChannel ? <p className="muted">Wybierz kanał głosowy, aby dodać utwory.</p> : null}
           <ul>
             {results.tracks.map((track, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: one search never changes, and a video can come twice.
               <li key={`${track.key}-${index}`}>
                 <TrackLine track={track} />{" "}
-                <button type="button" disabled={disabled} onClick={() => add([index])}>
+                <button type="button" disabled={disabled || noChannel} onClick={() => add([index])}>
                   Dodaj
                 </button>
               </li>

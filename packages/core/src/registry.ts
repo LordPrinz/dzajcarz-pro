@@ -13,9 +13,10 @@ import {
   MAX_SELECT_OPTIONS,
   parseCustomId,
 } from "./component.ts";
+import { allLocalizations, DEFAULT_LOCALE, type Localized, localize } from "./i18n.ts";
 import { type AnyModal, validateModal } from "./modal.ts";
 import type { AnyEventHandler, BotModule } from "./module.ts";
-import { usageLine } from "./prefix.ts";
+import { choiceWords, usageLine } from "./prefix.ts";
 
 /** Discord's rule for slash command and option names (lowercase only, since we never localise). */
 const NAME_PATTERN = /^[\p{Ll}\p{Lo}\p{N}_-]{1,32}$/u;
@@ -24,7 +25,7 @@ const MAX_SUBCOMMANDS = 25;
 
 export interface SubcommandSummary {
   name: string;
-  description: string;
+  description: Localized;
   /** Prefix-form syntax without the prefix: `prefix set <value>`. */
   usage: string;
   /** Slash-form syntax: `usage` without the `prefixOnly` options. */
@@ -35,7 +36,7 @@ export interface SubcommandSummary {
 
 export interface CommandSummary {
   name: string;
-  description: string;
+  description: Localized;
   aliases: readonly string[];
   module: string;
   /** Prefix-form syntax without the prefix: `play [query...]`; for a command with subcommands `queue add|clear`. */
@@ -290,7 +291,9 @@ function validateContexts(command: AnyCommand, where: string): void {
 
 function validateOptions(optionDefs: OptionsDef, where: string): void {
   const options = Object.entries(optionDefs);
-  if (options.length > 25) throw new Error(`${where} has more than 25 options`);
+  if (options.length > MAX_OPTIONS) {
+    throw new Error(`${where} has more than ${MAX_OPTIONS} options`);
+  }
   let seenOptional = false;
   options.forEach(([name, option], index) => {
     const at = `option "${name}" of ${where}`;
@@ -304,10 +307,15 @@ function validateOptions(optionDefs: OptionsDef, where: string): void {
     if (option.rest && (option.type !== "string" || index !== options.length - 1)) {
       throw new Error(`"rest" is allowed only on the last option, of type string: ${at}`);
     }
+    // The prefix form takes the rest of the line as it is, so it could not hold the value to the choices.
+    if (option.rest && option.choices) {
+      throw new Error(`"rest" and "choices" cannot be combined: ${at}`);
+    }
     validateChoicesAndRange(option, at);
   });
 }
 
+const MAX_OPTIONS = 25;
 const MAX_CHOICES = 25;
 const MAX_CHOICE_LENGTH = 100;
 
@@ -322,18 +330,26 @@ function validateChoicesAndRange(option: OptionDef, at: string): void {
       throw new Error(`${at} must have 1–${MAX_CHOICES} choices`);
     }
     for (const choice of choices) {
+      const name = localize(choice.name, DEFAULT_LOCALE);
       const length = String(choice.value).length;
-      if (
-        choice.name.length < 1 ||
-        choice.name.length > MAX_CHOICE_LENGTH ||
-        length > MAX_CHOICE_LENGTH
-      ) {
-        throw new Error(
-          `Choice "${choice.name}" of ${at} must be 1–${MAX_CHOICE_LENGTH} characters`,
-        );
+      if (!fits(choice.name, MAX_CHOICE_LENGTH) || length > MAX_CHOICE_LENGTH) {
+        throw new Error(`Choice "${name}" of ${at} must be 1–${MAX_CHOICE_LENGTH} characters`);
       }
       if (option.type !== "string" && typeof choice.value !== "number") {
-        throw new Error(`Choice "${choice.name}" of ${at} must have a number value`);
+        throw new Error(`Choice "${name}" of ${at} must have a number value`);
+      }
+    }
+    // The prefix parser matches value, name and aliases alike, so none may point at two choices.
+    const seen = new Set<string>();
+    for (const choice of choices) {
+      const name = localize(choice.name, DEFAULT_LOCALE);
+      const words = choiceWords(choice);
+      for (const word of new Set(words)) {
+        if (!word.trim() || word !== word.trim()) {
+          throw new Error(`Choice "${name}" of ${at} has an empty or padded alias`);
+        }
+        if (seen.has(word)) throw new Error(`Choice word "${word}" of ${at} is ambiguous`);
+        seen.add(word);
       }
     }
   }
@@ -343,6 +359,12 @@ function validateChoicesAndRange(option: OptionDef, at: string): void {
     option.type !== "number"
   ) {
     throw new Error(`minValue / maxValue are allowed only on integer and number options: ${at}`);
+  }
+  if (
+    option.type === "integer" &&
+    [minValue, maxValue].some((v) => v !== undefined && !Number.isInteger(v))
+  ) {
+    throw new Error(`minValue / maxValue must be integers on an integer option: ${at}`);
   }
   if (minValue !== undefined && maxValue !== undefined && minValue > maxValue) {
     throw new Error(`minValue is greater than maxValue: ${at}`);
@@ -355,8 +377,15 @@ function checkCooldown(cooldownMs: number | undefined, where: string): void {
   }
 }
 
-function checkDescription(description: string, where: string): void {
-  if (description.length < 1 || description.length > MAX_DESCRIPTION) {
-    throw new Error(`Description of ${where} must be 1–${MAX_DESCRIPTION} characters`);
+/** Whether every language of `text` is 1–`max` characters long. */
+function fits(text: Localized, max: number): boolean {
+  return allLocalizations(text).every((one) => one.length >= 1 && one.length <= max);
+}
+
+function checkDescription(description: Localized, where: string): void {
+  if (!fits(description, MAX_DESCRIPTION)) {
+    throw new Error(
+      `Description of ${where} must be 1–${MAX_DESCRIPTION} characters in every language`,
+    );
   }
 }

@@ -1,6 +1,7 @@
 # 1. Monorepo on Bun workspaces
 
-- **Status:** accepted
+- **Status:** accepted. The branch layout in Context is history: v5 now lives on `main` on top of the joined
+  v3 and v4 history, and the old branches are deleted.
 - **Date:** 2026-11-06
 
 ## Context

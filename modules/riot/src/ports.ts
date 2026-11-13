@@ -29,8 +29,9 @@ export interface ValorantMatch {
   won: boolean | null;
   /** `13:7`; null when the mode has no two-team result. */
   score: string | null;
-  map: string;
-  agent: string;
+  /** null when Riot sent neither a content name nor an id to show. */
+  map: string | null;
+  agent: string | null;
   kills: number;
   deaths: number;
   assists: number;

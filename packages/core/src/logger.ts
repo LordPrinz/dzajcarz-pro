@@ -38,11 +38,12 @@ export function createJsonLogger(
         const time = now().toISOString();
         const line = { time, level: lvl, msg: message };
         try {
-          write(JSON.stringify({ ...line, ...base, ...fields }, errorReplacer));
+          // `line` goes last so a field named `level` or `msg` cannot rewrite the entry.
+          write(JSON.stringify({ ...base, ...fields, ...line }, errorReplacer));
         } catch (error) {
           const logError = String(error);
           try {
-            write(JSON.stringify({ ...line, ...base, logError }, errorReplacer));
+            write(JSON.stringify({ ...base, logError, ...line }, errorReplacer));
           } catch {
             write(JSON.stringify({ ...line, logError }));
           }

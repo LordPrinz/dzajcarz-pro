@@ -27,7 +27,7 @@ export interface MusicTrackInfo {
   author: string;
   durationMs: number;
   uri: string | null;
-  requesterId: string;
+  requesterId: string | null;
   byBot: boolean;
   isStream: boolean;
   isSeekable: boolean;

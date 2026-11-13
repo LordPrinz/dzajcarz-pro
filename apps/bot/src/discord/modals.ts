@@ -1,6 +1,8 @@
-import type { AnyModal, ModalRawValue, ModalRawValues } from "@dzajcarz/core";
+import type { AnyModal, Locale, ModalRawValue, ModalRawValues } from "@dzajcarz/core";
 import {
   type ChannelFieldDef,
+  type Localized,
+  localize,
   type ModalChannelKind,
   type ModalFieldSpec,
   type ModalFile,
@@ -30,25 +32,35 @@ const CHANNEL_TYPES = {
   forum: ChannelType.GuildForum,
 } as const satisfies Record<ModalChannelKind, ChannelType>;
 
-/** Plain-data modal from a module to the JSON Discord expects. Throws if it breaks a Discord limit. */
-export function toModalPayload(spec: ModalSpec): APIModalInteractionResponseCallbackData {
+/**
+ * Plain-data modal from a module to the JSON Discord expects, in the member's language. Throws if it breaks
+ * a Discord limit.
+ */
+export function toModalPayload(
+  spec: ModalSpec,
+  locale: Locale,
+): APIModalInteractionResponseCallbackData {
   validateModal(spec);
   return {
     custom_id: spec.customId,
-    title: spec.title,
+    title: localize(spec.title, locale),
     components: spec.fields.map((field) => ({
       type: ComponentType.Label,
-      label: field.label,
-      description: field.description,
-      component: toFieldComponent(field),
+      label: localize(field.label, locale),
+      description: localizeOptional(field.description, locale),
+      component: toFieldComponent(field, locale),
     })),
   };
 }
 
-function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
+function localizeOptional(text: Localized | undefined, locale: Locale): string | undefined {
+  return text === undefined ? undefined : localize(text, locale);
+}
+
+function toFieldComponent(field: ModalFieldSpec, locale: Locale): APIComponentInLabel {
   const base = {
     custom_id: field.customId,
-    placeholder: field.placeholder,
+    placeholder: localizeOptional(field.placeholder, locale),
     required: field.required,
   };
   switch (field.type) {
@@ -69,9 +81,9 @@ function toFieldComponent(field: ModalFieldSpec): APIComponentInLabel {
         min_values: field.required ? 1 : 0,
         max_values: 1,
         options: (field.options ?? []).map((option) => ({
-          label: option.label,
+          label: localize(option.label, locale),
           value: option.value,
-          description: option.description,
+          description: localizeOptional(option.description, locale),
           default: option.value === field.value,
         })),
       };

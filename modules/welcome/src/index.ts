@@ -6,6 +6,7 @@ import {
   defineEvent,
   defineModal,
   defineSubcommand,
+  type Locale,
   type Logger,
   MANAGE_GUILD,
   requireGuild,
@@ -13,6 +14,7 @@ import {
   UserError,
 } from "@dzajcarz/core";
 import type { GuildMember } from "discord.js";
+import { t } from "./messages.ts";
 import { MAX_MESSAGE_LENGTH, renderWelcome } from "./template.ts";
 
 export { MAX_MESSAGE_LENGTH, renderWelcome, type WelcomeValues } from "./template.ts";
@@ -65,74 +67,76 @@ export function createWelcomeModule({
   moduleEnabled,
   logger,
 }: WelcomeModuleDeps): BotModule {
-  const tooLong = `Powitanie może mieć najwyżej ${MAX_MESSAGE_LENGTH} znaków.`;
-
   /** Shared by the prefix form and the modal, so both refuse the same input. */
-  async function saveWelcome(guildId: string, channelId: string, message: string): Promise<string> {
+  async function saveWelcome(
+    guildId: string,
+    channelId: string,
+    message: string,
+  ): Promise<(locale: Locale) => string> {
     const template = message.trim();
-    if (template.length === 0) throw new UserError("Treść powitania nie może być pusta.");
+    if (template.length === 0) throw new UserError((l) => t(l).empty);
     if (characterCount(template) > MAX_MESSAGE_LENGTH) {
-      throw new UserError(tooLong);
+      throw new UserError((l) => t(l).tooLong);
     }
     if (!(await channels.isTextChannelOf(guildId, channelId))) {
-      throw new UserError("Wybierz kanał tekstowy z tego serwera.");
+      throw new UserError((l) => t(l).notTextChannel);
     }
     await store.set(guildId, { channelId, template });
-    return `Nowi członkowie będą witani na <#${channelId}>. Sprawdź wygląd przez \`welcome test\`.`;
+    return (l) => t(l).saved(channelId);
   }
 
   const setForm = defineModal({
     module: "welcome",
     name: "set",
-    title: "Powitanie nowych członków",
+    title: t.all("formTitle"),
     permissions: MANAGE_GUILD,
     fields: {
       channel: {
         type: "channel",
-        label: "Kanał",
-        description: "Tu pojawi się powitanie.",
+        label: t.all("formChannel"),
+        description: t.all("formChannelHint"),
         channelTypes: ["text", "announcement"],
       },
       message: {
         type: "paragraph",
-        label: "Treść powitania",
-        description: `Zmienne: {user}, {username}, {server}, {memberCount}. Do ${MAX_MESSAGE_LENGTH} znaków.`,
+        label: t.all("formMessage"),
+        description: t.all("formMessageHint"),
         // Left optional so an empty answer gets the same wording as the prefix form.
         required: false,
-        placeholder: "Witaj {user} na {server}! Jesteś {memberCount}. osobą.",
+        placeholder: t.all("formPlaceholder"),
       },
     },
     run: async (ctx) => {
       const message = ctx.values.message ?? "";
       if (characterCount(message.trim()) > MAX_MESSAGE_LENGTH) {
         // The member typed all of it in a form that is now gone: hand the text back so it can be pasted again.
-        await ctx.reply({ content: tooLong, ephemeral: true });
+        await ctx.reply({ content: t(ctx.locale).tooLong, ephemeral: true });
         for (const chunk of codeBlocks(message))
           await ctx.reply({ content: chunk, ephemeral: true });
         return;
       }
       const content = await saveWelcome(requireGuild(ctx.guildId), ctx.values.channel, message);
-      await ctx.reply({ content, ephemeral: true });
+      await ctx.reply({ content: content(ctx.locale), ephemeral: true });
     },
   });
 
   const welcome = defineCommand({
     name: "welcome",
-    description: "Wiadomość powitalna dla nowych członków serwera",
+    description: t.all("commandDescription"),
     permissions: MANAGE_GUILD,
     subcommands: {
       set: defineSubcommand({
-        description: "Ustawia kanał i treść powitania",
+        description: t.all("setDescription"),
         options: {
           channel: {
             type: "channel",
-            description: "Kanał z powitaniami",
+            description: t.all("setChannelOption"),
             required: true,
             prefixOnly: true,
           },
           message: {
             type: "string",
-            description: "Treść: {user}, {username}, {server}, {memberCount}",
+            description: t.all("setMessageOption"),
             required: true,
             rest: true,
             prefixOnly: true,
@@ -159,34 +163,34 @@ export function createWelcomeModule({
           }
           const { channel, message } = ctx.args;
           if (channel === undefined || message === undefined) {
-            throw new UserError("Podaj kanał i treść: `welcome set <channel> <message...>`.");
+            throw new UserError((l) => t(l).setUsage);
           }
           const content = await saveWelcome(guildId, channel, message);
-          await ctx.reply({ content, ephemeral: true });
+          await ctx.reply({ content: content(ctx.locale), ephemeral: true });
         },
       }),
       off: defineSubcommand({
-        description: "Wyłącza powitania",
+        description: t.all("offDescription"),
         run: async (ctx) => {
           const removed = await store.delete(requireGuild(ctx.guildId));
           await ctx.reply({
-            content: removed ? "Powitania wyłączone." : "Powitania nie były ustawione.",
+            content: removed ? t(ctx.locale).removed : t(ctx.locale).wasNotSet,
             ephemeral: true,
           });
         },
       }),
       test: defineSubcommand({
-        description: "Wysyła powitanie dla Ciebie na skonfigurowany kanał",
+        description: t.all("testDescription"),
         run: async (ctx) => {
           const guildId = requireGuild(ctx.guildId);
           // Fetching the guild and posting can take longer than the 3 s a slash command may stay silent.
           await ctx.defer({ ephemeral: true });
           const config = await store.get(guildId);
           if (!config) {
-            throw new UserError("Powitania nie są ustawione. Użyj `welcome set`.");
+            throw new UserError((l) => t(l).notSet);
           }
           const guild = await guilds.describe(guildId);
-          if (!guild) throw new UserError("Nie mogę pobrać danych serwera.");
+          if (!guild) throw new UserError((l) => t(l).noGuildData);
           const text = renderWelcome(config.template, {
             userId: ctx.user.id,
             username: ctx.user.displayName,
@@ -197,11 +201,9 @@ export function createWelcomeModule({
             await sender.send(guildId, config.channelId, text, ctx.user.id);
           } catch (error) {
             logger.warn("Welcome test could not be sent", { guildId, error });
-            throw new UserError(
-              `Nie mogę wysłać wiadomości na <#${config.channelId}>. Sprawdź, czy kanał istnieje i czy bot może tam pisać.`,
-            );
+            throw new UserError((l) => t(l).cannotSend(config.channelId));
           }
-          await ctx.reply({ content: "Wysłano powitanie testowe.", ephemeral: true });
+          await ctx.reply({ content: t(ctx.locale).testSent, ephemeral: true });
         },
       }),
     },

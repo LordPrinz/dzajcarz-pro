@@ -305,6 +305,19 @@ describe("MusicView", () => {
     await view.unmount();
   });
 
+  test("without a player and without a voice channel, adding says to pick one and sends nothing", async () => {
+    const view = mount(snapshot({ player: null }), {}, (url) => {
+      if (url.endsWith("/voice-channels")) return Response.json({ channels: [], truncated: false });
+      return url.includes("/search") ? Response.json(searchResult()) : undefined;
+    });
+    await view.render();
+    await view.change(field(view, "Szukaj muzyki"), "x");
+    await view.click("Szukaj");
+    expect(view.container.textContent).toContain("Wybierz kanał głosowy");
+    expect(view.button("Dodaj")?.disabled).toBe(true);
+    await view.unmount();
+  });
+
   test("the search button stays disabled for a blank query", async () => {
     const view = mount(snapshot());
     await view.render();
@@ -424,6 +437,21 @@ describe("MusicView", () => {
     expect(posts(view).map((r) => r.body)).toEqual([
       { action: "seek", key: track("Lato z Radiem").key, positionMs: 90_000 },
     ]);
+    await view.unmount();
+  });
+
+  test("a seek commit names the track that was dragged, even when the track changed meanwhile", async () => {
+    const view = mount(snapshot());
+    await view.render();
+    await view.change(field(view, "Pozycja"), "90000");
+    const next = snapshot();
+    if (next.player) next.player = { ...next.player, current: track("Inny") };
+    await view.emit({ event: "music.state", payload: { ...next, at: "2026-11-12T10:00:05.000Z" } });
+    await act(async () => {
+      await Bun.sleep(500);
+    });
+    const seeks = posts(view).map((r) => r.body) as { key?: string }[];
+    expect(seeks.every((body) => body.key !== track("Inny").key)).toBe(true);
     await view.unmount();
   });
 

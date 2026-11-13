@@ -1,6 +1,7 @@
 import type { Logger } from "@dzajcarz/core";
 import type { GuildLookup, TextChannels, WelcomeSender } from "@dzajcarz/module-welcome";
 import { ChannelType, type Client } from "discord.js";
+import { fetchOrNull } from "./errors.ts";
 
 /**
  * Posts welcome messages. Unlike every other reply the greeting may ping, but only the new member:
@@ -24,7 +25,7 @@ export function createTextChannels(client: Client): TextChannels {
     async isTextChannelOf(guildId, channelId) {
       const guild = client.guilds.cache.get(guildId);
       if (!guild) return false;
-      const channel = await guild.channels.fetch(channelId).catch(() => null);
+      const channel = await fetchOrNull(guild.channels.fetch(channelId));
       return (
         channel?.guildId === guildId &&
         (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement)

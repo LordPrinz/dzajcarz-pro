@@ -52,6 +52,18 @@ describe("message text is never HTML", () => {
     );
   });
 
+  test("a bare link keeps a closing parenthesis only when it closes one inside the link", () => {
+    expect(render("https://en.wikipedia.org/wiki/Foo_(bar)")).toContain(
+      '<a href="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank"',
+    );
+    expect(render("(zobacz https://example.com/x)")).toContain(
+      '<a href="https://example.com/x" target="_blank"',
+    );
+    expect(render("(https://en.wikipedia.org/wiki/Foo_(bar))")).toContain(
+      '<a href="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank"',
+    );
+  });
+
   test("a link inside a link label is not a second link", () => {
     const html = render("[https://a.example](https://b.example)");
     expect(html.match(/<a /g)).toHaveLength(1);

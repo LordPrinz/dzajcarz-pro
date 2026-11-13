@@ -109,6 +109,20 @@ const inlineCode: Rule = (text, at) => {
   return { nodes: [{ type: "text", text: run }], end: at + ticks };
 };
 
+const BARE_URL = /(?<!\w)https?:\/\/[^\s<]+[^<.,:;"')\]\s]/y;
+
+const count = (text: string, char: string) => text.split(char).length - 1;
+
+/** A bare link keeps a closing ")" only when it closes a "(" inside the link: `Foo_(bar)`, not `(see https://a.example)`. */
+const bareUrl: Rule = (text, at, context) => {
+  BARE_URL.lastIndex = at;
+  const match = BARE_URL.exec(text);
+  if (!match) return null;
+  let url = match[0];
+  if (text[at + url.length] === ")" && count(url, "(") > count(url, ")")) url += ")";
+  return { nodes: link(url, null, url, context), end: at + url.length };
+};
+
 /** The rules that may start at a character, in order of priority. */
 const RULES: Record<string, Rule[]> = {
   "\\": [rule(/\\([^A-Za-z0-9\s])/, (m) => [{ type: "text", text: m[1] ?? "" }])],
@@ -138,11 +152,7 @@ const RULES: Record<string, Rule[]> = {
     ),
   ],
   // Only at a word boundary: "xhttps://…" stays text.
-  h: [
-    rule(/(?<!\w)https?:\/\/[^\s<]+[^<.,:;"')\]\s]/, (m, context) =>
-      link(m[0], null, m[0], context),
-    ),
-  ],
+  h: [bareUrl],
   "*": [
     rule(/\*\*([\s\S]+?)\*\*(?!\*)/, wrap("strong")),
     rule(/\*(?=\S)([\s\S]*?\S)\*(?!\*)/, wrap("em")),

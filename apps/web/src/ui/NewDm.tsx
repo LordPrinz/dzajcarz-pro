@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Guild } from "./api.ts";
 import { authorName } from "./reading-api.ts";
 import {
@@ -32,10 +32,15 @@ export function NewDm({ guilds, onOpened }: NewDmProps) {
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /** The newest search: an older, slower reply must not replace its results. */
+  const latest = useRef(0);
   const find = async (text: string, guild: string) => {
     if (text.trim().length < MIN_MEMBER_QUERY_LENGTH) return;
+    latest.current += 1;
+    const request = latest.current;
     setSearch({ kind: "loading" });
     const result = await searchMembers(text.trim(), guild || null);
+    if (request !== latest.current) return;
     setSearch(
       result.ok
         ? { kind: "ready", members: result.data.members }
@@ -47,6 +52,13 @@ export function NewDm({ guilds, onOpened }: NewDmProps) {
   const typed = useMemo(() => debounce(find, SEARCH_DEBOUNCE_MS), []);
   useEffect(() => () => typed.cancel(), [typed]);
   const ready = query.trim().length >= MIN_MEMBER_QUERY_LENGTH;
+
+  // Another server is another search, once there is a name to search for.
+  const changeGuild = (next: string) => {
+    setGuildId(next);
+    typed.cancel();
+    if (ready) void find(query, next);
+  };
 
   const open = async (member: MemberResult) => {
     setOpening(member.id);
@@ -85,7 +97,7 @@ export function NewDm({ guilds, onOpened }: NewDmProps) {
         </label>
         <label>
           Serwer
-          <select value={guildId} onChange={(event) => setGuildId(event.target.value)}>
+          <select value={guildId} onChange={(event) => changeGuild(event.target.value)}>
             <option value="">Wszystkie wspólne serwery</option>
             {guilds.map((guild) => (
               <option key={guild.id} value={guild.id}>

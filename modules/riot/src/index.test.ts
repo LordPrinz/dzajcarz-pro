@@ -3,10 +3,11 @@ import {
   type AnyCommand,
   type Embed,
   executeCommand,
+  type Locale,
   type Reply,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext } from "@dzajcarz/core/testing";
+import { createFakeContext, renderCatalog } from "@dzajcarz/core/testing";
 import {
   createMemoryStore,
   createStalledStore,
@@ -14,6 +15,7 @@ import {
   type KeyValueStore,
 } from "@dzajcarz/kv";
 import { createRiotModule } from "./index.ts";
+import { t } from "./messages.ts";
 import {
   type LolPlatform,
   type LolProfile,
@@ -103,7 +105,7 @@ function setup({
   async function run(
     name: string,
     args: Record<string, unknown>,
-    options: { userId?: string; guildId?: string | null } = {},
+    options: { userId?: string; guildId?: string | null; locale?: Locale } = {},
   ) {
     const ctx = createFakeContext({ args, ...options });
     await executeCommand(command(name), ctx, silentLogger);
@@ -469,5 +471,48 @@ describe("riot module", () => {
     const ctx = await t.run("valorant", { riot_id: "Dzajcarz#EUNE" });
     expect(performance.now() - started).toBeLessThan(500);
     expect(ctx.replies).toHaveLength(1);
+  });
+});
+
+describe("languages", () => {
+  test("embeds and errors follow the caller's language", async () => {
+    const { run } = setup();
+    const en = embedOf(
+      (await run("valorant", { riot_id: "Dzajcarz#EUNE" }, { locale: "en" })).replies[0],
+    );
+    expect(en?.fields?.map((field) => field.name)).toEqual(["Region", "Rank", "Recent matches"]);
+    expect(en?.fields?.at(-1)?.value).toContain("Win 13:7 · Ascent · Jett · 21/12/5 · Competitive");
+    const de = embedOf(
+      (await run("lol", { riot_id: "Dzajcarz#EUNE" }, { locale: "de", userId: "2" })).replies[0],
+    );
+    const values = de?.fields?.map((field) => field.value) ?? [];
+    expect(values).toContain("Gold IV, 37 LP (20S/18N)");
+    expect(values.at(-1)).toContain(
+      `Level 7, ${new Intl.NumberFormat("de-DE").format(123456)} Punkte`,
+    );
+    const bad = await run("valorant", { riot_id: "bez-tagu" }, { locale: "en", userId: "3" });
+    expect(textOf(bad.replies[0])).toBe("Give the Riot ID as `Name#TAG`.");
+  });
+
+  test("failures read in the caller's language", async () => {
+    const stats = fakeStats();
+    stats.failWith = new RiotLookupError("no-region-profile");
+    const { run } = setup({ stats });
+    const ctx = await run("lol", { riot_id: "Dzajcarz#EUNE" }, { locale: "de" });
+    expect(textOf(ctx.replies[0])).toBe(
+      "Der Spieler **Dzajcarz#EUNE** hat auf dem Server EUNE kein League-of-Legends-Konto. Versuch es mit einer anderen Region.",
+    );
+    const off = await setup({ stats: {} }).run(
+      "lol",
+      { riot_id: "Dzajcarz#EUNE" },
+      { locale: "en" },
+    );
+    expect(textOf(off.replies[0])).toBe("League of Legends stats are off: the bot has no API key.");
+  });
+
+  test("every text exists in every language", () => {
+    for (const texts of Object.values(renderCatalog(t))) {
+      for (const s of Object.values(texts)) expect(s.trim()).not.toBe("");
+    }
   });
 });

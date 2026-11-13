@@ -13,7 +13,7 @@ import {
 } from "discord.js";
 import type { ChannelHistory } from "../archive-backfill.ts";
 import type { ArchivePlace, ArchiveRecorder } from "../archive-recorder.ts";
-import { hasCode } from "./errors.ts";
+import { fetchOrNull, hasCode } from "./errors.ts";
 
 /** Postgres refuses U+0000 in text and jsonb, so one such message would fail a whole backfill page. */
 const withoutNul = (text: string) => text.replaceAll("\0", "");
@@ -77,7 +77,7 @@ async function placeOf(
   const channel =
     known ??
     client.channels.cache.get(channelId) ??
-    (await client.channels.fetch(channelId).catch(() => null));
+    (await fetchOrNull(client.channels.fetch(channelId)));
   if (!channel) return null;
   if (!channel.isThread()) return { guildId, channelId, parentId: null };
   return channel.parentId ? { guildId, channelId, parentId: channel.parentId } : null;
@@ -159,7 +159,7 @@ export function attachArchiveRecorder(
 /** Channel history through discord.js, which waits out rate limits on its own. */
 export function createChannelHistory(client: Client): ChannelHistory {
   const textChannel = async (channelId: string) => {
-    const channel = await client.channels.fetch(channelId).catch(() => null);
+    const channel = await fetchOrNull(client.channels.fetch(channelId));
     return channel?.isTextBased() ? channel : null;
   };
   return {

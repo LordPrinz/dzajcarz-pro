@@ -96,7 +96,10 @@ describe("Dżajco channels", () => {
     );
     expect(await check(null)).toBe(false);
     const failing = {
-      channels: { fetch: async () => Promise.reject(new Error("Unknown Channel")) },
+      channels: {
+        fetch: async () =>
+          Promise.reject(Object.assign(new Error("Unknown Channel"), { code: 10003 })),
+      },
     } as unknown as Client;
     expect(await createDzajcoChannels(failing).isChatOf(GUILD, "1")).toBe(false);
   });

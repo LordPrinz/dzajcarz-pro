@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { silentLogger } from "@dzajcarz/core";
+import { settle } from "@dzajcarz/core/testing/settle";
 import type { ArchivedMessageInput } from "@dzajcarz/db";
 import { MAX_CHANNELS } from "@dzajcarz/web-protocol";
 import { ChannelType, type Client, Events, type Message, RESTJSONErrorCodes } from "discord.js";
@@ -144,7 +145,6 @@ function fakeClient(cached: Record<string, unknown> = {}, fetchable: Record<stri
 }
 
 /** Lets the listeners, which are async, finish. */
-const settle = () => Bun.sleep(0);
 
 const ID = "500000000000000001";
 

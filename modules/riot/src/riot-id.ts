@@ -1,7 +1,6 @@
 import { UserError } from "@dzajcarz/core";
+import { t } from "./messages.ts";
 import type { RiotId } from "./ports.ts";
-
-export const RIOT_ID_HELP = "Podaj Riot ID jako `Nazwa#TAG`.";
 
 const NAME_LENGTH = { min: 3, max: 16 };
 const TAG = /^[\p{L}\p{N}]{3,5}$/u;
@@ -10,7 +9,7 @@ const TAG = /^[\p{L}\p{N}]{3,5}$/u;
 export function parseRiotId(input: string): RiotId {
   const text = input.trim();
   const hash = text.lastIndexOf("#");
-  if (hash < 0) throw new UserError(RIOT_ID_HELP);
+  if (hash < 0) throw new UserError((l) => t(l).riotIdHelp);
   const gameName = text.slice(0, hash).trim();
   const tagLine = text.slice(hash + 1).trim();
   const length = [...gameName].length;
@@ -20,7 +19,7 @@ export function parseRiotId(input: string): RiotId {
     length > NAME_LENGTH.max ||
     !TAG.test(tagLine)
   ) {
-    throw new UserError(RIOT_ID_HELP);
+    throw new UserError((l) => t(l).riotIdHelp);
   }
   return { gameName, tagLine };
 }

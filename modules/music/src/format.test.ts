@@ -8,7 +8,7 @@ import {
   parseTime,
   progressLine,
 } from "./format.ts";
-import { tracksWord } from "./panel.ts";
+import { t } from "./messages.ts";
 
 describe("parseQuery", () => {
   test("keeps links to supported sites as links, in normalised form", () => {
@@ -89,10 +89,11 @@ describe("formatting", () => {
   });
 
   test("progress line", () => {
-    expect(progressLine(0, 100_000, false)).toStartWith("🔘▬");
-    expect(progressLine(100_000, 100_000, false)).toEndWith("▬🔘 1:40 / 1:40");
-    expect(progressLine(500_000, 100_000, false)).toEndWith("1:40 / 1:40");
-    expect(progressLine(65_000, 0, true)).toBe("🔴 Na żywo · 1:05");
+    expect(progressLine(0, 100_000, false, "pl")).toStartWith("🔘▬");
+    expect(progressLine(100_000, 100_000, false, "pl")).toEndWith("▬🔘 1:40 / 1:40");
+    expect(progressLine(500_000, 100_000, false, "pl")).toEndWith("1:40 / 1:40");
+    expect(progressLine(65_000, 0, true, "pl")).toBe("🔴 Na żywo · 1:05");
+    expect(progressLine(65_000, 0, true, "en")).toBe("🔴 Live · 1:05");
   });
 
   test("only http(s) URLs pass", () => {
@@ -110,7 +111,11 @@ describe("formatting", () => {
   });
 
   test("Polish plural of utwór", () => {
-    expect([1, 2, 4, 5, 12, 14, 21, 22, 25, 112, 122].map(tracksWord)).toEqual([
+    expect(
+      [1, 2, 4, 5, 12, 14, 21, 22, 25, 112, 122].map((count) =>
+        t("pl").trackCount(count).replace(/^\d+ /, ""),
+      ),
+    ).toEqual([
       "utwór",
       "utwory",
       "utwory",

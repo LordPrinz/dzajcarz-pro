@@ -1,0 +1,85 @@
+import { defineMessages } from "@dzajcarz/core";
+
+/** Every text the bot itself writes in the schedule module. Song titles are names and stay as they are. */
+export const t = defineMessages({
+  pl: {
+    scheduleDescription: "Piosenka o stałych porach na najbardziej zaludnionym kanale głosowym",
+    listDescription: "Pokazuje piosenkę, godziny i wykluczone kanały",
+    excludeDescription: "Wyklucza kanał głosowy z odtwarzania",
+    includeDescription: "Przywraca wykluczony kanał głosowy",
+    voiceChannelOption: "Kanał głosowy",
+    songDescription: "Wybiera piosenkę (bez nazwy: pokazuje dostępne, reset: domyślna)",
+    songOption: "Nazwa piosenki",
+    defaultSongChoice: (title: string) => `Domyślna (${title})`,
+    song: (title: string) => `Piosenka: **${title}**`,
+    timetable: (expression: string, zone: string) =>
+      `Harmonogram: \`${expression}\` (${zone}, zmienisz przez /timezone)`,
+    excludedChannels: (channels: string) => `Wykluczone kanały: ${channels}`,
+    noExcludedChannels: "Brak wykluczonych kanałów.",
+    notAVoiceChannel: "Wybierz kanał głosowy z tego serwera.",
+    excluded: (channel: string) => `Kanał ${channel} jest wykluczony.`,
+    alreadyExcluded: (channel: string) => `Kanał ${channel} był już wykluczony.`,
+    included: (channel: string) => `Kanał ${channel} nie jest już wykluczony.`,
+    notExcluded: (channel: string) => `Kanał ${channel} nie był wykluczony.`,
+    currentSong: (title: string, available: string, reset: string) =>
+      `Teraz: **${title}**. Dostępne: ${available}. \`${reset}\` przywraca domyślną.`,
+    songReset: (title: string) => `Przywrócono domyślną piosenkę: **${title}**.`,
+    songAlreadyDefault: (title: string) => `Już gra domyślna piosenka: **${title}**.`,
+    unknownSong: (name: string, available: string) =>
+      `Nie znam piosenki \`${name}\`. Dostępne: ${available}.`,
+    songChosen: (title: string) => `Wybrana piosenka: **${title}**.`,
+  },
+  en: {
+    scheduleDescription: "A song at fixed times in the busiest voice channel",
+    listDescription: "Shows the song, the times and the excluded channels",
+    excludeDescription: "Excludes a voice channel from playback",
+    includeDescription: "Brings back an excluded voice channel",
+    voiceChannelOption: "Voice channel",
+    songDescription: "Picks the song (no name: lists the available ones, reset: the default)",
+    songOption: "Song name",
+    defaultSongChoice: (title) => `Default (${title})`,
+    song: (title) => `Song: **${title}**`,
+    timetable: (expression, zone) =>
+      `Schedule: \`${expression}\` (${zone}, change it with /timezone)`,
+    excludedChannels: (channels) => `Excluded channels: ${channels}`,
+    noExcludedChannels: "No excluded channels.",
+    notAVoiceChannel: "Pick a voice channel of this server.",
+    excluded: (channel) => `The channel ${channel} is excluded.`,
+    alreadyExcluded: (channel) => `The channel ${channel} was already excluded.`,
+    included: (channel) => `The channel ${channel} is no longer excluded.`,
+    notExcluded: (channel) => `The channel ${channel} wasn't excluded.`,
+    currentSong: (title, available, reset) =>
+      `Now: **${title}**. Available: ${available}. \`${reset}\` restores the default.`,
+    songReset: (title) => `Restored the default song: **${title}**.`,
+    songAlreadyDefault: (title) => `The default song is already selected: **${title}**.`,
+    unknownSong: (name, available) => `I don't know the song \`${name}\`. Available: ${available}.`,
+    songChosen: (title) => `Song selected: **${title}**.`,
+  },
+  de: {
+    scheduleDescription: "Ein Lied zu festen Zeiten im am stärksten besuchten Sprachkanal",
+    listDescription: "Zeigt das Lied, die Zeiten und die ausgeschlossenen Kanäle",
+    excludeDescription: "Schließt einen Sprachkanal von der Wiedergabe aus",
+    includeDescription: "Nimmt einen ausgeschlossenen Sprachkanal wieder auf",
+    voiceChannelOption: "Sprachkanal",
+    songDescription: "Wählt das Lied (ohne Namen: zeigt die verfügbaren, reset: das Standardlied)",
+    songOption: "Name des Lieds",
+    defaultSongChoice: (title) => `Standard (${title})`,
+    song: (title) => `Lied: **${title}**`,
+    timetable: (expression, zone) =>
+      `Zeitplan: \`${expression}\` (${zone}, änderbar mit /timezone)`,
+    excludedChannels: (channels) => `Ausgeschlossene Kanäle: ${channels}`,
+    noExcludedChannels: "Keine ausgeschlossenen Kanäle.",
+    notAVoiceChannel: "Wähle einen Sprachkanal dieses Servers.",
+    excluded: (channel) => `Der Kanal ${channel} ist ausgeschlossen.`,
+    alreadyExcluded: (channel) => `Der Kanal ${channel} war schon ausgeschlossen.`,
+    included: (channel) => `Der Kanal ${channel} ist nicht mehr ausgeschlossen.`,
+    notExcluded: (channel) => `Der Kanal ${channel} war nicht ausgeschlossen.`,
+    currentSong: (title, available, reset) =>
+      `Aktuell: **${title}**. Verfügbar: ${available}. \`${reset}\` stellt das Standardlied wieder her.`,
+    songReset: (title) => `Standardlied wiederhergestellt: **${title}**.`,
+    songAlreadyDefault: (title) => `Das Standardlied ist schon ausgewählt: **${title}**.`,
+    unknownSong: (name, available) =>
+      `Ich kenne das Lied \`${name}\` nicht. Verfügbar: ${available}.`,
+    songChosen: (title) => `Lied ausgewählt: **${title}**.`,
+  },
+});

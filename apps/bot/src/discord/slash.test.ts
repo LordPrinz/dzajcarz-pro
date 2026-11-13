@@ -165,3 +165,46 @@ describe("toSlashCommand with subcommands", () => {
     expect(body.default_member_permissions).toBe(PermissionFlagsBits.ManageGuild.toString());
   });
 });
+
+describe("toSlashCommand localizations", () => {
+  test("Polish is the base text; English and German go out for every client locale", () => {
+    const command = defineCommand({
+      name: "loop",
+      description: { pl: "Powtarzanie", en: "Repeat", de: "Wiederholen" },
+      options: {
+        mode: {
+          type: "string",
+          description: { pl: "Tryb", en: "Mode", de: "Modus" },
+          choices: [
+            { name: { pl: "wyłącz", en: "off", de: "aus" }, value: "off" },
+            { name: "Track", value: "track" },
+          ],
+        },
+      },
+      run: noop,
+    });
+    const body = toSlashCommand(command);
+    expect(body).toMatchObject({
+      name: "loop",
+      description: "Powtarzanie",
+      description_localizations: { "en-US": "Repeat", "en-GB": "Repeat", de: "Wiederholen" },
+    });
+    expect(body.options?.[0]).toMatchObject({
+      description: "Tryb",
+      description_localizations: { "en-US": "Mode", "en-GB": "Mode", de: "Modus" },
+      choices: [
+        {
+          name: "wyłącz",
+          name_localizations: { "en-US": "off", "en-GB": "off", de: "aus" },
+          value: "off",
+        },
+        { name: "Track", value: "track" },
+      ],
+    });
+    // A text that is the same in every language carries no localizations.
+    expect(JSON.parse(JSON.stringify(body.options?.[0])).choices[1]).toEqual({
+      name: "Track",
+      value: "track",
+    });
+  });
+});

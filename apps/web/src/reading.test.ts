@@ -367,6 +367,40 @@ describe("GET /api/search", () => {
     ]);
   });
 
+  test("a search across servers resolves each message's roles against its own server", async () => {
+    const live = createLiveState();
+    live.record({ guilds: 2, startedAt: "2026-11-01T10:00:00.000Z" });
+    const OTHER_GUILD = "100000000000000009";
+    const ROLE = "400000000000000001";
+    const OTHER_ROLE = "400000000000000002";
+    const { bot, requests } = fakeBot((_name, payload) => {
+      const { guildId } = payload as { guildId: string | null };
+      return {
+        ok: true,
+        data: {
+          users: {},
+          roles: guildId === GUILD ? { [ROLE]: "Admini" } : { [OTHER_ROLE]: "Goście" },
+          channels: {},
+        },
+      };
+    });
+    const { archive } = fakeArchive({
+      search: async () => ({
+        messages: [
+          stored(2, { content: `<@&${ROLE}>` }),
+          stored(1, { guildId: OTHER_GUILD, content: `<@&${OTHER_ROLE}>` }),
+        ],
+        hasMore: false,
+      }),
+    });
+    started = await startTestServer({ bot, archive, live });
+    const body = (await (await get("/api/search?q=a")).json()) as { resolved: unknown };
+    expect(body.resolved).toMatchObject({ roles: { [ROLE]: "Admini", [OTHER_ROLE]: "Goście" } });
+    expect(requests.map(([, payload]) => (payload as { guildId: string }).guildId).sort()).toEqual(
+      [GUILD, OTHER_GUILD].sort(),
+    );
+  });
+
   test("dm searches DMs only; the last page has no cursor", async () => {
     const { archive, calls } = fakeArchive({
       search: async (...args) => {

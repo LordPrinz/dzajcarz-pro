@@ -2,11 +2,17 @@ import {
   type BotModule,
   type CommandContext,
   characterCount,
+  common,
+  DISCORD_LIMITS,
   defineCommand,
   formatDateTime,
   type GuildTimeZones,
+  hasPermissions,
+  isAdministrator,
+  type Locale,
+  type LocaleResolver,
+  type Localized,
   type Logger,
-  plural,
   requireGuild,
   truncate,
   UserError,
@@ -14,9 +20,12 @@ import {
 import type { KeyValueStore } from "@dzajcarz/kv";
 import { parseDuration } from "./duration.ts";
 import { checkHierarchy, type MemberInfo } from "./hierarchy.ts";
+import { MAX_PURGE, MAX_REASON_LENGTH } from "./limits.ts";
+import { t } from "./messages.ts";
 
 export { MAX_TIMEOUT_MS, parseDuration } from "./duration.ts";
 export { checkHierarchy, type MemberInfo } from "./hierarchy.ts";
+export { MAX_REASON_LENGTH } from "./limits.ts";
 
 /** The Discord side of moderation, as the module needs it. */
 export interface ModerationGuild {
@@ -89,73 +98,52 @@ export interface ModerationModuleDeps {
   dmLimit: Pick<KeyValueStore, "setIfAbsent">;
   /** Dates in /warnings are shown on the server's clock. */
   timeZones: GuildTimeZones;
+  /** The member's own language for the DMs the bot sends them. */
+  locales: LocaleResolver;
   logger: Logger;
 }
 
 // PermissionFlagsBits values; modules do not import discord.js at runtime.
 const KICK_MEMBERS = 1n << 1n;
 const BAN_MEMBERS = 1n << 2n;
-const ADMINISTRATOR = 1n << 3n;
 const MANAGE_MESSAGES = 1n << 13n;
 const MODERATE_MEMBERS = 1n << 40n;
 
-/** Discord's limit for an audit log reason, and the length the history keeps. */
-export const MAX_REASON_LENGTH = 512;
-/** Discord's limit for one message. */
-const MAX_MESSAGE_LENGTH = 2000;
 /** A reason in the /warnings list is cut to this many characters, so ten of them fit in one message. */
 const LISTED_REASON_LENGTH = 120;
 const LISTED_WARNINGS = 10;
-const MAX_PURGE = 100;
 /** One warning DM per member and guild in this window; the warnings themselves are always recorded. */
 export const WARN_DM_WINDOW_MS = 10 * 60_000;
 
-export const NO_REASON = "brak powodu";
-export const NOT_A_MEMBER = "Tej osoby nie ma na serwerze.";
-export const NO_GUILD_PERMISSION = "Nie masz uprawnień do tej komendy.";
-export const BOT_LACKS_PERMISSION =
-  "Nie mam uprawnień, żeby to zrobić. Sprawdź moje uprawnienia na serwerze.";
-export const ADMIN_TIMEOUT = "Nie można wyciszyć administratora.";
-export const REASON_TOO_LONG = `Powód może mieć najwyżej ${MAX_REASON_LENGTH} znaków.`;
-export const BAD_DURATION = "Podaj czas jak 30s, 10m, 2h albo 1d (najwyżej 28d).";
-export const NOT_TIMED_OUT = "Ta osoba nie jest wyciszona.";
-export const NOT_RECORDED = " (nie udało się zapisać w historii)";
-export const WARNINGS_SENT = "Wysłałem Ci listę w prywatnej wiadomości.";
-export const WARNINGS_DM_CLOSED = "Nie mogę wysłać Ci prywatnej wiadomości. Użyj /warnings.";
-
-const userOption = (description: string) =>
+const userOption = (description: Localized) =>
   ({ type: "user", description, required: true }) as const;
 const reasonOption = {
   type: "string",
-  description: `Powód (do ${MAX_REASON_LENGTH} znaków)`,
+  description: t.all("reasonOption"),
   rest: true,
 } as const;
 
-function hasPermission(granted: bigint, permission: bigint): boolean {
-  return (granted & ADMINISTRATOR) !== 0n || (granted & permission) === permission;
-}
-
 /** One line of the list: no line breaks, and a long reason cut so the list stays in one message. */
-function listedReason(reason: string | null): string {
-  const flat = (reason ?? NO_REASON).replace(/\s+/g, " ");
+function listedReason(reason: string | null, locale: Locale): string {
+  const flat = (reason ?? t(locale).noReason).replace(/\s+/g, " ");
   return truncate(flat, LISTED_REASON_LENGTH);
 }
 
 /**
  * The /warnings text: a header and as many whole lines as fit into one Discord message. The header is
- * written for the lines that made it, so "N najnowszych" always matches what is shown.
+ * written for the lines that made it, so "N most recent" always matches what is shown.
  */
-function warningsList(targetId: string, total: number, lines: string[]): string {
-  const word = plural(total, "ostrzeżenie", "ostrzeżenia", "ostrzeżeń");
+function warningsList(targetId: string, total: number, lines: string[], locale: Locale): string {
+  const text = t(locale);
   for (let shown = lines.length; shown >= 0; shown--) {
     const header =
       shown < total
-        ? `<@${targetId}> ma ${total} ${word}, ${shown} najnowszych:`
-        : `<@${targetId}> ma ${total} ${word}:`;
-    const text = [header, ...lines.slice(0, shown)].join("\n");
-    if (characterCount(text) <= MAX_MESSAGE_LENGTH) return text;
+        ? text.warningsHeaderCut(targetId, total, shown)
+        : text.warningsHeader(targetId, total);
+    const list = [header, ...lines.slice(0, shown)].join("\n");
+    if (characterCount(list) <= DISCORD_LIMITS.content) return list;
   }
-  return `<@${targetId}> ma ${total} ${word}.`;
+  return text.warningsHeaderOnly(targetId, total);
 }
 
 export function createModerationModule({
@@ -163,19 +151,20 @@ export function createModerationModule({
   log,
   dmLimit,
   timeZones,
+  locales,
   logger,
 }: ModerationModuleDeps): BotModule {
   /** The typed reason, or null when none was given. Longer than Discord's audit limit is refused. */
   function reasonOf(raw: string | undefined): string | null {
     const reason = raw?.trim() ?? "";
     if (reason === "") return null;
-    if (characterCount(reason) > MAX_REASON_LENGTH) throw new UserError(REASON_TOO_LONG);
+    if (characterCount(reason) > MAX_REASON_LENGTH) throw new UserError((l) => t(l).reasonTooLong);
     return reason;
   }
 
   /** What the guild's audit log shows: who did it and why, within Discord's 512 characters. */
   function auditReason(ctx: CommandContext, reason: string | null): string {
-    return [...`${ctx.user.displayName}: ${reason ?? NO_REASON}`]
+    return [...`${ctx.user.displayName}: ${reason ?? t(ctx.locale).noReason}`]
       .slice(0, MAX_REASON_LENGTH)
       .join("");
   }
@@ -185,8 +174,8 @@ export function createModerationModule({
    * a channel overwrite that grants the bit (which Discord's own command gate accepts) is not enough.
    */
   function requireGuildPermission(actor: MemberInfo | null, permission: bigint): void {
-    if (!hasPermission(actor?.permissions ?? 0n, permission)) {
-      throw new UserError(NO_GUILD_PERMISSION);
+    if (!hasPermissions(actor?.permissions ?? 0n, permission)) {
+      throw new UserError((l) => common(l).noPermission);
     }
   }
 
@@ -208,11 +197,11 @@ export function createModerationModule({
     ]);
     if (!actor) throw new Error(`The caller ${ctx.user.id} is not a member of ${guildId}`);
     requireGuildPermission(actor, permission);
-    if (memberOnly && !target) throw new UserError(NOT_A_MEMBER);
+    if (memberOnly && !target) throw new UserError((l) => t(l).notAMember);
     const refused = checkHierarchy({ actor, bot, targetId, target, botActs });
     if (refused) throw new UserError(refused);
-    if (botActs && !hasPermission(bot.permissions, permission)) {
-      throw new UserError(BOT_LACKS_PERMISSION);
+    if (botActs && !hasPermissions(bot.permissions, permission)) {
+      throw new UserError((l) => t(l).botLacksPermission);
     }
     return { guildId, target };
   }
@@ -240,10 +229,11 @@ export function createModerationModule({
   async function notify(
     guildId: string,
     userId: string,
-    text: (guildName: string) => string,
+    text: (guildName: string, texts: ReturnType<typeof t>) => string,
   ): Promise<boolean> {
     try {
-      const sent = await guild.sendDirect(userId, text(await guild.guildName(guildId)));
+      const [name, locale] = await Promise.all([guild.guildName(guildId), locales.user(userId)]);
+      const sent = await guild.sendDirect(userId, text(name, t(locale)));
       if (!sent) logger.info("The member does not accept direct messages", { guildId, userId });
       return sent;
     } catch (error) {
@@ -261,7 +251,7 @@ export function createModerationModule({
     userId: string,
     notified: boolean,
     act: () => Promise<void>,
-    correction: (guildName: string) => string,
+    correction: (guildName: string, texts: ReturnType<typeof t>) => string,
   ): Promise<void> {
     try {
       await act();
@@ -289,13 +279,14 @@ export function createModerationModule({
     }
   }
 
-  const because = (reason: string | null) => `Powód: ${reason ?? NO_REASON}`;
+  const because = (texts: ReturnType<typeof t>, reason: string | null) =>
+    texts.because(reason ?? texts.noReason);
 
   const ban = defineCommand({
     name: "ban",
-    description: "Banuje osobę na serwerze (także kogoś, kogo już tu nie ma)",
+    description: t.all("banDescription"),
     permissions: BAN_MEMBERS,
-    options: { user: userOption("Kogo zbanować"), reason: reasonOption },
+    options: { user: userOption(t.all("banUser")), reason: reasonOption },
     async run(ctx) {
       const reason = reasonOf(ctx.args.reason);
       const targetId = ctx.args.user;
@@ -307,13 +298,13 @@ export function createModerationModule({
       // After the ban the bot shares no server with them any more, so the message goes first.
       const notified =
         target !== null &&
-        (await notify(guildId, targetId, (name) => `Ban na serwerze ${name}. ${because(reason)}`));
+        (await notify(guildId, targetId, (name, text) => text.banDm(name, because(text, reason))));
       await actAfterNotice(
         guildId,
         targetId,
         notified,
         () => guild.ban(guildId, targetId, auditReason(ctx, reason)),
-        (name) => `Ban na serwerze ${name} nie doszedł do skutku.`,
+        (name, text) => text.banFailedDm(name),
       );
       const saved = await save({
         guildId,
@@ -325,15 +316,18 @@ export function createModerationModule({
         durationMs: null,
         messageCount: null,
       });
-      await ctx.reply(`Zbanowano <@${targetId}>. ${because(reason)}${saved ? "" : NOT_RECORDED}`);
+      const text = t(ctx.locale);
+      await ctx.reply(
+        `${text.banned(targetId, because(text, reason))}${saved ? "" : text.notRecorded}`,
+      );
     },
   });
 
   const kick = defineCommand({
     name: "kick",
-    description: "Wyrzuca osobę z serwera",
+    description: t.all("kickDescription"),
     permissions: KICK_MEMBERS,
-    options: { user: userOption("Kogo wyrzucić"), reason: reasonOption },
+    options: { user: userOption(t.all("kickUser")), reason: reasonOption },
     async run(ctx) {
       const reason = reasonOf(ctx.args.reason);
       const targetId = ctx.args.user;
@@ -342,17 +336,15 @@ export function createModerationModule({
         botActs: true,
       });
       await ctx.defer();
-      const notified = await notify(
-        guildId,
-        targetId,
-        (name) => `Wyrzucenie z serwera ${name}. ${because(reason)}`,
+      const notified = await notify(guildId, targetId, (name, text) =>
+        text.kickDm(name, because(text, reason)),
       );
       await actAfterNotice(
         guildId,
         targetId,
         notified,
         () => guild.kick(guildId, targetId, auditReason(ctx, reason)),
-        (name) => `Wyrzucenie z serwera ${name} nie doszło do skutku.`,
+        (name, text) => text.kickFailedDm(name),
       );
       const saved = await save({
         guildId,
@@ -364,22 +356,25 @@ export function createModerationModule({
         durationMs: null,
         messageCount: null,
       });
-      await ctx.reply(`Wyrzucono <@${targetId}>. ${because(reason)}${saved ? "" : NOT_RECORDED}`);
+      const text = t(ctx.locale);
+      await ctx.reply(
+        `${text.kicked(targetId, because(text, reason))}${saved ? "" : text.notRecorded}`,
+      );
     },
   });
 
   const timeout = defineCommand({
     name: "timeout",
-    description: "Wycisza osobę na podany czas (najwyżej 28 dni)",
+    description: t.all("timeoutDescription"),
     permissions: MODERATE_MEMBERS,
     options: {
-      user: userOption("Kogo wyciszyć"),
-      duration: { type: "string", description: "Na ile: 30s, 10m, 2h albo 1d", required: true },
+      user: userOption(t.all("timeoutUser")),
+      duration: { type: "string", description: t.all("timeoutDuration"), required: true },
       reason: reasonOption,
     },
     async run(ctx) {
       const duration = parseDuration(ctx.args.duration);
-      if (!duration) throw new UserError(BAD_DURATION);
+      if (!duration) throw new UserError((l) => t(l).badDuration);
       const reason = reasonOf(ctx.args.reason);
       const targetId = ctx.args.user;
       const { guildId, target } = await prepare(ctx, targetId, MODERATE_MEMBERS, {
@@ -387,15 +382,13 @@ export function createModerationModule({
         botActs: true,
       });
       // Discord never times out an administrator; say so instead of a generic permission error.
-      if (target && (target.permissions & ADMINISTRATOR) !== 0n) {
-        throw new UserError(ADMIN_TIMEOUT);
+      if (target && isAdministrator(target.permissions)) {
+        throw new UserError((l) => t(l).adminTimeout);
       }
       await ctx.defer();
       await guild.timeout(guildId, targetId, duration.ms, auditReason(ctx, reason));
-      await notify(
-        guildId,
-        targetId,
-        (name) => `Wyciszenie na serwerze ${name} na ${duration.label}. ${because(reason)}`,
+      await notify(guildId, targetId, (name, text) =>
+        text.timeoutDm(name, duration.label, because(text, reason)),
       );
       const saved = await save({
         guildId,
@@ -407,17 +400,18 @@ export function createModerationModule({
         durationMs: duration.ms,
         messageCount: null,
       });
+      const text = t(ctx.locale);
       await ctx.reply(
-        `Wyciszono <@${targetId}> na ${duration.label}. ${because(reason)}${saved ? "" : NOT_RECORDED}`,
+        `${text.timedOut(targetId, duration.label, because(text, reason))}${saved ? "" : text.notRecorded}`,
       );
     },
   });
 
   const untimeout = defineCommand({
     name: "untimeout",
-    description: "Zdejmuje wyciszenie przed czasem",
+    description: t.all("untimeoutDescription"),
     permissions: MODERATE_MEMBERS,
-    options: { user: userOption("Komu zdjąć wyciszenie"), reason: reasonOption },
+    options: { user: userOption(t.all("untimeoutUser")), reason: reasonOption },
     async run(ctx) {
       const reason = reasonOf(ctx.args.reason);
       const targetId = ctx.args.user;
@@ -425,7 +419,7 @@ export function createModerationModule({
         memberOnly: true,
         botActs: true,
       });
-      if (!target?.timedOut) throw new UserError(NOT_TIMED_OUT);
+      if (!target?.timedOut) throw new UserError((l) => t(l).notTimedOut);
       await ctx.defer();
       await guild.untimeout(guildId, targetId, auditReason(ctx, reason));
       const saved = await save({
@@ -438,17 +432,18 @@ export function createModerationModule({
         durationMs: null,
         messageCount: null,
       });
+      const text = t(ctx.locale);
       await ctx.reply(
-        `Zdjęto wyciszenie z <@${targetId}>. ${because(reason)}${saved ? "" : NOT_RECORDED}`,
+        `${text.untimedOut(targetId, because(text, reason))}${saved ? "" : text.notRecorded}`,
       );
     },
   });
 
   const warn = defineCommand({
     name: "warn",
-    description: "Daje osobie ostrzeżenie, zapisane w historii",
+    description: t.all("warnDescription"),
     permissions: MODERATE_MEMBERS,
-    options: { user: userOption("Kogo ostrzec"), reason: reasonOption },
+    options: { user: userOption(t.all("warnUser")), reason: reasonOption },
     async run(ctx) {
       const reason = reasonOf(ctx.args.reason);
       const targetId = ctx.args.user;
@@ -476,24 +471,20 @@ export function createModerationModule({
         }
       }
       if (await warnDmAllowed(guildId, targetId)) {
-        await notify(
-          guildId,
-          targetId,
-          (name) => `Ostrzeżenie na serwerze ${name}. ${because(reason)}`,
-        );
+        await notify(guildId, targetId, (name, text) => text.warnDm(name, because(text, reason)));
       }
-      const which = count === null ? "" : ` (ostrzeżenie nr ${count})`;
+      const text = t(ctx.locale);
       await ctx.reply(
-        `Ostrzeżenie dla <@${targetId}>${which}. ${because(reason)}${saved ? "" : NOT_RECORDED}`,
+        `${text.warned(targetId, count, because(text, reason))}${saved ? "" : text.notRecorded}`,
       );
     },
   });
 
   const warnings = defineCommand({
     name: "warnings",
-    description: "Pokazuje ostrzeżenia osoby",
+    description: t.all("warningsDescription"),
     permissions: MODERATE_MEMBERS,
-    options: { user: userOption("Czyje ostrzeżenia pokazać") },
+    options: { user: userOption(t.all("warningsUser")) },
     async run(ctx) {
       const guildId = requireGuild(ctx.guildId);
       requireGuildPermission(await guild.member(guildId, ctx.user.id), MODERATE_MEMBERS);
@@ -503,16 +494,22 @@ export function createModerationModule({
         log.warnings(guildId, targetId, LISTED_WARNINGS),
         timeZones.of(guildId),
       ]);
+      const text = t(ctx.locale);
       const content =
         total === 0
-          ? `<@${targetId}> nie ma ostrzeżeń.`
+          ? text.noWarnings(targetId)
           : warningsList(
               targetId,
               total,
-              recent.map(
-                (warning) =>
-                  `\`#${warning.id}\` ${formatDateTime(warning.createdAt, zone)} od <@${warning.moderatorId}>: ${listedReason(warning.reason)}`,
+              recent.map((warning) =>
+                text.warningLine(
+                  warning.id,
+                  formatDateTime(warning.createdAt, zone),
+                  warning.moderatorId,
+                  listedReason(warning.reason, ctx.locale),
+                ),
               ),
+              ctx.locale,
             );
       if (ctx.invocation === "slash") {
         await ctx.reply({ content, ephemeral: true });
@@ -525,18 +522,18 @@ export function createModerationModule({
       } catch (error) {
         logger.warn("Could not send the warnings list", { guildId, userId: ctx.user.id, error });
       }
-      await ctx.reply(sent ? WARNINGS_SENT : WARNINGS_DM_CLOSED);
+      await ctx.reply(sent ? text.warningsSent : text.warningsDmClosed);
     },
   });
 
   const purge = defineCommand({
     name: "purge",
-    description: "Usuwa ostatnie wiadomości na tym kanale (do 100, młodsze niż 14 dni)",
+    description: t.all("purgeDescription"),
     permissions: MANAGE_MESSAGES,
     options: {
       count: {
         type: "integer",
-        description: "Ile wiadomości usunąć",
+        description: t.all("purgeCount"),
         required: true,
         minValue: 1,
         maxValue: MAX_PURGE,
@@ -546,7 +543,7 @@ export function createModerationModule({
       const guildId = requireGuild(ctx.guildId);
       const count = ctx.args.count;
       if (!Number.isInteger(count) || count < 1 || count > MAX_PURGE) {
-        throw new UserError(`Podaj liczbę od 1 do ${MAX_PURGE}.`);
+        throw new UserError((l) => t(l).badPurgeCount(MAX_PURGE));
       }
       await ctx.defer({ ephemeral: true });
       // The prefix command's own message stays, so the reply has something to answer; messages that arrived
@@ -568,21 +565,12 @@ export function createModerationModule({
           durationMs: null,
           messageCount: deleted,
         }));
-      const parts = [
-        `Usunięto ${deleted} ${plural(deleted, "wiadomość", "wiadomości", "wiadomości")}.`,
-      ];
-      if (tooOld > 0) {
-        parts.push(
-          `Pominięto ${tooOld} ${plural(tooOld, "starszą", "starsze", "starszych")} niż 14 dni.`,
-        );
-      }
-      if (pinned > 0) {
-        parts.push(
-          `Pominięto ${pinned} ${plural(pinned, "przypiętą", "przypięte", "przypiętych")}.`,
-        );
-      }
+      const text = t(ctx.locale);
+      const parts = [text.purged(deleted)];
+      if (tooOld > 0) parts.push(text.skippedOld(tooOld));
+      if (pinned > 0) parts.push(text.skippedPinned(pinned));
       await ctx.reply({
-        content: `${parts.join(" ")}${saved ? "" : NOT_RECORDED}`,
+        content: `${parts.join(" ")}${saved ? "" : text.notRecorded}`,
         ephemeral: true,
       });
     },

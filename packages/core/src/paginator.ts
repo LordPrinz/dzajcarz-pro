@@ -1,9 +1,10 @@
 import type { CommandContext, Embed, Reply } from "./command.ts";
 import { type AnyComponent, type ComponentRow, defineButton } from "./component.ts";
+import { coreMessages } from "./messages.ts";
 
 export type Viewer = Pick<
   CommandContext,
-  "user" | "guildId" | "place" | "channelId" | "memberPermissions"
+  "user" | "guildId" | "place" | "channelId" | "memberPermissions" | "locale"
 >;
 
 /** One rendered page; the paginator adds the ◀ ▶ row below `components`. */
@@ -40,7 +41,7 @@ export interface Paginator {
 }
 
 /**
- * Ready-made pagination: a row `◀ | Strona N/M | ▶`, the arrows disabled at the ends. Only the member
+ * Ready-made pagination: a row `◀ | Strona N/M | ▶` (in the viewer's language), the arrows disabled at the ends. Only the member
  * who ran the command can turn pages (the owner check in `executeComponent`).
  */
 export function createPaginator({
@@ -62,7 +63,7 @@ export function createPaginator({
     const { pageCount, components = [], ...body } = rendered;
     return {
       ...body,
-      components: [...components, navigationRow(owner, data, page, Math.max(1, pageCount))],
+      components: [...components, navigationRow(owner, data, page, Math.max(1, pageCount), viewer)],
     };
   }
 
@@ -71,6 +72,7 @@ export function createPaginator({
     data: string,
     page: number,
     pageCount: number,
+    viewer: Viewer,
   ): ComponentRow {
     const target = (to: number) => button.customId(owner, `${to}:${data}`);
     return [
@@ -84,7 +86,7 @@ export function createPaginator({
       {
         type: "button",
         customId: button.customId(owner, "indicator"),
-        label: `Strona ${page + 1}/${pageCount}`,
+        label: coreMessages(viewer.locale).page(page + 1, pageCount),
         style: "secondary",
         disabled: true,
       },

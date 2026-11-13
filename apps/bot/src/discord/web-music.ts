@@ -1,14 +1,17 @@
 import { MAX_VOICE_CHANNELS, type VoiceChannelInfo } from "@dzajcarz/web-protocol";
 import {
+  ChannelType,
   type Client,
   type GuildBasedChannel,
   PermissionFlagsBits,
   type VoiceBasedChannel,
+  type VoiceChannel,
 } from "discord.js";
 import type { VoiceDirectory } from "../web-music.ts";
 
-const isVoice = (channel: GuildBasedChannel | undefined): channel is VoiceBasedChannel =>
-  channel?.isVoiceBased() === true;
+// A stage is left out: the bot joins it suppressed and would play to nobody (see schedule.ts).
+const isVoice = (channel: GuildBasedChannel | undefined): channel is VoiceChannel =>
+  channel?.type === ChannelType.GuildVoice;
 
 /**
  * What the bot needs besides Discord's `joinable` (View Channel and Connect, and room in a channel with a
@@ -26,7 +29,7 @@ function canJoin(channel: VoiceBasedChannel): boolean {
   return Boolean(me && channel.joinable && channel.permissionsFor(me)?.has(NEEDED));
 }
 
-/** The voice and stage channels of a guild from the gateway cache, in Discord's order. */
+/** The voice channels of a guild from the gateway cache, in Discord's order. */
 export function createVoiceDirectory(client: Client): VoiceDirectory {
   return {
     list(guildId) {

@@ -17,6 +17,7 @@ function setup() {
             guild_id: GUILD,
             prefix,
             time_zone: null,
+            locale: null,
             created_at: new Date(),
             updated_at: new Date(),
           };
@@ -27,6 +28,7 @@ function setup() {
         guild_id: GUILD,
         prefix,
         time_zone: null,
+        locale: null,
         created_at: new Date(),
         updated_at: new Date(),
       };

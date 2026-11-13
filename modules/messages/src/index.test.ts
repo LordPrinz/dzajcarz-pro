@@ -6,11 +6,20 @@ import {
   type CronScheduler,
   createRegistry,
   executeCommand,
+  type Locale,
+  type LocaleResolver,
   type LogFields,
   type Logger,
   silentLogger,
 } from "@dzajcarz/core";
-import { clickComponent, createFakeContext, replyText, submitModal } from "@dzajcarz/core/testing";
+import {
+  clickComponent,
+  createFakeContext,
+  fakeLocales,
+  renderCatalog,
+  replyText,
+  submitModal,
+} from "@dzajcarz/core/testing";
 import {
   createMemoryStore,
   createStalledStore,
@@ -30,6 +39,7 @@ import {
   type ScheduledMessageStore,
 } from "./index.ts";
 import { localMinute } from "./local-minute.test-support.ts";
+import { t } from "./messages.ts";
 
 const MANAGE_GUILD = 1n << 5n;
 const GUILD = "100000000000000001";
@@ -161,6 +171,8 @@ function setup(
     /** Server time zones (`/timezone`); others use Warsaw time. */
     zones?: Zones;
     failures?: KeyValueStore;
+    /** Members' DM languages; Polish unless a test says otherwise. */
+    locales?: LocaleResolver;
   } = {},
 ) {
   const zones = options.zones ?? {};
@@ -248,6 +260,7 @@ function setup(
     now: () => current,
     timeZones: { of: async (guildId) => (guildId !== null ? zones[guildId] : undefined) ?? ZONE },
     logger,
+    locales: options.locales ?? fakeLocales("pl"),
   });
   const registry = createRegistry([module]);
   const find = (name: string): AnyCommand => {
@@ -270,9 +283,11 @@ function setup(
       guildId?: string | null;
       userId?: string;
       memberPermissions?: bigint;
+      locale?: Locale;
     } = {},
   ) => {
     const ctx = createFakeContext({
+      locale: context.locale,
       args,
       subcommand,
       invocation: context.invocation ?? "slash",
@@ -289,20 +304,21 @@ function setup(
     return ctx.replies.map(replyText);
   };
 
-  const openForm = async () => {
-    const ctx = await run("messages", "add");
+  const openForm = async (locale?: Locale) => {
+    const ctx = await run("messages", "add", {}, { locale });
     const modal = ctx.modals[0];
     if (!modal) throw new Error("no modal opened");
     return modal;
   };
 
-  const submitForm = async (values: Record<string, string>) => {
-    const modal = await openForm();
+  const submitForm = async (values: Record<string, string>, locale?: Locale) => {
+    const modal = await openForm(locale);
     const ctx = await submitModal({
       registry,
       customId: modal.customId,
       values,
       memberPermissions: MANAGE_GUILD,
+      locale,
     });
     return ctx.replies.map(replyText);
   };
@@ -921,7 +937,8 @@ describe("messages add", () => {
   test("a DM that would pass 2000 characters once {user} and the footer are filled in is refused", async () => {
     const s = setup();
     // The footer with a 100-character server name, and how much each {user} grows.
-    const footer = [..."\n-# Zaplanowana wiadomość z serwera ."].length + 100;
+    // The longest footer of any language, since the recipient's language is not known when it is added.
+    const footer = [..."\n-# Scheduled message from the server ."].length + 100;
     const growth = `<@${MEMBER}>`.length - "{user}".length;
     const fits = "a".repeat(2000 - footer);
     expect(await s.prefixAdd("19:00", `<@${MEMBER}>`, fits)).toEqual([
@@ -1075,12 +1092,25 @@ describe("messages list", () => {
       {
         content: [
           "Godziny w strefie Europe/Warsaw:",
-          `#2 09:00 → <#${GENERAL}>: \`Pierwsza linia druga linia xxxxxxxxxxxxx…\``,
+          `#2 09:00 → <#${GENERAL}>: \`Pierwsza linia druga linia xxxxxxxxxxxx…\``,
           `#1 21:00 → DM <@${MEMBER}>: \`Dobranoc\``,
         ].join("\n"),
         ephemeral: true,
       },
     ]);
+  });
+
+  test("a long preview is exactly 40 characters, the ellipsis included", async () => {
+    const s = setup();
+    await s.schedule({
+      time: "09:00",
+      content: "😀".repeat(60),
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    const line = replyText((await s.run("messages", "list")).replies[0])?.split("\n")[1] ?? "";
+    const preview = line.slice(line.indexOf("`") + 1, line.lastIndexOf("`"));
+    expect([...preview]).toHaveLength(40);
+    expect(preview.endsWith("…")).toBe(true);
   });
 
   test("the preview shows markdown, mentions and backticks as typed", async () => {
@@ -1349,5 +1379,90 @@ describe("sending, under load and at the edges", () => {
     });
     await s.fire();
     expect(s.dmSends[0]?.content).toBe(`Hej\n-# Zaplanowana wiadomość z serwera ${OTHER_GUILD}.`);
+  });
+});
+
+describe("languages", () => {
+  test("every text of the catalog is filled in every language", () => {
+    for (const texts of Object.values(renderCatalog(t))) {
+      for (const text of Object.values(texts)) expect(text.trim()).not.toBe("");
+    }
+  });
+
+  test("the commands answer in the language of the context", async () => {
+    const s = setup();
+    expect(replyText((await s.run("messages", "list", {}, { locale: "en" })).replies[0])).toBe(
+      "No scheduled messages. Add one with `messages add`.",
+    );
+    expect(replyText((await s.run("messages", "list", {}, { locale: "de" })).replies[0])).toBe(
+      "Keine geplanten Nachrichten. Füge eine mit `messages add` hinzu.",
+    );
+    expect(
+      replyText((await s.run("messages", "remove", { id: 9 }, { locale: "de" })).replies[0]),
+    ).toBe("Auf diesem Server gibt es keine Nachricht #9.");
+  });
+
+  test("the list of a server in English", async () => {
+    const s = setup();
+    await s.schedule({
+      time: "09:00",
+      content: "Hi",
+      target: { kind: "channel", channelId: GENERAL },
+    });
+    const reply = replyText((await s.run("messages", "list", {}, { locale: "en" })).replies[0]);
+    expect(reply).toBe(`Times in the Europe/Warsaw zone:\n#1 09:00 → <#${GENERAL}>: \`Hi\``);
+  });
+
+  test("the form and the prefix form refuse and confirm in the language of the context", async () => {
+    const s = setup();
+    expect(await s.submitForm({ time: "x", channel: GENERAL, text: "Hi" }, "en")).toEqual([
+      "Give the time as HH:MM, e.g. 19:00.",
+      "```\nHi\n```",
+    ]);
+    expect(await s.submitForm({ time: "19:00", channel: GENERAL, text: "Hi" }, "de")).toEqual([
+      `Nachricht #1 für 19:00 (Europe/Warsaw) geplant → <#${GENERAL}>.`,
+    ]);
+    const ctx = await s.run(
+      "messages",
+      "add",
+      { time: "19:00", target: `<#${NEWS}>`, text: "{user}" },
+      { invocation: "prefix", locale: "en" },
+    );
+    expect(replyText(ctx.replies[0])).toBe(
+      `Scheduled message #2 for 19:00 (Europe/Warsaw) → <#${NEWS}>. \`{user}\` only works in direct messages; in a channel it is posted literally.`,
+    );
+  });
+
+  test("the /dm command answers in English and German", async () => {
+    const s = setup();
+    const off = await s.run("dm", "off", {}, { locale: "en", memberPermissions: 0n });
+    expect(replyText(off.replies[0])).toBe(
+      "You won't get scheduled messages from this server anymore.",
+    );
+    const on = await s.run("dm", "on", {}, { locale: "de", memberPermissions: 0n });
+    expect(replyText(on.replies[0])).toBe(
+      "Du bekommst wieder geplante Nachrichten von diesem Server.",
+    );
+  });
+
+  test("a DM gets its footer and button in the recipient's language, not the scheduler's", async () => {
+    const s = setup({ locales: fakeLocales("pl", { users: { [MEMBER]: "de" } }) });
+    await s.schedule({ time: "19:00", content: "Hallo", target: { kind: "dm", userId: MEMBER } });
+    await s.fire();
+    expect(s.dmSends[0]?.content).toBe("Hallo\n-# Geplante Nachricht vom Server Dżajcarnia.");
+    expect(optOutButtonOf(s.dmSends[0]).label).toBe("Keine mehr senden");
+  });
+
+  test("the opt-out button answers in the language of the member", async () => {
+    const s = setup();
+    const ctx = await clickComponent({
+      registry: s.registry,
+      customId: `messages:optout:${MEMBER}:${GUILD}`,
+      guildId: null,
+      locale: "en",
+    });
+    expect(replyText(ctx.replies[0])).toBe(
+      "You won't get scheduled messages from the server Dżajcarnia anymore. Turn them back on with `/dm on` on that server.",
+    );
   });
 });

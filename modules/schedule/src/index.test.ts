@@ -3,11 +3,13 @@ import {
   type CronScheduler,
   createRegistry,
   executeCommand,
+  type Locale,
   type LogFields,
   type Logger,
   silentLogger,
 } from "@dzajcarz/core";
-import { createFakeContext, replyText } from "@dzajcarz/core/testing";
+import { createFakeContext, renderCatalog, replyText } from "@dzajcarz/core/testing";
+import { settle } from "@dzajcarz/core/testing/settle";
 import {
   createScheduleModule,
   pickChannel,
@@ -16,6 +18,7 @@ import {
   type ScheduleVoice,
   type VoiceCrowd,
 } from "./index.ts";
+import { t } from "./messages.ts";
 
 const MANAGE_GUILD = 1n << 5n;
 const GUILD = "100000000000000001";
@@ -155,15 +158,14 @@ function setup(
     if (!task) throw new Error("nothing scheduled");
     await task();
   };
-  /** Lets the awaits inside a run reach `player.play`. */
-  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
   const run = async (
     subcommand: string,
     args: Record<string, unknown> = {},
     memberPermissions: bigint = MANAGE_GUILD,
+    locale?: Locale,
   ) => {
-    const ctx = createFakeContext({ args, subcommand, memberPermissions });
+    const ctx = createFakeContext({ args, subcommand, memberPermissions, locale });
     await executeCommand(command, ctx, silentLogger);
     return ctx.replies.map((reply) => replyText(reply));
   };
@@ -582,5 +584,32 @@ describe("/schedule", () => {
         now: () => NINE_WARSAW,
       }),
     ).toThrow("reserved");
+  });
+});
+
+describe("languages", () => {
+  test("every text of the catalog is filled in every language", () => {
+    for (const texts of Object.values(renderCatalog(t))) {
+      for (const text of Object.values(texts)) expect(text.trim()).not.toBe("");
+    }
+  });
+
+  test("the commands answer in English and German", async () => {
+    const { run } = setup({});
+    expect(await run("list", {}, MANAGE_GUILD, "en")).toEqual([
+      "Song: **Lato z Radiem**\nSchedule: `0 9,21 * * *` (Europe/Warsaw, change it with /timezone)\nNo excluded channels.",
+    ]);
+    expect(await run("list", {}, MANAGE_GUILD, "de")).toEqual([
+      "Lied: **Lato z Radiem**\nZeitplan: `0 9,21 * * *` (Europe/Warsaw, änderbar mit /timezone)\nKeine ausgeschlossenen Kanäle.",
+    ]);
+    expect(await run("song", { name: "icona_pop" }, MANAGE_GUILD, "en")).toEqual([
+      "Song selected: **Icona Pop**.",
+    ]);
+    expect(await run("song", { name: "nope" }, MANAGE_GUILD, "de")).toEqual([
+      "Ich kenne das Lied `nope` nicht. Verfügbar: `lato_z_radiem`, `icona_pop`.",
+    ]);
+    expect(await run("include", { channel: LOUNGE }, MANAGE_GUILD, "en")).toEqual([
+      `The channel <#${LOUNGE}> wasn't excluded.`,
+    ]);
   });
 });

@@ -2,7 +2,12 @@ import {
   type AnyCommand,
   type CommandPlace,
   DEFAULT_CONTEXTS,
+  DEFAULT_LOCALE,
+  DISCORD_LOCALES,
   type InstallType,
+  LOCALES,
+  type Localized,
+  localize,
   type OptionDef,
   type OptionsDef,
   type OptionType,
@@ -13,6 +18,7 @@ import {
   ApplicationCommandType,
   ApplicationIntegrationType,
   InteractionContextType,
+  type LocalizationMap,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "discord.js";
 
@@ -40,6 +46,33 @@ const PLACES = {
 type OptionJSON = NonNullable<RESTPostAPIChatInputApplicationCommandsJSONBody["options"]>[number];
 
 /**
+ * The text in the default language plus Discord's localizations for every other client language the bot
+ * speaks. A text that is the same everywhere carries no localizations.
+ */
+function localized(text: Localized): { text: string; localizations?: LocalizationMap } {
+  const base = localize(text, DEFAULT_LOCALE);
+  if (typeof text === "string") return { text: base };
+  const localizations: LocalizationMap = {};
+  for (const locale of LOCALES) {
+    if (locale === DEFAULT_LOCALE) continue;
+    for (const code of DISCORD_LOCALES[locale]) {
+      localizations[code as keyof LocalizationMap] = text[locale];
+    }
+  }
+  return { text: base, localizations };
+}
+
+function descriptionOf(text: Localized) {
+  const { text: description, localizations } = localized(text);
+  return { description, description_localizations: localizations };
+}
+
+function choice<V extends string | number>(name: Localized, value: V) {
+  const { text, localizations } = localized(name);
+  return { name: text, name_localizations: localizations, value };
+}
+
+/**
  * The body Discord expects when registering a command as a slash command. A guild-scoped command
  * (`scope: "guild"`, the dev guild deploy) cannot be used in DMs or installed on a user, so Discord gets
  * neither `integration_types` nor `contexts` for it.
@@ -52,12 +85,12 @@ export function toSlashCommand(
   return {
     type: ApplicationCommandType.ChatInput,
     name: command.name,
-    description: command.description,
+    ...descriptionOf(command.description),
     options: command.subcommands
       ? Object.entries(command.subcommands).map(([name, subcommand]) => ({
           type: ApplicationCommandOptionType.Subcommand as const,
           name,
-          description: subcommand.description,
+          ...descriptionOf(subcommand.description),
           options: toOptions(subcommand.options) as APIApplicationCommandBasicOption[],
         }))
       : toOptions(command.options),
@@ -82,7 +115,7 @@ function toOptions(options: OptionsDef = {}) {
 function toOption(name: string, option: OptionDef): OptionJSON {
   const base = {
     name,
-    description: option.description,
+    ...descriptionOf(option.description),
     required: option.required ?? false,
   };
   switch (option.type) {
@@ -90,7 +123,7 @@ function toOption(name: string, option: OptionDef): OptionJSON {
       return {
         ...base,
         type: ApplicationCommandOptionType.String,
-        choices: option.choices?.map((c) => ({ name: c.name, value: String(c.value) })),
+        choices: option.choices?.map((c) => choice(c.name, String(c.value))),
       };
     case "integer":
       return {
@@ -98,7 +131,7 @@ function toOption(name: string, option: OptionDef): OptionJSON {
         type: ApplicationCommandOptionType.Integer,
         min_value: option.minValue,
         max_value: option.maxValue,
-        choices: option.choices?.map((c) => ({ name: c.name, value: Number(c.value) })),
+        choices: option.choices?.map((c) => choice(c.name, Number(c.value))),
       };
     case "number":
       return {
@@ -106,7 +139,7 @@ function toOption(name: string, option: OptionDef): OptionJSON {
         type: ApplicationCommandOptionType.Number,
         min_value: option.minValue,
         max_value: option.maxValue,
-        choices: option.choices?.map((c) => ({ name: c.name, value: Number(c.value) })),
+        choices: option.choices?.map((c) => choice(c.name, Number(c.value))),
       };
     default:
       return { ...base, type: OPTION_TYPES[option.type] };

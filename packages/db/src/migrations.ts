@@ -19,6 +19,9 @@ import m0015 from "../migrations/0015_message_archive.sql" with { type: "text" }
 import m0016 from "../migrations/0016_archive_author_index.sql" with { type: "text" };
 import m0017 from "../migrations/0017_web_statement_timeout.sql" with { type: "text" };
 import m0018 from "../migrations/0018_web_upload.sql" with { type: "text" };
+import m0019 from "../migrations/0019_web_upload_lease.sql" with { type: "text" };
+import m0020 from "../migrations/0020_locales.sql" with { type: "text" };
+import m0021 from "../migrations/0021_birthdays.sql" with { type: "text" };
 
 export interface Migration {
   /** File name, e.g. `0001_init.sql`: the key in `schema_migrations`. */
@@ -47,4 +50,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { name: "0016_archive_author_index.sql", content: m0016 },
   { name: "0017_web_statement_timeout.sql", content: m0017 },
   { name: "0018_web_upload.sql", content: m0018 },
+  { name: "0019_web_upload_lease.sql", content: m0019 },
+  { name: "0020_locales.sql", content: m0020 },
+  { name: "0021_birthdays.sql", content: m0021 },
 ];

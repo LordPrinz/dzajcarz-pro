@@ -75,6 +75,8 @@ export const WRITE_REJECTIONS = [
   "file_too_large",
   /** An upload is gone (older than the staging time limit) or was sent by another message. */
   "upload_missing",
+  /** Another send still holds an upload (a lease that has not expired yet); retry shortly. */
+  "upload_busy",
 ] as const;
 export type WriteRejection = (typeof WRITE_REJECTIONS)[number];
 

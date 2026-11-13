@@ -15,9 +15,17 @@ export const GUILD_TABLES = [
   "moderation_action",
   "module_disabled",
   "welcome_config",
+  "birthday_config",
   "guild_settings",
   "archive_settings",
 ] as const;
+
+/**
+ * Tables that keep a guild's id in another column, so the `guild_id` check in guild-data.test.ts cannot see
+ * them: `birthday_wish.target` is a guild id or `dm`. Members' birthdays themselves are not per-server data
+ * and stay.
+ */
+export const GUILD_TARGET_TABLES = ["birthday_wish"] as const;
 
 /**
  * Tables with a `guild_id` that survive the bot leaving. An opt-out from a server's scheduled DMs is the
@@ -32,7 +40,7 @@ export const KEPT_GUILD_TABLES = [
   "archived_message",
 ] as const;
 
-export type GuildTable = (typeof GUILD_TABLES)[number];
+export type GuildTable = (typeof GUILD_TABLES)[number] | (typeof GUILD_TARGET_TABLES)[number];
 
 export interface GuildDataRepository {
   /**
@@ -63,6 +71,11 @@ const DELETES: Record<GuildTable, Delete> = {
     tx`DELETE FROM module_disabled WHERE guild_id = ${guildId} RETURNING 1`,
   welcome_config: (tx, guildId) =>
     tx`DELETE FROM welcome_config WHERE guild_id = ${guildId} RETURNING 1`,
+  birthday_config: (tx, guildId) =>
+    tx`DELETE FROM birthday_config WHERE guild_id = ${guildId} RETURNING 1`,
+  // Leaving drops the year's wishes too, so a member rejoining the same day may be wished again there.
+  birthday_wish: (tx, guildId) =>
+    tx`DELETE FROM birthday_wish WHERE target = ${guildId} RETURNING 1`,
   guild_settings: (tx, guildId) =>
     tx`DELETE FROM guild_settings WHERE guild_id = ${guildId} RETURNING 1`,
   archive_settings: (tx, guildId) =>
@@ -74,7 +87,7 @@ export function createGuildDataRepository(sql: SQL): GuildDataRepository {
     forget(guildId) {
       return sql.begin(async (tx) => {
         const removed: Partial<Record<GuildTable, number>> = {};
-        for (const table of GUILD_TABLES) {
+        for (const table of [...GUILD_TARGET_TABLES, ...GUILD_TABLES]) {
           const rows = await DELETES[table](tx, guildId);
           if (rows.length > 0) removed[table] = rows.length;
         }

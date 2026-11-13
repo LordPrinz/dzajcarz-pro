@@ -9,9 +9,14 @@ import {
   type Reply,
   silentLogger,
 } from "@dzajcarz/core";
-import { type ClickOptions, clickComponent, createFakeContext } from "@dzajcarz/core/testing";
-import { commandCount } from "./help.ts";
+import {
+  type ClickOptions,
+  clickComponent,
+  createFakeContext,
+  renderCatalog,
+} from "@dzajcarz/core/testing";
 import { createGeneralModule, describeCommand, type GeneralModuleDeps } from "./index.ts";
+import { t } from "./messages.ts";
 
 const BAN = 1n << 2n;
 const ADMIN = 1n << 3n;
@@ -191,12 +196,12 @@ describe("general module", () => {
         permissions: undefined,
       })),
     });
-    const full = describeCommand(summary(25), "!");
+    const full = describeCommand(summary(25), "!", "pl");
     // 25 subcommands plus the alias field would be 26: the embed keeps Discord's cap.
     expect(full.fields).toHaveLength(25);
     expect(full.fields?.at(-1)?.name).toBe("Aliasy");
     for (const field of full.fields ?? []) expect(field.value.length).toBeLessThanOrEqual(1024);
-    expect(describeCommand(summary(3), "!").fields).toHaveLength(4);
+    expect(describeCommand(summary(3), "!", "pl").fields).toHaveLength(4);
   });
 
   test("help echoes at most 32 characters of an unknown name, so the reply stays under 2000", async () => {
@@ -209,6 +214,11 @@ describe("general module", () => {
     expect(await setup().run("help", { command: "nope" })).toEqual([
       { content: "Nie znam komendy `nope`.", ephemeral: true },
     ]);
+  });
+
+  test("the detail view of one command is private like the menu", async () => {
+    const [reply] = await setup().run("help", { command: "mod" });
+    expect(obj(reply).ephemeral).toBe(true);
   });
 
   test("the detail view hides subcommands the member may not run", async () => {
@@ -505,7 +515,7 @@ describe("interactive help", () => {
   });
 });
 
-describe("commandCount", () => {
+describe("command count", () => {
   test.each([
     [0, "0 komend"],
     [1, "1 komenda"],
@@ -516,7 +526,7 @@ describe("commandCount", () => {
     [22, "22 komendy"],
     [112, "112 komend"],
   ])("%d", (count, text) => {
-    expect(commandCount(count)).toBe(text);
+    expect(t("pl").commandCount(count)).toBe(text);
   });
 });
 
@@ -608,4 +618,67 @@ describe("general module contexts", () => {
     await executeCommand(command, ctx, silentLogger);
     expect(ctx.replies).toEqual(["Pong! 1 ms"]);
   });
+});
+
+describe("general module in other languages", () => {
+  const WEATHER: BotModule = {
+    name: "weather",
+    commands: [
+      defineCommand({
+        name: "forecast",
+        description: { pl: "Prognoza pogody", en: "Weather forecast", de: "Wettervorhersage" },
+        run: async () => {},
+      }),
+    ],
+  };
+
+  test("help, its category page and its buttons follow the caller's language", async () => {
+    const registry = registryWith({}, WEATHER);
+    const help = registry.find("help");
+    if (!help) throw new Error("no help");
+    const ctx = createFakeContext({ locale: "en" });
+    await executeCommand(help, ctx, silentLogger);
+    expect(embed(ctx.replies[0])).toMatchObject({
+      title: "Dżajcarz's commands",
+      footer: "Total: 3 commands",
+    });
+    expect(selectOf(ctx.replies[0]).placeholder).toBe("Pick a category");
+
+    const page = await clickComponent({
+      registry,
+      customId: selectOf(ctx.replies[0]).customId,
+      values: ["weather"],
+      locale: "de",
+    });
+    expect(embed(page.updates[0])).toMatchObject({
+      title: "Kategorie: weather",
+      description: "`/forecast` · `!forecast`\nWettervorhersage",
+    });
+    expect(buttonNamed(page.updates[0], "Seite 1/1").disabled).toBe(true);
+    buttonNamed(page.updates[0], "Startseite");
+  });
+
+  test("help for one command and an unknown name answer in the caller's language", async () => {
+    const { run } = setup();
+    const registry = registryWith({}, WEATHER);
+    const help = registry.find("help");
+    if (!help) throw new Error("no help");
+    const ctx = createFakeContext({ args: { command: "forecast" }, locale: "en" });
+    await executeCommand(help, ctx, silentLogger);
+    expect(embed(ctx.replies[0])).toMatchObject({
+      title: "/forecast",
+      description: "Weather forecast",
+      fields: [{ name: "Usage" }],
+    });
+    expect(await run("help", { command: "nope" }, { locale: "de" })).toEqual([
+      { content: "Den Befehl `nope` kenne ich nicht.", ephemeral: true },
+    ]);
+    expect(await run("ping", {}, { locale: "en" })).toEqual(["Pong! 42 ms"]);
+  });
+});
+
+test("every text of the catalog renders in every language", () => {
+  for (const texts of Object.values(renderCatalog(t))) {
+    for (const text of Object.values(texts)) expect(text.trim()).not.toBe("");
+  }
 });

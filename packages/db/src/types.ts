@@ -7,6 +7,16 @@ export interface GuildSettingsRow {
   prefix: string | null;
   /** IANA zone; null: the bot's default zone. */
   time_zone: string | null;
+  /** `pl`, `en` or `de`; null: the bot's default language. */
+  locale: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface UserSettingsRow {
+  user_id: string;
+  /** `pl`, `en` or `de`; null: no choice, so the client's language or the default applies. */
+  locale: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -153,4 +163,20 @@ export interface ArchivedMessageVersionRow {
   /** When this version was written; null: the original message. */
   edited_at: Date | null;
   replaced_at: Date;
+}
+
+export interface BirthdayRow {
+  user_id: string;
+  month: number;
+  day: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface BirthdayConfigRow {
+  guild_id: string;
+  channel_id: string;
+  template: string;
+  created_at: Date;
+  updated_at: Date;
 }

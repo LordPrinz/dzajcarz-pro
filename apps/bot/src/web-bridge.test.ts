@@ -90,17 +90,27 @@ function setup(listGuilds: () => GuildSummary[] = () => guilds, logger = silentL
 }
 
 describe("startWebBridge", () => {
+  test("commands are refused as unavailable until the bot is ready", async () => {
+    const { client, start } = setup();
+    await client.start();
+    const bridge = await start();
+    expect(await client.request("guilds.list", {})).toEqual({ ok: false, reason: "unavailable" });
+    await bridge.onReady();
+    expect(await client.request("guilds.list", {})).toEqual({ ok: true, data: guilds });
+    await bridge.stop();
+  });
+
   test("guilds.list returns what listGuilds returns", async () => {
     const { client, start } = setup();
     await client.start();
-    await start();
+    await (await start()).onReady();
     expect(await client.request("guilds.list", {})).toEqual({ ok: true, data: guilds });
   });
 
   test("guilds.channels answers the list, or null for a guild the bot is not in", async () => {
     const { client, start } = setup();
     await client.start();
-    await start();
+    await (await start()).onReady();
     expect(await client.request("guilds.channels", { guildId: GUILD })).toEqual({
       ok: true,
       data: listChannels(GUILD),
@@ -114,7 +124,7 @@ describe("startWebBridge", () => {
   test("the archive commands reach the archive control", async () => {
     const { client, start } = setup();
     await client.start();
-    await start();
+    await (await start()).onReady();
     const settings = { guildId: GUILD, enabled: true, excludedChannelIds: [CHANNEL] };
     expect(await client.request("archive.guild.set", settings)).toEqual({
       ok: true,
@@ -133,7 +143,7 @@ describe("startWebBridge", () => {
   test("the reading commands reach the reading control", async () => {
     const { client, start } = setup();
     await client.start();
-    await start();
+    await (await start()).onReady();
     expect(await client.request("channel.messages", { channelId: CHANNEL, limit: 10 })).toEqual({
       ok: true,
       data: { status: "no_access" },
@@ -155,7 +165,7 @@ describe("startWebBridge", () => {
   test("the writing commands reach the writing control", async () => {
     const { client, start } = setup();
     await client.start();
-    await start();
+    await (await start()).onReady();
     expect(
       await client.request("message.send", {
         channelId: CHANNEL,
@@ -204,8 +214,7 @@ describe("startWebBridge", () => {
     await pubsub.subscribe(EVENT_CHANNEL, (raw) => seen.push(JSON.parse(raw)));
     const bridge = await start();
     expect(seen).toHaveLength(0);
-    bridge.onReady();
-    bridge.onReady();
+    await Promise.all([bridge.onReady(), bridge.onReady()]);
     await Bun.sleep(70);
     await bridge.stop();
     expect(seen.length).toBeGreaterThanOrEqual(3);
@@ -232,8 +241,7 @@ describe("startWebBridge", () => {
       logger: silentLogger,
       heartbeatMs: 60_000,
     });
-    bridge.onReady();
-    bridge.onReady();
+    await Promise.all([bridge.onReady(), bridge.onReady()]);
     await Bun.sleep(20);
     await bridge.stop();
     expect(seen).toHaveLength(1);
@@ -243,7 +251,7 @@ describe("startWebBridge", () => {
     const { pubsub, client, start } = setup();
     await client.start();
     const bridge = await start();
-    bridge.onReady();
+    await bridge.onReady();
     await bridge.stop();
     expect(await client.request("guilds.list", {})).toEqual({ ok: false, reason: "unavailable" });
     const seen: string[] = [];
@@ -262,7 +270,7 @@ describe("startWebBridge", () => {
       throw new Error("cache broke");
     }, logger);
     await client.start();
-    await start();
+    await (await start()).onReady();
     expect(await client.request("guilds.list", {})).toMatchObject({ ok: false, reason: "error" });
     expect(lines).toContain("Command handler failed");
   });

@@ -131,7 +131,8 @@ describe("unusedServices", () => {
   test("passing the service around and awaiting it is harmless", async () => {
     const service = unusedServices<Service>();
     const held = { service, send: service.send };
-    expect(held.send).toBeDefined();
+    expect(typeof held.send).toBe("function");
+    expect(() => held.send("x")).toThrow("not available while deploying");
     expect(await Promise.resolve(service)).toBe(service);
   });
 });
@@ -200,6 +201,23 @@ describe("sameCommands", () => {
     ).toBe(false);
     expect(edit((c) => void c.pop())).toBe(false);
     expect(sameCommands(local, [], "global")).toBe(local.length === 0);
+  });
+
+  test("compares localizations, whatever order Discord keeps them in", () => {
+    const local = buildDeployBody({ scope: "global", clear: false });
+    const remote = () => asDiscordReturnsIt(local, "global");
+    const ping = (commands: Json[]) => commands.find((c) => c.name === "ping") as Json;
+    const reordered = remote();
+    const map = ping(reordered).description_localizations as Record<string, string>;
+    ping(reordered).description_localizations = Object.fromEntries(Object.entries(map).reverse());
+    expect(sameCommands(local, reordered, "global")).toBe(true);
+
+    const changed = remote();
+    ping(changed).description_localizations = { ...map, de: "alter Text" };
+    expect(sameCommands(local, changed, "global")).toBe(false);
+    const missing = remote();
+    ping(missing).description_localizations = null;
+    expect(sameCommands(local, missing, "global")).toBe(false);
   });
 });
 
@@ -363,7 +381,9 @@ describe("deployOnStartup", () => {
     return {
       calls,
       bodies,
-      async get(route: `/${string}`) {
+      async get(route: `/${string}`, { query }: { query: URLSearchParams }) {
+        // Without it Discord leaves the localizations out of the answer.
+        expect(query.get("with_localizations")).toBe("true");
         calls.push(`GET ${route}`);
         if (fail === "get") throw new Error("Missing Access");
         return sets[route] ?? [];

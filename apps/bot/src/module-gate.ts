@@ -20,6 +20,11 @@ export interface ModuleGateDeps {
   ttlMs?: number;
   /** How long a lookup may take before the module counts as enabled. */
   timeoutMs?: number;
+  /**
+   * The category a channel sits in, so a toggle set on a category covers its channels. Callers pass a
+   * thread's parent channel, never the thread. Without it only channel and guild toggles apply.
+   */
+  categoryOf?: (channelId: string) => string | null;
 }
 
 interface Entry {
@@ -56,6 +61,7 @@ export function createModuleGate({
   logger,
   ttlMs = 10 * 60_000,
   timeoutMs = 1500,
+  categoryOf,
 }: ModuleGateDeps): ModuleGate {
   async function load(guildId: string): Promise<Entry[] | null> {
     const cached = await cache.get(key(guildId)).catch((error: unknown) => {
@@ -100,27 +106,43 @@ export function createModuleGate({
     });
   }
 
+  async function refresh(guildId: string): Promise<void> {
+    try {
+      const entries = await toggles.listDisabled(guildId);
+      await cache.set(key(guildId), JSON.stringify(entries), ttlMs);
+    } catch (error) {
+      logger.warn("Module toggle cache refresh failed; dropping the entry", { guildId, error });
+      await cache.del(key(guildId)).catch((delError: unknown) => {
+        logger.warn("Module toggle cache invalidation failed", { guildId, error: delError });
+      });
+    }
+  }
+
+  // Refreshes of one guild run one after another: overlapping ones could write an older read last and keep it
+  // for the TTL. An entry leaves the map once its chain has drained. `refresh` never rejects.
+  const refreshing = new Map<string, Promise<void>>();
+
   return {
     async isEnabled(guildId, channelId, module) {
       if (guildId === null || PROTECTED_MODULES.has(module)) return true;
       const entries = await loadWithin(guildId);
       if (!entries) return true;
+      const category = channelId === null ? null : (categoryOf?.(channelId) ?? null);
       return !entries.some(
         (entry) =>
-          entry.module === module && (entry.channelId === null || entry.channelId === channelId),
+          entry.module === module &&
+          (entry.channelId === null ||
+            entry.channelId === channelId ||
+            (category !== null && entry.channelId === category)),
       );
     },
 
-    async forget(guildId) {
-      try {
-        const entries = await toggles.listDisabled(guildId);
-        await cache.set(key(guildId), JSON.stringify(entries), ttlMs);
-      } catch (error) {
-        logger.warn("Module toggle cache refresh failed; dropping the entry", { guildId, error });
-        await cache.del(key(guildId)).catch((delError: unknown) => {
-          logger.warn("Module toggle cache invalidation failed", { guildId, error: delError });
-        });
-      }
+    forget(guildId) {
+      const run = (refreshing.get(guildId) ?? Promise.resolve()).then(() => refresh(guildId));
+      refreshing.set(guildId, run);
+      return run.then(() => {
+        if (refreshing.get(guildId) === run) refreshing.delete(guildId);
+      });
     },
   };
 }

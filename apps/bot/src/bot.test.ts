@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   type CommandContexts,
+  coreMessages,
   createRegistry,
   defineButton,
   defineCommand,
@@ -10,7 +11,6 @@ import {
   type Logger,
   PUBLIC_OWNER,
   silentLogger,
-  UNKNOWN_MODAL,
 } from "@dzajcarz/core";
 import {
   type ButtonInteraction,
@@ -708,6 +708,120 @@ describe("modals in routing", () => {
   test("an unknown modal is answered instead of timing out", async () => {
     const { calls, submit, deps } = setup([]);
     await handleModal(submit(`fun:gone:${OWNER}:`), deps);
-    expect(calls[0]).toMatchObject({ method: "reply", payload: { content: UNKNOWN_MODAL } });
+    expect(calls[0]).toMatchObject({
+      method: "reply",
+      payload: { content: coreMessages("pl").unknownModal },
+    });
+  });
+});
+
+describe("the language of the place", () => {
+  const GUILD = "100000000000000001";
+  const USER = "200000000000000002";
+
+  function setup({ botInGuild = true, disabled = false } = {}) {
+    const asked: unknown[] = [];
+    const seen: string[] = [];
+    const echo = defineCommand({
+      name: "echo",
+      description: "x",
+      contexts: { places: ["guild", "bot-dm"], installs: ["guild", "user"] },
+      options: {
+        mode: {
+          type: "string",
+          description: "m",
+          choices: [{ name: { pl: "głośno", en: "loud", de: "laut" }, value: "loud" }],
+        },
+      },
+      run: async (ctx) => {
+        seen.push(`${ctx.locale}:${ctx.args.mode ?? ""}`);
+      },
+    });
+    const { client, listeners } = fakeClient();
+    const deps = {
+      registry: createRegistry([{ name: "fun", commands: [echo] }]),
+      gate: { isEnabled: async () => !disabled, forget: async () => {} },
+      prefixes: { resolve: async () => "!", forget: async () => {} },
+      botInGuild: () => botInGuild,
+      locales: {
+        of: async (place: unknown) => {
+          asked.push(place);
+          return "de" as const;
+        },
+      },
+      logger: silentLogger,
+    };
+    attachHandlers(client, deps);
+    const replies: unknown[] = [];
+    const slash = (guildId: string | null) =>
+      listeners.get("interactionCreate")?.({
+        id: "1",
+        isMessageComponent: () => false,
+        isModalSubmit: () => false,
+        isChatInputCommand: () => true,
+        commandName: "echo",
+        options: { data: [], getSubcommand: () => null },
+        user: { id: USER, displayName: "t" },
+        guildId,
+        locale: "en-GB",
+        channelId: "300000000000000003",
+        channel: null,
+        context: guildId === null ? 1 : 0,
+        inGuild: () => guildId !== null,
+        memberPermissions: { bitfield: 0n },
+        replied: false,
+        deferred: false,
+        reply: async (payload: unknown) => void replies.push(payload),
+      });
+    const prefix = (content: string) =>
+      handleMessage(
+        {
+          author: { bot: false, id: USER },
+          webhookId: null,
+          content,
+          guildId: GUILD,
+          channelId: "300000000000000003",
+          member: null,
+          channel: { isDMBased: () => false, isSendable: () => false },
+          reply: async (payload: unknown) => void replies.push(payload),
+        } as unknown as Message,
+        undefined,
+        deps,
+      );
+    return { asked, seen, replies, slash, prefix };
+  }
+
+  test("a slash command gets the place's language, with the client's language for DMs", async () => {
+    const { asked, seen, slash } = setup();
+    await slash(GUILD);
+    await slash(null);
+    expect(asked).toEqual([
+      { guildId: GUILD, userId: USER, clientLocale: "en-GB" },
+      { guildId: null, userId: USER, clientLocale: "en-GB" },
+    ]);
+    expect(seen).toEqual(["de:", "de:"]);
+  });
+
+  test("a server the bot is not in counts as the member's own place", async () => {
+    const { asked, slash } = setup({ botInGuild: false });
+    await slash(GUILD);
+    expect(asked).toEqual([{ guildId: null, userId: USER, clientLocale: "en-GB" }]);
+  });
+
+  test("the disabled-module answer uses the language too", async () => {
+    const { replies, slash } = setup({ disabled: true });
+    await slash(GUILD);
+    expect(replies).toMatchObject([
+      { content: "Dieses Modul ist auf diesem Server oder in diesem Kanal ausgeschaltet." },
+    ]);
+  });
+
+  test("a prefix command takes a choice in the place's language and complains in it", async () => {
+    const { asked, seen, replies, prefix } = setup();
+    await prefix("!echo laut");
+    expect(asked).toEqual([{ guildId: GUILD, userId: USER, clientLocale: undefined }]);
+    expect(seen).toEqual(["de:loud"]);
+    await prefix("!echo leise");
+    expect(replies).toMatchObject([{ content: "Argument `mode`: erlaubt: loud" }]);
   });
 });

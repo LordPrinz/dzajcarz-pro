@@ -51,7 +51,14 @@ export interface MessageArchiveRepository {
   oldestInChannel(channelId: string): Promise<string | null>;
 }
 
-const json = (value: unknown) => JSON.stringify(value);
+/** Postgres text cannot hold U+0000 and jsonb rejects `\u0000`; one such message would fail its whole batch. */
+export const withoutNul = (text: string): string => text.replaceAll("\u0000", "");
+
+/** JSON with U+0000 removed from every string value. */
+export const jsonWithoutNul = (value: unknown): string =>
+  JSON.stringify(value, (_key, item: unknown) =>
+    typeof item === "string" ? withoutNul(item) : item,
+  );
 
 export function createMessageArchiveRepository(sql: SQL): MessageArchiveRepository {
   return {
@@ -79,7 +86,7 @@ export function createMessageArchiveRepository(sql: SQL): MessageArchiveReposito
           message_id, guild_id, channel_id, author_id, author_username, author_display_name,
           author_avatar_url, author_bot, content, attachments, embeds, reply_to_id, created_at, edited_at
         )
-        SELECT * FROM jsonb_to_recordset(${json(rows)}::text::jsonb) AS m(
+        SELECT * FROM jsonb_to_recordset(${jsonWithoutNul(rows)}::text::jsonb) AS m(
           message_id text, guild_id text, channel_id text, author_id text, author_username text,
           author_display_name text, author_avatar_url text, author_bot boolean, content text,
           attachments jsonb, embeds jsonb, reply_to_id text, created_at timestamptz,
@@ -92,8 +99,9 @@ export function createMessageArchiveRepository(sql: SQL): MessageArchiveReposito
     },
 
     async recordEdit(m) {
-      const attachments = json(m.attachments);
-      const embeds = json(m.embeds);
+      const content = withoutNul(m.content);
+      const attachments = jsonWithoutNul(m.attachments);
+      const embeds = jsonWithoutNul(m.embeds);
       const [row] = await sql<{ versioned: boolean }[]>`
         WITH previous AS (
           SELECT content, attachments, embeds, edited_at FROM archived_message
@@ -101,7 +109,7 @@ export function createMessageArchiveRepository(sql: SQL): MessageArchiveReposito
         ), version AS (
           INSERT INTO archived_message_version (message_id, content, attachments, embeds, edited_at)
           SELECT ${m.id}, content, attachments, embeds, edited_at FROM previous
-          WHERE (content, attachments) IS DISTINCT FROM (${m.content}, ${attachments}::text::jsonb)
+          WHERE (content, attachments) IS DISTINCT FROM (${content}, ${attachments}::text::jsonb)
           RETURNING 1
         )
         INSERT INTO archived_message (
@@ -109,7 +117,7 @@ export function createMessageArchiveRepository(sql: SQL): MessageArchiveReposito
           author_avatar_url, author_bot, content, attachments, embeds, reply_to_id, created_at, edited_at
         ) VALUES (
           ${m.id}, ${m.guildId}, ${m.channelId}, ${m.author.id}, ${m.author.username},
-          ${m.author.displayName}, ${m.author.avatarUrl}, ${m.author.bot}, ${m.content},
+          ${m.author.displayName}, ${m.author.avatarUrl}, ${m.author.bot}, ${content},
           ${attachments}::text::jsonb, ${embeds}::text::jsonb, ${m.replyToId}, ${m.createdAt},
           ${m.editedAt}
         )

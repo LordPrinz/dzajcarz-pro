@@ -21,7 +21,8 @@ This is v5, a rewrite on Bun. The history of the earlier versions (v3 and v4) si
 | Music             | Lavalink 4 with the YouTube source plugin                                          |
 | Database          | PostgreSQL 18 via `Bun.SQL`, plain SQL migrations                                  |
 | Cache / cooldowns | Redis 8 via Bun `RedisClient`                                                      |
-| Validation        | zod (environment and Riot API responses)                                           |
+| Web panel         | React 19 served by `Bun.serve`, Redis pub/sub to the bot                           |
+| Validation        | zod (environment, Riot API responses, panel protocol)                              |
 | Quality           | Biome, TypeScript strict, Husky git hooks, GitHub Actions                          |
 
 ## Repository layout
@@ -29,15 +30,18 @@ This is v5, a rewrite on Bun. The history of the earlier versions (v3 and v4) si
 ```
 apps/
   bot/              the bot process: composition root, Discord adapters, slash command deploy
+  web/              the owner's web panel: JSON API, WebSocket and a React page (ADR 9)
 packages/
   core/             module system: commands (slash + prefix), events, registry, dispatcher, logger
   db/               SQL migrations, migration runner, repositories (Bun.SQL)
-  kv/               KeyValueStore port with Redis and in-memory adapters
+  kv/               KeyValueStore and PubSub ports with Redis and in-memory adapters
+  web-protocol/     commands and events between the panel and the bot (zod schemas, client, server)
 modules/
   general/          ping, help (interactive menu: categories, pages, install links)
   dzajco/           answers "what" in any language with the DŻAJCO gif, also in threads, voice chats and DMs with the bot (dzajco show, set, reset)
   settings/         prefix (set, reset, show), timezone (set, reset, show), modules (list, disable, enable)
   welcome/          welcome (set through a form, off, test), greets new members
+  birthday/         birthday (set, remove, show, channel through a form, test, disable), wishes members on their birthday on servers and in a DM
   fun/              czy_wiedziałeś, time
   party/            party (create and edit through a form, delete, lock, unlock, limit, rename, invite, special invite with a message and attachment, block, hide, show), a voice channel per member who joins the party area
   moderation/       ban, kick, timeout, untimeout, warn, warnings, purge (every action stored with its reason)
@@ -101,6 +105,8 @@ history needs a production key (ADR 8).
 | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `bun run dev`                 | bot in watch mode                                                                                        |
 | `bun run start`               | bot without watch                                                                                        |
+| `bun run web:dev`             | web panel in watch mode                                                                                  |
+| `bun run web:start`           | web panel without watch                                                                                  |
 | `bun run commands:deploy`     | register slash commands without starting the bot (optional: the bot does it on start)                    |
 | `bun run check` / `check:fix` | Biome lint + format                                                                                      |
 | `bun run typecheck`           | `tsc` for the scripts and every workspace                                                                |

@@ -1,8 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { createArchiveSettingsRepository } from "./archive-settings.ts";
+import { createBirthdayRepository } from "./birthdays.ts";
 import { createDzajcoRepository } from "./dzajco.ts";
-import { createGuildDataRepository, GUILD_TABLES, KEPT_GUILD_TABLES } from "./guild-data.ts";
+import {
+  createGuildDataRepository,
+  GUILD_TABLES,
+  GUILD_TARGET_TABLES,
+  KEPT_GUILD_TABLES,
+} from "./guild-data.ts";
 import { createGuildSettingsRepository } from "./guild-settings.ts";
 import { createModerationRepository } from "./moderation.ts";
 import { createModuleToggleRepository } from "./module-toggles.ts";
@@ -26,7 +32,9 @@ afterAll(async () => {
 beforeEach(async () => {
   // Test-only SQL built from the constant table list.
   if (sql)
-    await sql.unsafe(`TRUNCATE ${[...GUILD_TABLES, ...KEPT_GUILD_TABLES].join(", ")} CASCADE`);
+    await sql.unsafe(
+      `TRUNCATE ${[...GUILD_TABLES, ...GUILD_TARGET_TABLES, ...KEPT_GUILD_TABLES, "birthday"].join(", ")} CASCADE`,
+    );
 });
 
 const GONE = "1000000000000000001";
@@ -36,8 +44,14 @@ const STAYS = "1000000000000000002";
 async function fill(db: SQL, guildId: string, n: number) {
   const id = (suffix: number) => `${n}00000000000000${suffix}`;
   await createGuildSettingsRepository(db).setPrefix(guildId, "?");
+  await createGuildSettingsRepository(db).setLocale(guildId, "en");
   await createModuleToggleRepository(db).disable(guildId, "fun", null);
   await createWelcomeRepository(db).set(guildId, { channelId: id(1), template: "Cześć {user}" });
+  const birthdays = createBirthdayRepository(db);
+  await birthdays.setConfig(guildId, { channelId: id(1), template: "Sto lat {user}" });
+  await birthdays.set(id(8), { month: 5, day: 1 });
+  await birthdays.claimWish(id(8), guildId, 2026);
+  await birthdays.claimWish(id(8), "dm", 2026);
   const party = createPartyRepository(db);
   await party.addArea({
     guildId,
@@ -89,6 +103,10 @@ async function countsOf(db: SQL, guildId: string) {
     );
     counts[table] = Number(row?.count);
   }
+  const [wishes] = await db<{ count: string }[]>`
+    SELECT count(*) AS count FROM birthday_wish WHERE target = ${guildId}
+  `;
+  counts.birthday_wish = Number(wishes?.count);
   return counts;
 }
 
@@ -126,6 +144,12 @@ describe.skipIf(!sql)("guild data", () => {
     // A member's opt-out from this server's DMs outlives the bot's stay.
     const [optOut] = await db()`SELECT 1 FROM scheduled_message_opt_out WHERE guild_id = ${GONE}`;
     expect(optOut).toBeDefined();
+    // A birthday is the member's own, and so is the DM wish; only the server's wishes go.
+    const [kept] = await db()<{ birthdays: string; dms: string }[]>`
+      SELECT (SELECT count(*) FROM birthday) AS birthdays,
+        (SELECT count(*) FROM birthday_wish WHERE target = 'dm') AS dms
+    `;
+    expect(kept).toEqual({ birthdays: "2", dms: "2" });
   });
 
   test("forgetting a guild with no data removes nothing", async () => {

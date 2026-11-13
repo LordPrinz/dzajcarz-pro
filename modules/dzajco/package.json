@@ -12,8 +12,5 @@
   "dependencies": {
     "@dzajcarz/core": "workspace:*",
     "@dzajcarz/kv": "workspace:*"
-  },
-  "devDependencies": {
-    "discord.js": "14.28.1"
   }
 }

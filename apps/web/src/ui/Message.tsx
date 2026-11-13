@@ -1,3 +1,4 @@
+import { formatBytes } from "@dzajcarz/core/format";
 import { useState } from "react";
 import { hexColor, httpsUrl, LINK_PROPS, Markdown } from "./markdown.tsx";
 import {
@@ -29,11 +30,6 @@ export function attachmentKind(attachment: PanelAttachment): "image" | "video" |
   if (type.startsWith("video/") || VIDEO.test(attachment.name)) return "video";
   return "file";
 }
-
-const formatSize = (bytes: number) =>
-  bytes >= 1024 * 1024
-    ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
-    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 function Attachment({ attachment }: { attachment: PanelAttachment }) {
   const link = attachment.url === null ? null : httpsUrl(attachment.url);
@@ -74,7 +70,7 @@ function Attachment({ attachment }: { attachment: PanelAttachment }) {
       ) : (
         <span>{attachment.name} (brak linku)</span>
       )}{" "}
-      <span className="muted">{formatSize(attachment.size)}</span>
+      <span className="muted">{formatBytes(attachment.size)}</span>
     </p>
   );
 }

@@ -10,6 +10,8 @@ export type ConnectionState = "connecting" | "open" | "reconnecting" | "expired"
 
 const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 30_000;
+/** A socket that stayed open this long counts as a working connection and resets the backoff. */
+const STABLE_MS = 5_000;
 
 /** 1 s, 2 s, 4 s … up to 30 s. */
 export const backoffDelay = (attempt: number): number =>
@@ -46,6 +48,7 @@ export interface SocketOptions {
   createSocket?: (url: string) => SocketLike;
   isExpired?: () => Promise<boolean>;
   schedule?: (callback: () => void, ms: number) => unknown;
+  now?: () => number;
 }
 
 function parseJson(data: unknown): unknown {
@@ -81,6 +84,7 @@ export function connectSocket({
   createSocket = (target) => new WebSocket(target) as unknown as SocketLike,
   isExpired = sessionExpired,
   schedule = setTimeout,
+  now = Date.now,
 }: SocketOptions): PanelSocket {
   let attempt = 0;
   let stopped = false;
@@ -99,14 +103,18 @@ export function connectSocket({
     onState(attempt === 0 ? "connecting" : "reconnecting");
     const socket = createSocket(url);
     current = socket;
+    let openedAt: number | null = null;
     socket.onopen = () => {
-      attempt = 0;
+      // The backoff restarts only once the connection proves itself (see onmessage and onclose): a server
+      // that accepts and at once closes would otherwise be retried every second forever.
+      openedAt = now();
       onState("open");
       // A new socket starts with no channel: watch again what was watched.
       if (watched) sendTo(socket, "subscribe", watched);
       if (watchedMusic) sendMusic(socket, "subscribe", watchedMusic);
     };
     socket.onmessage = (event) => {
+      attempt = 0;
       const value = parseJson(event.data);
       const status = asStatus(value);
       if (status) onStatus(status);
@@ -114,6 +122,7 @@ export function connectSocket({
     };
     socket.onclose = () => {
       if (stopped || current !== socket) return;
+      if (openedAt !== null && now() - openedAt >= STABLE_MS) attempt = 0;
       void retry();
     };
   }

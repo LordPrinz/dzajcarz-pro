@@ -55,6 +55,14 @@ describe.skipIf(!sql)("guild settings repository", () => {
     expect(await repo().isKnownTimeZone("US/Pacific-New")).toBe(false);
   });
 
+  test("setLocale keeps the other settings, resets with null and rejects unknown languages", async () => {
+    await repo().setPrefix(guildId, "?");
+    const set = await repo().setLocale(guildId, "de");
+    expect([set.prefix, set.locale]).toEqual(["?", "de"]);
+    expect((await repo().setLocale(guildId, null)).locale).toBeNull();
+    await expect(repo().setLocale(guildId, "fr")).rejects.toThrow();
+  });
+
   test("the database rejects a prefix longer than 5 characters", async () => {
     await expect(repo().setPrefix(guildId, "toolong")).rejects.toThrow();
   });
