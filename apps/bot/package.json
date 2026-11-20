@@ -29,7 +29,7 @@
     "@dzajcarz/module-welcome": "workspace:*",
     "@dzajcarz/web-protocol": "workspace:*",
     "discord.js": "14.28.1",
-    "lavalink-client": "2.11.0",
+    "lavalink-client": "2.11.2",
     "wrapper-valorant-api": "3.0.1",
     "zod": "4.6.7"
   }
